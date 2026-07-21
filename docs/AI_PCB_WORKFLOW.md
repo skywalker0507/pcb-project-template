@@ -32,7 +32,7 @@ next meaningful stage in a fresh Codex session.
 ## Tool roles
 
 - atopile: electrical design, parts, nets and generated board baseline;
-- KiCad MCP: live placement, routing, rendering and operations not represented
+- Konnect MCP: live placement, routing, rendering and operations not represented
   by deterministic scripts;
 - Houtini-LM: bounded, non-authoritative text work;
 - KRT/FreeRouting: candidate copper only, followed by independent audit;

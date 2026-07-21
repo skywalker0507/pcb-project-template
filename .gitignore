@@ -5,6 +5,7 @@ manufacturing/
 tools/KiCadRoutingTools/
 tools/houtini-lm/
 tools/freerouting/
+tools/konnect/
 .codex/config.toml
 .codex/pcb-mcp.fragment.toml
 __pycache__/

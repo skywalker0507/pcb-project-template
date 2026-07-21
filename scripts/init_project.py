@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import urllib.request
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,6 +61,39 @@ def download(url: str, destination: Path) -> str:
     return actual
 
 
+def install_konnect(policy: dict[str, object]) -> dict[str, str]:
+    release = fetch_json(str(policy["latest_release_api"]))
+    suffix = str(policy["windows_asset_suffix"])
+    assets = release.get("assets", [])
+    asset = next((item for item in assets if item.get("name", "").endswith(suffix)), None)
+    if not asset:
+        raise SystemExit(f"Latest Konnect release has no *{suffix} asset")
+
+    install_dir = ROOT / "tools/konnect"
+    archive = install_dir / "konnect-latest.zip"
+    archive_hash = download(asset["browser_download_url"], archive)
+    with zipfile.ZipFile(archive) as package:
+        executable = next(
+            (item for item in package.infolist() if Path(item.filename).name.lower() == "konnect.exe"),
+            None,
+        )
+        if executable is None:
+            raise SystemExit("Konnect release archive contains no konnect.exe")
+        target = install_dir / "konnect.exe"
+        with package.open(executable) as source, target.open("wb") as output:
+            shutil.copyfileobj(source, output)
+    archive.unlink()
+    version = run([str(target), "--version"])
+    binary_hash = hashlib.sha256(target.read_bytes()).hexdigest()
+    return {
+        "version": str(release["tag_name"]),
+        "binary_version": version,
+        "asset": asset["name"],
+        "asset_sha256": archive_hash,
+        "binary_sha256": binary_hash,
+    }
+
+
 def update_checkout(name: str, repository: str, ref: str, destination: Path) -> str:
     if destination.exists():
         if not (destination / ".git").exists():
@@ -100,7 +134,7 @@ def update_ato_requirement(version: str) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def configure_project(project_name: str, distro: str, force: bool) -> None:
+def configure_project(project_name: str, distro: str, force: bool, with_konnect: bool) -> None:
     flow_path = ROOT / "config/pcb-flow.json"
     flow = json.loads(flow_path.read_text(encoding="utf-8"))
     flow["project"]["name"] = project_name
@@ -142,6 +176,29 @@ HOUTINI_LM_MAX_INPUT_CHARS = "120000"
 HOUTINI_LM_RESPONSE_METADATA = "none"
 HOUTINI_LM_ALLOWED_ROOTS = '{root_windows}'
 '''
+    if with_konnect:
+        konnect = ROOT / "tools/konnect/konnect.exe"
+        konnect_config = ROOT / "build/konnect/config.toml"
+        konnect_config.parent.mkdir(parents=True, exist_ok=True)
+        konnect_config.write_text(f'''kicad_cli = 'C:\\Program Files\\KiCad\\10.0\\bin\\kicad-cli.exe'
+kicad_binary = 'C:\\Program Files\\KiCad\\10.0\\bin\\kicad.exe'
+project_dir = '{root_windows}'
+ipc_address = ''
+transport = 'stdio'
+jlcpcb_db_path = '{ROOT / "build/konnect/jlcpcb.sqlite"}'
+log_level = 'warn'
+''', encoding="utf-8")
+        config += f'''
+[mcp_servers.konnect]
+type = "stdio"
+command = '{sys.executable}'
+args = ['{ROOT / "scripts/start_konnect_mcp.py"}', '{konnect}', '--config', '{konnect_config}']
+cwd = '{root_windows}'
+enabled = true
+env_vars = ["KICAD_API_SOCKET"]
+startup_timeout_sec = 30
+tool_timeout_sec = 300
+'''
     target = ROOT / ".codex/config.toml"
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists() and not force:
@@ -160,10 +217,24 @@ def main() -> int:
     parser.add_argument("--distro", default="Ubuntu")
     parser.add_argument("--no-wsl", action="store_true")
     parser.add_argument("--no-tools", action="store_true")
+    konnect_group = parser.add_mutually_exclusive_group()
+    konnect_group.add_argument(
+        "--with-konnect", dest="konnect", action="store_true",
+        help="install Konnect even if project policy disables it",
+    )
+    konnect_group.add_argument(
+        "--no-konnect", dest="konnect", action="store_false",
+        help="do not install the default Konnect replacement for KiCAD-MCP-Server",
+    )
+    parser.set_defaults(konnect=None)
     parser.add_argument("--force-config", action="store_true")
     parser.add_argument("--skip-check", action="store_true")
     args = parser.parse_args()
     policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
+    want_konnect = (
+        bool(policy["konnect"].get("enabled_by_default", True))
+        if args.konnect is None else args.konnect
+    )
     resolved: dict[str, object] = {"schema": 1, "mode": "latest"}
 
     if not args.no_wsl:
@@ -222,10 +293,14 @@ def main() -> int:
             "sha256": freerouting_hash,
         }
 
+        if want_konnect:
+            resolved["konnect"] = install_konnect(policy["konnect"])
+
     RESOLVED_PATH.parent.mkdir(parents=True, exist_ok=True)
     RESOLVED_PATH.write_text(json.dumps(resolved, indent=2) + "\n", encoding="utf-8")
 
-    configure_project(args.project_name, args.distro, args.force_config)
+    konnect_enabled = want_konnect and (ROOT / "tools/konnect/konnect.exe").is_file()
+    configure_project(args.project_name, args.distro, args.force_config, konnect_enabled)
     check_exit = None
     if not args.skip_check:
         check_exit = subprocess.run([

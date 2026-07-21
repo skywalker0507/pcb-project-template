@@ -92,6 +92,19 @@ def main() -> int:
     freerouting_hash = hashlib.sha256(freerouting.read_bytes()).hexdigest() if freerouting.is_file() else "missing"
     add(checks, "freerouting", freerouting_hash == freerouting_resolved.get("sha256"), f"expected={freerouting_resolved.get('sha256')};actual={freerouting_hash}")
 
+    konnect_resolved = resolved.get("konnect")
+    if konnect_resolved:
+        konnect = root / "tools/konnect/konnect.exe"
+        ok, output = run([str(konnect), "--version"], root) if konnect.is_file() else (False, "missing")
+        binary_hash = hashlib.sha256(konnect.read_bytes()).hexdigest() if konnect.is_file() else "missing"
+        add(
+            checks, "konnect",
+            ok
+            and output == konnect_resolved.get("binary_version")
+            and binary_hash == konnect_resolved.get("binary_sha256"),
+            f"version={output};sha256={binary_hash}",
+        )
+
     if args.deep and (root / "scripts/krt_flow.py").is_file():
         ok, output = run([sys.executable, "scripts/krt_flow.py", "check"], root, 120)
         add(checks, "krt-check", ok, output[-300:])
