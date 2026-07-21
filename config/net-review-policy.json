@@ -1,0 +1,56 @@
+{
+  "rules": [
+    {
+      "pattern": "^(usb_dp|usb_dm)$",
+      "classification": "usb2_high_speed_differential",
+      "review": [
+        "90 ohm differential geometry and pair matching",
+        "continuous reference plane and return path",
+        "connector/ESD stubs, layer transitions and via symmetry"
+      ]
+    },
+    {
+      "pattern": "(^|_)(swclk|swdio)$",
+      "classification": "swd_edge_sensitive",
+      "review": [
+        "continuous reference and limited stubs",
+        "series resistor position and edge-rate control where present",
+        "avoid switching-node coupling"
+      ]
+    },
+    {
+      "pattern": "(uart|target_tx|target_rx)",
+      "classification": "uart_low_speed",
+      "review": [
+        "continuity, reference plane and connector protection",
+        "avoid long parallel coupling to clocks or switch nodes",
+        "do not require TX/RX length matching"
+      ]
+    },
+    {
+      "pattern": "^vtref$",
+      "classification": "low_bandwidth_analog_reference",
+      "review": [
+        "leakage, noisy aggressors, branch stubs and ADC/supervisor sensing topology",
+        "do not apply controlled-impedance or length-matching requirements"
+      ]
+    },
+    {
+      "pattern": "(nrst|reset|enable|boot|gpio0|^G$)",
+      "classification": "low_speed_high_impedance_control",
+      "review": [
+        "pull resistor and transistor placement",
+        "coupling from switching nodes and ESD paths",
+        "do not apply length matching"
+      ]
+    },
+    {
+      "pattern": "(^lv$|^hv$|gnd|vcc|vdd|3v3|5v|power|supply)",
+      "classification": "distribution_or_power",
+      "review": [
+        "plane/trace continuity, current loops, decoupling and return paths",
+        "do not use HPWL alone as a quality metric"
+      ]
+    }
+  ]
+}

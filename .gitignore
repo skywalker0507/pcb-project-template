@@ -1,0 +1,14 @@
+.ato/
+build/
+manufacturing/
+.venv-routingtools/
+tools/KiCadRoutingTools/
+tools/houtini-lm/
+tools/freerouting/
+.codex/config.toml
+.codex/pcb-mcp.fragment.toml
+__pycache__/
+*.py[cod]
+*.kicad_prl
+*.kicad_pcb.lck
+*-backups/

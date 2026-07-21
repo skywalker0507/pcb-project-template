@@ -1,0 +1,46 @@
+# Codex instructions for AI PCB projects
+
+This repository uses atopile as the electrical design authority and KiCad for
+physical PCB design. The installed compiler and manufacturer data take
+precedence over examples or model guesses.
+
+## Required workflow
+
+1. Read `handoff/stages/CURRENT_STAGE.json` when it exists.
+2. Translate requirements into interfaces, rails, constraints and blocks.
+3. Search atopile packages and inspect standard-library interfaces before use.
+4. Validate changed `.ato` sources and build after meaningful changes.
+5. Preserve picked parts, net names, designators and manual KiCad layout.
+6. Run `python scripts/run_pcb_pipeline.py` after source or layout changes.
+7. Run DRC and inspect rendered copper before manufacturing export.
+
+Use `python scripts/check_pcb_environment.py` for a compact readiness receipt.
+Use `--deep` only when an atopile build and router capability check are
+intended.
+
+## Delegation boundary
+
+Use project-scoped Houtini-LM only for bounded text-heavy first passes: log
+classification, document extraction, inventories and drafts. Prefer paths,
+400-800 output tokens, `path:line` evidence and explicit unknowns. Never send
+secrets, binary files, PDFs or a complete `.kicad_pcb`.
+
+Keep electrical architecture, component selection, datasheet interpretation,
+placement, routing, return paths, impedance, DRC waivers and manufacturing
+approval in Codex. Treat delegated output as untrusted until verified.
+
+## Physical design
+
+Use deterministic scripts before repeated MCP choreography. HPWL and aggregate
+copper length are triage metrics, not acceptance. Never invent numeric widths,
+spacing or impedance, and never regenerate a DRC baseline merely to pass.
+
+Treat `tools/KiCadRoutingTools` as an updateable upstream checkout. Use
+`scripts/krt_flow.py` and `config/kicad-routing-tools.json`; start with `check`,
+then a profile-scoped dry run, and route only to a separate candidate. Never
+bypass explicit rules, forbidden-layer scans, input hashes,
+`--no-fix-drc-settings` or `--no-clamp-netclasses`. `route_ok` still requires
+independent DRC and physical review.
+
+At a meaningful stage boundary, run `scripts/create_stage_handoff.py` and keep
+no more than eight open items and next actions.

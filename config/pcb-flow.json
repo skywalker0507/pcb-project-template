@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "project": {
+    "name": "pcb-project-template",
+    "build_target": "default",
+    "board": "elec/layout/default/default.kicad_pcb"
+  },
+  "checks": [],
+  "audit": {
+    "require_in1_ground": false,
+    "baseline": "config/pcb-release-baseline.json",
+    "routing_paths": "config/routing-paths.json",
+    "audit_json": "build/reports/final-routing-audit.json",
+    "drc_report": "build/reports/final-kicad-cli-drc.rpt"
+  },
+  "context": {
+    "policy": "config/net-review-policy.json",
+    "output": "build/delegated/pcb-context.json"
+  },
+  "manufacturing": {
+    "output": "manufacturing/jlcpcb/pcb-project-template-rev-a",
+    "log": "build/logs/jlcpcb-export.log"
+  },
+  "handoff": {
+    "output": "handoff/stages/CURRENT_STAGE.json",
+    "max_open_items": 8,
+    "authoritative_docs": []
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "schema": 1,
+  "tool": {
+    "repository": "tools/KiCadRoutingTools",
+    "python": ".venv-routingtools/Scripts/python.exe",
+    "router_script": "route.py",
+    "commit": "6856b893dfad30640bbe483a17dbffe153389fcd"
+  },
+  "kicad_cli": "C:/Program Files/KiCad/10.0/bin/kicad-cli.exe",
+  "guardrails": {
+    "forbidden_signal_layers": [
+      "In1.Cu",
+      "In2.Cu"
+    ]
+  },
+  "profiles": {
+    "outer_low_risk": {
+      "require_explicit_include": true,
+      "include_nets": [],
+      "exclude_nets": [
+        "*GND*",
+        "*gnd*",
+        "*VCC*",
+        "*vcc*",
+        "*VDD*",
+        "*vdd*",
+        "USB*",
+        "usb*",
+        "*CLK*",
+        "*clk*"
+      ],
+      "routing": {
+        "layers": [
+          "F.Cu",
+          "In1.Cu",
+          "In2.Cu",
+          "B.Cu"
+        ],
+        "layer_costs": [
+          1.0,
+          -1.0,
+          -1.0,
+          3.0
+        ],
+        "track_width": null,
+        "clearance": null,
+        "via_size": null,
+        "via_drill": null,
+        "grid_step": 0.1,
+        "max_ripup": 3,
+        "hole_to_hole_clearance": null,
+        "board_edge_clearance": null,
+        "fab_overrides": "config/krt-fab-overrides.txt",
+        "extra_args": []
+      }
+    }
+  },
+  "artifacts": {
+    "log_dir": "build/logs/krt",
+    "report_dir": "build/reports/krt",
+    "history": "build/reports/krt/history.jsonl",
+    "receipt_max_items": 8
+  },
+  "acceptance": {
+    "require_router_complete": true,
+    "require_audit_pass": true,
+    "require_project_rules": true
+  },
+  "attempt_policy": {
+    "max_identical_attempts": 2
+  },
+  "audit": {
+    "enabled": true,
+    "command": [
+      "python",
+      "scripts/krt_candidate_audit.py",
+      "--input",
+      "{input}",
+      "--candidate",
+      "{output}",
+      "--kicad-cli",
+      "C:/Program Files/KiCad/10.0/bin/kicad-cli.exe",
+      "--work-dir",
+      "build/reports/krt/drc"
+    ]
+  }
+}
