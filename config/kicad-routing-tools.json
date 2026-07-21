@@ -4,7 +4,7 @@
     "repository": "tools/KiCadRoutingTools",
     "python": ".venv-routingtools/Scripts/python.exe",
     "router_script": "route.py",
-    "commit": "6856b893dfad30640bbe483a17dbffe153389fcd"
+    "commit": null
   },
   "kicad_cli": "C:/Program Files/KiCad/10.0/bin/kicad-cli.exe",
   "guardrails": {

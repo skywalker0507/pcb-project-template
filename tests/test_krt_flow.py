@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,6 +71,38 @@ class KrtFlowTests(unittest.TestCase):
             "--layers=F.Cu", "--Impedance=50", "--bus",
         ])
         self.assertEqual(conflicts, ["--impedance", "--layers"])
+
+    def test_latest_krt_preserves_netclasses_without_clearance_ceiling(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            board = root / "board.kicad_pcb"
+            board.write_text("(kicad_pcb)", encoding="utf-8")
+            board.with_suffix(".kicad_pro").write_text(json.dumps({
+                "net_settings": {
+                    "classes": [{"name": "Default", "clearance": 0.2}],
+                },
+            }), encoding="utf-8")
+            profile = {"routing": {
+                "layers": ["F.Cu", "B.Cu"],
+                "layer_costs": [1, 3],
+                "track_width": 0.2,
+                "clearance": 0.2,
+                "via_size": 0.6,
+                "via_drill": 0.3,
+                "fab_overrides": None,
+                "extra_args": [],
+            }}
+            state = {
+                "ok": True,
+                "python": "python",
+                "router": "route.py",
+                "netclass_mode": "native_netclasses",
+            }
+            with mock.patch.object(flow, "tool_state", return_value=state):
+                command = flow.build_command({}, root, profile, board, root / "out.kicad_pcb", ["sig"])
+            self.assertNotIn("--clearance", command)
+            self.assertNotIn("--no-clamp-netclasses", command)
+            self.assertIn("--no-fix-drc-settings", command)
 
 
 if __name__ == "__main__":

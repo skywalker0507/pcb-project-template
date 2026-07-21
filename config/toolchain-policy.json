@@ -1,0 +1,25 @@
+{
+  "schema": 2,
+  "mode": "latest",
+  "atopile": {
+    "package": "atopile"
+  },
+  "houtini_lm": {
+    "repository": "https://github.com/skywalker0507/houtini-lm.git",
+    "ref": "pcb-ai-adapter"
+  },
+  "kicad_routing_tools": {
+    "repository": "https://github.com/drandyhaas/KiCadRoutingTools.git",
+    "ref": "main",
+    "native_release": "latest"
+  },
+  "kicad": {
+    "major": 10,
+    "cli": "C:/Program Files/KiCad/10.0/bin/kicad-cli.exe"
+  },
+  "freerouting": {
+    "latest_release_api": "https://api.github.com/repos/freerouting/freerouting/releases/latest",
+    "jar_asset_suffix": ".jar",
+    "java_major": 25
+  }
+}

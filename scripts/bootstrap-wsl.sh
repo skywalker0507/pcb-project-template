@@ -25,23 +25,10 @@ if ! command -v uv >/dev/null 2>&1; then
     export PATH="$HOME/.local/bin:$PATH"
 fi
 
-required_version="0.15.7"
-installed_version=""
-if command -v ato >/dev/null 2>&1; then
-    installed_version="$(ato --version 2>/dev/null | tail -n 1 | tr -d '\r')"
-fi
-
-if [[ "$installed_version" != "$required_version" ]]; then
-    echo "installing atopile $required_version with uv"
-    uv tool install --force "atopile==$required_version"
-    hash -r
-fi
-
+echo "installing the latest atopile release with uv"
+uv tool install --force atopile
+hash -r
 actual_version="$(ato --version | tail -n 1 | tr -d '\r')"
-if [[ "$actual_version" != "$required_version" ]]; then
-    echo "expected atopile $required_version, got $actual_version" >&2
-    exit 1
-fi
 
 git config core.autocrlf input
 git config core.filemode false

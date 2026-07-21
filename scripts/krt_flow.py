@@ -27,6 +27,7 @@ PROTECTED_EXTRA_FLAGS = {
     "--clearance", "--via-size", "--via-drill", "--fab-tier",
     "--fab-overrides", "--hole-to-hole-clearance",
     "--board-edge-clearance", "--enable-used-layers", "--overwrite",
+    "--no-fix-drc-settings", "--no-clamp-netclasses", "--net-clearances",
 }
 
 
@@ -98,6 +99,23 @@ def expand_nets(board: Path, includes: list[str], excludes: list[str]) -> list[s
         if not any(fnmatch.fnmatchcase(name, pattern) for pattern in excludes)
     }
     return sorted(selected)
+
+
+def project_default_clearance(board: Path) -> float | None:
+    project = board.with_suffix(".kicad_pro")
+    if not project.is_file():
+        return None
+    data = json.loads(project.read_text(encoding="utf-8"))
+    classes = data.get("net_settings", {}).get("classes", [])
+    if isinstance(classes, dict):
+        default = classes.get("Default")
+    else:
+        default = next(
+            (item for item in classes if item.get("name") == "Default"), None
+        )
+    if not default or default.get("clearance") is None:
+        return None
+    return float(default["clearance"])
 
 
 def sexpr_blocks(text: str, head: str):
@@ -271,11 +289,17 @@ def tool_state(config: dict[str, Any], root: Path) -> dict[str, Any]:
         errors="replace", check=False,
     ) if python.is_file() and router.is_file() else None
     required_flags = {
-        "--layers", "--layer-costs", "--no-fix-drc-settings",
-        "--no-clamp-netclasses", "--fab-overrides",
+        "--layers", "--layer-costs", "--no-fix-drc-settings", "--fab-overrides",
     }
     help_text = help_check.stdout if help_check and help_check.returncode == 0 else ""
     missing_flags = sorted(flag for flag in required_flags if flag not in help_text)
+    if "--no-clamp-netclasses" in help_text:
+        netclass_mode = "legacy_no_clamp"
+    elif "--net-clearances" in help_text:
+        netclass_mode = "native_netclasses"
+    else:
+        netclass_mode = "unsupported"
+        missing_flags.append("netclass-preservation-capability")
     return {
         "ok": bool(
             repository.is_dir()
@@ -295,6 +319,7 @@ def tool_state(config: dict[str, Any], root: Path) -> dict[str, Any]:
         "actual_commit": actual_commit,
         "python_import_ok": bool(import_check and import_check.returncode == 0),
         "missing_cli_flags": missing_flags,
+        "netclass_mode": netclass_mode,
     }
 
 
@@ -320,7 +345,6 @@ def build_command(
     command += ["--layers", *map(str, layers), "--layer-costs", *map(str, costs)]
     options = {
         "track_width": "--track-width",
-        "clearance": "--clearance",
         "via_size": "--via-size",
         "via_drill": "--via-drill",
         "grid_step": "--grid-step",
@@ -333,10 +357,27 @@ def build_command(
         value = routing.get(key)
         if value is not None:
             command += [flag, str(value)]
+    if state["netclass_mode"] == "legacy_no_clamp":
+        command += ["--clearance", str(routing["clearance"])]
+    else:
+        board_clearance = project_default_clearance(source)
+        configured_clearance = float(routing["clearance"])
+        if board_clearance is None:
+            raise SystemExit(
+                "Latest KRT requires a same-stem .kicad_pro with a Default clearance"
+            )
+        if abs(board_clearance - configured_clearance) > 1e-9:
+            raise SystemExit(
+                "Configured clearance must equal the KiCad Default netclass when "
+                "using latest KRT: "
+                f"config={configured_clearance}, project={board_clearance}"
+            )
     fab_overrides = routing.get("fab_overrides")
     if fab_overrides:
         command += ["--fab-overrides", str(resolve(root, fab_overrides))]
-    command += ["--no-fix-drc-settings", "--no-clamp-netclasses"]
+    command += ["--no-fix-drc-settings"]
+    if state["netclass_mode"] == "legacy_no_clamp":
+        command += ["--no-clamp-netclasses"]
     extra_args = [str(value) for value in routing.get("extra_args", [])]
     conflicts = protected_extra_conflicts(extra_args)
     if conflicts:
@@ -404,6 +445,7 @@ def command_check(args: argparse.Namespace) -> int:
             "actual_commit": state["actual_commit"],
             "python_import_ok": state["python_import_ok"],
             "missing_cli_flags": state["missing_cli_flags"],
+            "netclass_mode": state["netclass_mode"],
         },
         "input": str(board) if board else None,
         "input_sha256": sha256(board) if board and board.is_file() else None,
@@ -705,7 +747,7 @@ def parser() -> argparse.ArgumentParser:
     top = argparse.ArgumentParser(description=__doc__)
     top.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     commands = top.add_subparsers(dest="command", required=True)
-    check = commands.add_parser("check", help="Verify the pinned tool and optional input")
+    check = commands.add_parser("check", help="Verify the resolved tool revision and optional input")
     check.add_argument("--input")
     check.set_defaults(handler=command_check)
     route = commands.add_parser("route", help="Run one policy-controlled route attempt")

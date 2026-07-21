@@ -13,9 +13,6 @@ import sys
 import hashlib
 
 
-ATO_VERSION = "0.15.7"
-
-
 def run(command: list[str], cwd: Path, timeout: int = 30) -> tuple[bool, str]:
     try:
         result = subprocess.run(
@@ -45,11 +42,13 @@ def main() -> int:
     args = parser.parse_args()
     root = args.project_root.resolve()
     checks: list[dict[str, object]] = []
-    lock_path = root / "config/toolchain-lock.json"
-    lock = json.loads(lock_path.read_text(encoding="utf-8")) if lock_path.is_file() else {}
+    policy_path = root / "config/toolchain-policy.json"
+    resolved_path = root / "build/toolchain-resolved.json"
+    resolved = json.loads(resolved_path.read_text(encoding="utf-8")) if resolved_path.is_file() else {}
 
-    for relative in ("ato.yaml", "config/pcb-flow.json", "config/kicad-routing-tools.json", "config/toolchain-lock.json"):
+    for relative in ("ato.yaml", "config/pcb-flow.json", "config/kicad-routing-tools.json", "config/toolchain-policy.json"):
         add(checks, f"project:{relative}", (root / relative).is_file(), relative)
+    add(checks, "project:resolved-toolchain", resolved_path.is_file(), str(resolved_path))
     mcp_configured = (root / ".codex/config.toml").is_file() or (root / ".codex/pcb-mcp.fragment.toml").is_file()
     add(checks, "project:mcp-config", mcp_configured, ".codex/config.toml or merge fragment")
 
@@ -62,7 +61,9 @@ def main() -> int:
     add(checks, "wsl", bool(wsl), wsl or "not found")
     if wsl:
         ok, output = run([wsl, "-d", args.distro, "--", "bash", "-lc", "command -v uv && command -v ato && ato --version | tail -n 1"], root)
-        add(checks, "wsl-atopile", ok and output.splitlines()[-1:] == [ATO_VERSION], output or "no output")
+        actual_ato = output.splitlines()[-1] if output.splitlines() else "missing"
+        expected_ato = resolved.get("atopile", {}).get("version")
+        add(checks, "wsl-atopile", ok and actual_ato == expected_ato, f"expected={expected_ato};actual={actual_ato}")
     else:
         add(checks, "wsl-atopile", False, "WSL unavailable")
 
@@ -70,7 +71,7 @@ def main() -> int:
     add(checks, "node", bool(node), node or "not found")
     houtini = root / "tools/houtini-lm"
     houtini_ok, houtini_head = git_head(houtini, root)
-    expected_houtini = lock.get("houtini_lm", {}).get("commit")
+    expected_houtini = resolved.get("houtini_lm", {}).get("commit")
     add(checks, "houtini-commit", houtini_ok and houtini_head == expected_houtini, f"expected={expected_houtini};actual={houtini_head}")
     add(checks, "houtini-build", (houtini / "dist/index.js").is_file(), str(houtini / "dist/index.js"))
     key_present = bool(os.environ.get("HOUTINI_LM_API_KEY") or os.environ.get("DEEPSEEK_API_KEY"))
@@ -81,15 +82,15 @@ def main() -> int:
     add(checks, "krt-repository", krt_repo.is_dir(), str(krt_repo))
     add(checks, "krt-python", krt_python.is_file(), str(krt_python))
     krt_ok, krt_head = git_head(krt_repo, root)
-    expected_krt = lock.get("kicad_routing_tools", {}).get("commit")
+    expected_krt = resolved.get("kicad_routing_tools", {}).get("commit")
     add(checks, "krt-commit", krt_ok and krt_head == expected_krt, f"expected={expected_krt};actual={krt_head}")
 
     java = shutil.which("java")
     add(checks, "java", bool(java), java or "not found")
-    freerouting_lock = lock.get("freerouting", {})
-    freerouting = root / f"tools/freerouting/freerouting-{freerouting_lock.get('version', '')}.jar"
+    freerouting_resolved = resolved.get("freerouting", {})
+    freerouting = root / "tools/freerouting/freerouting-latest.jar"
     freerouting_hash = hashlib.sha256(freerouting.read_bytes()).hexdigest() if freerouting.is_file() else "missing"
-    add(checks, "freerouting", freerouting_hash == freerouting_lock.get("sha256"), f"expected={freerouting_lock.get('sha256')};actual={freerouting_hash}")
+    add(checks, "freerouting", freerouting_hash == freerouting_resolved.get("sha256"), f"expected={freerouting_resolved.get('sha256')};actual={freerouting_hash}")
 
     if args.deep and (root / "scripts/krt_flow.py").is_file():
         ok, output = run([sys.executable, "scripts/krt_flow.py", "check"], root, 120)

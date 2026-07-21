@@ -3,7 +3,8 @@
 ## Machine and project setup
 
 Run `python scripts/init_project.py --project-name <name>` on each fresh clone.
-The command is idempotent for project files and pinned tool checkouts. Restart
+The command updates configured tools to their latest channels and is idempotent
+when those channels have not changed. Restart
 Codex after `.codex/config.toml` is generated, then run the deep environment
 check.
 

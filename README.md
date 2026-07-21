@@ -3,10 +3,10 @@
 Token-efficient, reproducible atopile and KiCad project template for Codex.
 It combines:
 
-- atopile 0.15.7 builds isolated in WSL;
+- the latest atopile release installed and built in WSL;
 - a project-scoped atopile MCP bridge;
-- a pinned Houtini-LM fork for bounded DeepSeek delegation;
-- a pinned KiCadRoutingTools checkout behind a guarded adapter;
+- the latest `pcb-ai-adapter` branch of the Houtini-LM fork;
+- the latest KiCadRoutingTools `main` checkout behind a guarded adapter;
 - a SHA-verified FreeRouting JAR for bounded headless routing;
 - deterministic DRC, PCB-context, FreeRouting and JLCPCB export scripts;
 - compact stage handoffs that avoid repeatedly loading the whole project.
@@ -20,7 +20,7 @@ python scripts/init_project.py --project-name my-board
 ```
 
 The initializer uses Python on Windows, installs atopile in the selected WSL
-distribution, clones the locked Houtini/KRT revisions, builds both adapters and
+distribution, updates Houtini/KRT to their configured latest branches, builds both adapters and
 writes `.codex/config.toml` with local absolute paths. API keys are never
 written to the repository.
 
@@ -50,11 +50,12 @@ passing router check is not PCB release approval.
 
 Stages do not duplicate `src/` or `elec/layout/`.
 
-## Locked external tools
+## Latest-version policy
 
-Exact repositories, commits and the compatible KRT native release are in
-`config/toolchain-lock.json`. Upgrades
-are deliberate: test a new commit independently, update the lock, rerun unit
-tests and `check_pcb_environment.py --deep`, then commit the lock change.
+Repositories and latest channels are declared in `config/toolchain-policy.json`.
+Every initializer run fetches the current branch/release and records the actual
+versions, commits and download hash in ignored
+`build/toolchain-resolved.json`. Run the initializer again whenever you want to
+upgrade, then rerun the deep environment check before PCB work.
 
 See `docs/AI_PCB_WORKFLOW.md` for the normal design and release sequence.

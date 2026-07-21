@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Initialize the pinned AI PCB toolchain on Windows with WSL atopile."""
+"""Install the latest compatible AI PCB toolchain and record what resolved."""
 
 from __future__ import annotations
 
@@ -15,7 +15,8 @@ import urllib.request
 
 
 ROOT = Path(__file__).resolve().parents[1]
-LOCK_PATH = ROOT / "config/toolchain-lock.json"
+POLICY_PATH = ROOT / "config/toolchain-policy.json"
+RESOLVED_PATH = ROOT / "build/toolchain-resolved.json"
 
 
 def run(command: list[str], *, cwd: Path = ROOT, timeout: int = 600) -> str:
@@ -48,37 +49,55 @@ def npm_command(*arguments: str) -> list[str]:
     return ["npm", *arguments]
 
 
-def install_download(url: str, sha256: str, destination: Path) -> None:
-    if destination.is_file() and hashlib.sha256(destination.read_bytes()).hexdigest() == sha256:
-        return
+def download(url: str, destination: Path) -> str:
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(destination.suffix + ".download")
     request = urllib.request.Request(url, headers={"User-Agent": "pcb-project-template"})
     with urllib.request.urlopen(request, timeout=180) as response, temporary.open("wb") as output:
         shutil.copyfileobj(response, output)
     actual = hashlib.sha256(temporary.read_bytes()).hexdigest()
-    if actual != sha256:
-        temporary.unlink(missing_ok=True)
-        raise SystemExit(f"Download hash mismatch for {destination}: {actual}")
     temporary.replace(destination)
+    return actual
 
 
-def checkout(name: str, repository: str, commit: str, destination: Path) -> None:
+def update_checkout(name: str, repository: str, ref: str, destination: Path) -> str:
     if destination.exists():
         if not (destination / ".git").exists():
             raise SystemExit(f"{name} destination is not a Git checkout: {destination}")
         dirty = run(["git", "-C", str(destination), "status", "--porcelain"])
         if dirty:
             raise SystemExit(f"Refusing to change dirty {name} checkout: {destination}")
-        current = run(["git", "-C", str(destination), "rev-parse", "HEAD"])
-        if current == commit:
-            return
-        run(["git", "-C", str(destination), "fetch", "origin", commit])
     else:
         destination.parent.mkdir(parents=True, exist_ok=True)
         run(["git", "clone", "--no-checkout", repository, str(destination)])
-        run(["git", "-C", str(destination), "fetch", "origin", commit])
+    run(["git", "-C", str(destination), "fetch", "origin", ref])
+    commit = run(["git", "-C", str(destination), "rev-parse", "FETCH_HEAD"])
     run(["git", "-C", str(destination), "checkout", "--detach", commit])
+    return commit
+
+
+def fetch_json(url: str) -> dict[str, object]:
+    request = urllib.request.Request(url, headers={"User-Agent": "pcb-project-template"})
+    with urllib.request.urlopen(request, timeout=60) as response:
+        return json.load(response)
+
+
+def atopile_version(distro: str) -> str:
+    return run([
+        "wsl.exe", "-d", distro, "--", "bash", "-lc",
+        "export PATH=\"$HOME/.local/bin:$PATH\"; ato --version | tail -n 1",
+    ]).splitlines()[-1].strip()
+
+
+def update_ato_requirement(version: str) -> None:
+    path = ROOT / "ato.yaml"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    replacement = f'requires-atopile: ">={version}"'
+    if lines and lines[0].startswith("requires-atopile:"):
+        lines[0] = replacement
+    else:
+        lines.insert(0, replacement)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def configure_project(project_name: str, distro: str, force: bool) -> None:
@@ -144,50 +163,67 @@ def main() -> int:
     parser.add_argument("--force-config", action="store_true")
     parser.add_argument("--skip-check", action="store_true")
     args = parser.parse_args()
-    lock = json.loads(LOCK_PATH.read_text(encoding="utf-8"))
+    policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
+    resolved: dict[str, object] = {"schema": 1, "mode": "latest"}
 
     if not args.no_wsl:
         run([
             "wsl.exe", "-d", args.distro, "--", "bash",
             f"{windows_to_wsl(ROOT)}/scripts/bootstrap-wsl.sh",
         ])
+    ato_version = atopile_version(args.distro)
+    update_ato_requirement(ato_version)
+    resolved["atopile"] = {"version": ato_version}
 
     if not args.no_tools:
-        houtini_lock = lock["houtini_lm"]
+        houtini_policy = policy["houtini_lm"]
         houtini = ROOT / "tools/houtini-lm"
-        checkout("Houtini-LM", houtini_lock["repository"], houtini_lock["commit"], houtini)
+        houtini_commit = update_checkout(
+            "Houtini-LM", houtini_policy["repository"], houtini_policy["ref"], houtini,
+        )
         if not (shutil.which("npm.cmd") or shutil.which("npm")):
             raise SystemExit("Node.js/npm 18+ is required")
         run(npm_command("ci"), cwd=houtini)
         run(npm_command("run", "build"), cwd=houtini)
+        houtini_version = json.loads((houtini / "package.json").read_text(encoding="utf-8"))["version"]
+        resolved["houtini_lm"] = {"commit": houtini_commit, "version": houtini_version}
 
-        krt_lock = lock["kicad_routing_tools"]
+        krt_policy = policy["kicad_routing_tools"]
         krt = ROOT / "tools/KiCadRoutingTools"
-        checkout("KiCadRoutingTools", krt_lock["repository"], krt_lock["commit"], krt)
+        krt_commit = update_checkout(
+            "KiCadRoutingTools", krt_policy["repository"], krt_policy["ref"], krt,
+        )
         venv = ROOT / ".venv-routingtools"
         if not (venv / "Scripts/python.exe").is_file():
             run([sys.executable, "-m", "venv", str(venv)])
         router_python = str(venv / "Scripts/python.exe")
         run([router_python, "-m", "pip", "install", "-r", str(krt / "requirements.txt")])
-        run([
-            router_python,
-            str(krt / "build_router.py"),
-            "--tag",
-            krt_lock["native_release"],
-        ])
+        run([router_python, str(krt / "build_router.py")])
 
         krt_config_path = ROOT / "config/kicad-routing-tools.json"
         krt_config = json.loads(krt_config_path.read_text(encoding="utf-8"))
-        if krt_config["tool"].get("commit") != krt_lock["commit"]:
-            krt_config["tool"]["commit"] = krt_lock["commit"]
+        if krt_config["tool"].get("commit") != krt_commit:
+            krt_config["tool"]["commit"] = krt_commit
             krt_config_path.write_text(json.dumps(krt_config, indent=2) + "\n", encoding="utf-8")
+        resolved["kicad_routing_tools"] = {"commit": krt_commit}
 
-        freerouting = lock["freerouting"]
-        install_download(
-            freerouting["url"],
-            freerouting["sha256"],
-            ROOT / f"tools/freerouting/freerouting-{freerouting['version']}.jar",
-        )
+        freerouting_policy = policy["freerouting"]
+        release = fetch_json(freerouting_policy["latest_release_api"])
+        suffix = freerouting_policy["jar_asset_suffix"]
+        assets = release.get("assets", [])
+        asset = next((item for item in assets if item.get("name", "").endswith(suffix)), None)
+        if not asset:
+            raise SystemExit(f"Latest FreeRouting release has no {suffix} asset")
+        freerouting_path = ROOT / "tools/freerouting/freerouting-latest.jar"
+        freerouting_hash = download(asset["browser_download_url"], freerouting_path)
+        resolved["freerouting"] = {
+            "version": release["tag_name"],
+            "asset": asset["name"],
+            "sha256": freerouting_hash,
+        }
+
+    RESOLVED_PATH.parent.mkdir(parents=True, exist_ok=True)
+    RESOLVED_PATH.write_text(json.dumps(resolved, indent=2) + "\n", encoding="utf-8")
 
     configure_project(args.project_name, args.distro, args.force_config)
     check_exit = None

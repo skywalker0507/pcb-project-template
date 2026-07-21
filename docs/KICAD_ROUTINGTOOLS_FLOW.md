@@ -7,7 +7,7 @@ tracks on forbidden layers. Its generic KiCad DRC gate compares the candidate
 against the input and rejects new violation objects or a higher unconnected
 count without needing a project-specific baseline.
 
-1. Install or clone KiCadRoutingTools at the configured pinned commit.
+1. Run `scripts/init_project.py` to update KiCadRoutingTools to the configured latest branch.
 2. Create its Python environment and compiled Rust router as upstream directs.
 3. Set explicit `track_width`, `clearance`, `via_size`, and `via_drill` values
    from the reviewed KiCad project/fabricator rules.

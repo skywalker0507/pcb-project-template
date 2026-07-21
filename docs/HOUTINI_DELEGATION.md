@@ -1,7 +1,7 @@
 # Houtini-LM delegation adapter
 
-The template installs a reviewed Houtini-LM fork and commit from
-`config/toolchain-lock.json`. It is project-local under `tools/houtini-lm` and
+The template installs the latest `pcb-ai-adapter` branch declared in
+`config/toolchain-policy.json`. It is project-local under `tools/houtini-lm` and
 is not copied into Git history.
 
 The fork adds the PCB workflow's token controls:
@@ -25,8 +25,9 @@ Do not automatically track the upstream default branch. In the Houtini fork:
    branch;
 3. run `npm ci`, `npm test` and any live API smoke test intentionally;
 4. push the reviewed adapter commit;
-5. update only the Houtini commit in `config/toolchain-lock.json`;
-6. rerun `python scripts/check_pcb_environment.py --deep` in a disposable
+5. merge the reviewed change into `pcb-ai-adapter`;
+6. rerun `python scripts/init_project.py` and
+   `python scripts/check_pcb_environment.py --deep` in a disposable
    project before adopting it elsewhere.
 
-Existing PCB projects remain on their locked commit until explicitly upgraded.
+Existing PCB projects update when their initializer is run again.

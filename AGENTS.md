@@ -38,8 +38,10 @@ spacing or impedance, and never regenerate a DRC baseline merely to pass.
 Treat `tools/KiCadRoutingTools` as an updateable upstream checkout. Use
 `scripts/krt_flow.py` and `config/kicad-routing-tools.json`; start with `check`,
 then a profile-scoped dry run, and route only to a separate candidate. Never
-bypass explicit rules, forbidden-layer scans, input hashes,
-`--no-fix-drc-settings` or `--no-clamp-netclasses`. `route_ok` still requires
+bypass explicit rules, forbidden-layer scans, input hashes or
+`--no-fix-drc-settings`. On older KRT the adapter requires
+`--no-clamp-netclasses`; on newer KRT it omits the clearance ceiling only after
+verifying the configured value equals the KiCad Default netclass. `route_ok` still requires
 independent DRC and physical review.
 
 At a meaningful stage boundary, run `scripts/create_stage_handoff.py` and keep

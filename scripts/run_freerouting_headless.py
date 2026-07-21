@@ -12,7 +12,7 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_JAR = ROOT / "tools/freerouting/freerouting-2.2.4.jar"
+DEFAULT_JAR = ROOT / "tools/freerouting/freerouting-latest.jar"
 
 
 def main() -> int:

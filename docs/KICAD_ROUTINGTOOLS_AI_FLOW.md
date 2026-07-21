@@ -3,7 +3,7 @@
 The repository treats `tools/KiCadRoutingTools` as an updateable upstream
 checkout. All project policy and automation live outside that directory:
 
-- `config/kicad-routing-tools.json`: pinned tool paths, net profiles, numeric
+- `config/kicad-routing-tools.json`: resolved tool commit, net profiles, numeric
   rules, forbidden layers, artifact paths and acceptance policy;
 - `config/krt-fab-overrides.txt`: exact reviewed fabrication floor, which also
   disables the upstream router's automatic standard-to-advanced escalation;
@@ -33,8 +33,10 @@ returns one compact JSON line. Full router and audit output stays under
 `build/logs/krt/`; the complete machine-readable decision record stays under
 `build/reports/krt/`.
 
-The adapter always passes `--no-fix-drc-settings` and
-`--no-clamp-netclasses`. It scans output copper independently and rejects any
+The adapter always passes `--no-fix-drc-settings`. Older KRT revisions also
+receive `--no-clamp-netclasses`; newer revisions removed that switch, so the
+adapter verifies the configured clearance against the KiCad Default class and
+omits KRT's clearance ceiling, preserving native netclasses. It scans output copper independently and rejects any
 segment on configured forbidden signal layers. A zero upstream exit code is
 not acceptance: incomplete nets, input mutation, forbidden-layer copper, or a
 failed configured audit all make the receipt unsuccessful.
@@ -58,9 +60,10 @@ lists live only in report files.
 python scripts/init_project.py --project-name new-board
 ```
 
-The initializer clones the reviewed KRT commit from
-`config/toolchain-lock.json`, creates its isolated Python environment and
-builds the native router. Fill the profile's `null` numeric values only after
+The initializer fetches the latest configured KRT branch from
+`config/toolchain-policy.json`, records its resolved commit, creates an
+isolated Python environment and builds the matching latest native router. Fill
+the profile's `null` numeric values only after
 reviewing the new project's KiCad rules; routing intentionally refuses to run
 while they remain unset.
 
