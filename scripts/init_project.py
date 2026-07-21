@@ -178,8 +178,9 @@ def main() -> int:
 
         krt_config_path = ROOT / "config/kicad-routing-tools.json"
         krt_config = json.loads(krt_config_path.read_text(encoding="utf-8"))
-        krt_config["tool"]["commit"] = krt_lock["commit"]
-        krt_config_path.write_text(json.dumps(krt_config, indent=2) + "\n", encoding="utf-8")
+        if krt_config["tool"].get("commit") != krt_lock["commit"]:
+            krt_config["tool"]["commit"] = krt_lock["commit"]
+            krt_config_path.write_text(json.dumps(krt_config, indent=2) + "\n", encoding="utf-8")
 
         freerouting = lock["freerouting"]
         install_download(
