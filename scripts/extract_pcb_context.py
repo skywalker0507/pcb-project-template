@@ -73,6 +73,10 @@ def main() -> int:
         type=Path,
         default=ROOT / "config/net-review-policy.json",
     )
+    parser.add_argument(
+        "--max-output-bytes", type=int, default=1_000_000,
+        help="Hard cap for the local context index; use query_pcb_context.py for LLM slices.",
+    )
     args = parser.parse_args()
 
     import pcbnew
@@ -195,11 +199,14 @@ def main() -> int:
             if item["classification"] != "distribution_or_power"
         ][:20],
     }
+    encoded = json.dumps(context, ensure_ascii=False, indent=2) + "\n"
+    if len(encoded.encode("utf-8")) > args.max_output_bytes:
+        raise SystemExit(
+            "PCB context index exceeds its cap; do not delegate it wholesale. "
+            "Use a narrower board or extend the local index cap deliberately."
+        )
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        json.dumps(context, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    args.output.write_text(encoded, encoding="utf-8")
     print(
         json.dumps(
             {

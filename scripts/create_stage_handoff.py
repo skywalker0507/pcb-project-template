@@ -11,6 +11,9 @@ from pathlib import Path
 import subprocess
 import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from pcb_policy import relative_to
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -73,6 +76,29 @@ def run_pipeline(config: Path) -> dict[str, object]:
     raise RuntimeError("PCB pipeline returned no JSON summary")
 
 
+def receipt_open_items(receipt: dict[str, object], limit: int) -> list[str]:
+    items: list[str] = []
+    failed = receipt.get("failed_step")
+    if isinstance(failed, dict):
+        items.append(f"Pipeline failed at {failed.get('name', 'unknown')}: inspect its bounded log/receipt.")
+    audit_path = (receipt.get("artifacts") or {}).get("audit_json") if isinstance(receipt.get("artifacts"), dict) else None
+    if isinstance(audit_path, str) and Path(audit_path).is_file():
+        try:
+            audit = json.loads(Path(audit_path).read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            audit = {}
+        categories = audit.get("drc_categories", {}) if isinstance(audit, dict) else {}
+        if isinstance(categories, dict):
+            for name, count in sorted(categories.items()):
+                if count:
+                    items.append(f"Resolve DRC category {name} ({count} item(s)); do not regenerate the baseline.")
+        for key in ("unexpected_violations", "unconnected_signatures"):
+            values = audit.get(key, []) if isinstance(audit, dict) else []
+            if isinstance(values, list):
+                items.extend(f"Review {key}: {value}" for value in values[:limit])
+    return items[:limit] or ["Pipeline receipt has no actionable audit detail; inspect its failed-step log."]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--stage", required=True)
@@ -86,14 +112,38 @@ def main() -> int:
         default=ROOT / "config/pcb-flow.json",
     )
     parser.add_argument("--skip-pipeline", action="store_true")
+    parser.add_argument(
+        "--from-pipeline-receipt", type=Path,
+        help="Use an existing run_pcb_pipeline JSON receipt instead of rerunning the pipeline.",
+    )
     args = parser.parse_args()
 
     config = json.loads(args.config.read_text(encoding="utf-8"))
+    checklist_path = ROOT / config.get("stage_checklist", "config/stage-checklist.json")
+    checklist = json.loads(checklist_path.read_text(encoding="utf-8"))
+    stage_rules = checklist.get("stages", {}).get(args.stage)
+    if not isinstance(stage_rules, dict):
+        raise SystemExit(f"Unknown stage {args.stage!r}; use a key from {checklist_path}")
     limit = int(config["handoff"].get("max_open_items", 8))
     if len(args.open_item) > limit or len(args.next_action) > limit:
         raise SystemExit(f"Handoff lists are limited to {limit} items")
 
-    pipeline = None if args.skip_pipeline else run_pipeline(args.config)
+    if args.from_pipeline_receipt:
+        try:
+            pipeline = json.loads(args.from_pipeline_receipt.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SystemExit(f"Invalid pipeline receipt: {args.from_pipeline_receipt}: {exc}") from exc
+        if not isinstance(pipeline, dict):
+            raise SystemExit("Pipeline receipt must contain a JSON object")
+        pipeline["receipt_source"] = str(args.from_pipeline_receipt.resolve())
+        if pipeline.get("success") is not False:
+            raise SystemExit("--from-pipeline-receipt requires a failed pipeline receipt")
+        if not args.open_item:
+            args.open_item = receipt_open_items(pipeline, limit)
+        if not args.next_action:
+            args.next_action = ["Resolve the recorded failure; do not rerun unrelated stages."]
+    else:
+        pipeline = None if args.skip_pipeline else run_pipeline(args.config)
     board_path = ROOT / config["project"]["board"]
     output = ROOT / config["handoff"]["output"]
     dirty_lines = git("status", "--short").splitlines()
@@ -104,6 +154,10 @@ def main() -> int:
         "stage": args.stage,
         "status": args.status,
         "objective": args.objective,
+        "stage_rules": {
+            "required_evidence": stage_rules.get("required_evidence", []),
+            "forbidden": stage_rules.get("forbidden", []),
+        },
         "source_sha256": tree_hash([ROOT / "ato.yaml", ROOT / "src"]),
         "board_sha256": (
             hashlib.sha256(board_path.read_bytes()).hexdigest().upper()
@@ -119,10 +173,10 @@ def main() -> int:
         "open_items": args.open_item,
         "next_actions": args.next_action,
         "read_first": [
-            str(output.resolve()),
+            relative_to(ROOT, output),
         ],
         "authoritative_docs": [
-            str((ROOT / path).resolve())
+            relative_to(ROOT, ROOT / path)
             for path in config["handoff"].get("authoritative_docs", [])
         ],
     }

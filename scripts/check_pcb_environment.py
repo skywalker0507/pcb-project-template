@@ -37,16 +37,19 @@ def git_head(path: Path, root: Path) -> tuple[bool, str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
-    parser.add_argument("--distro", default="Ubuntu")
-    parser.add_argument("--deep", action="store_true", help="also run KRT check and atopile build")
+    parser.add_argument("--distro", default="Ubuntu-24.04")
+    parser.add_argument("--tier", choices=("minimal", "standard", "deep"), default="standard")
+    parser.add_argument("--deep", action="store_true", help="Deprecated alias for --tier deep.")
     args = parser.parse_args()
+    tier = "deep" if args.deep else args.tier
     root = args.project_root.resolve()
     checks: list[dict[str, object]] = []
     policy_path = root / "config/toolchain-policy.json"
+    policy = json.loads(policy_path.read_text(encoding="utf-8")) if policy_path.is_file() else {}
     resolved_path = root / "build/toolchain-resolved.json"
     resolved = json.loads(resolved_path.read_text(encoding="utf-8")) if resolved_path.is_file() else {}
 
-    for relative in ("ato.yaml", "config/pcb-flow.json", "config/kicad-routing-tools.json", "config/toolchain-policy.json"):
+    for relative in ("ato.yaml", "config/pcb-flow.json", "config/kicad-routing-tools.json", "config/toolchain-policy.json", "config/board-stack.json", "config/pcb-acceptance.json", "config/requirements.json", "handoff/stages/CURRENT_STAGE.json"):
         add(checks, f"project:{relative}", (root / relative).is_file(), relative)
     add(checks, "project:resolved-toolchain", resolved_path.is_file(), str(resolved_path))
     mcp_configured = (root / ".codex/config.toml").is_file() or (root / ".codex/pcb-mcp.fragment.toml").is_file()
@@ -61,7 +64,7 @@ def main() -> int:
     add(checks, "wsl", bool(wsl), wsl or "not found")
     if wsl:
         ok, output = run([wsl, "-d", args.distro, "--", "bash", "-lc", "command -v uv && command -v ato && ato --version | tail -n 1"], root)
-        actual_ato = output.splitlines()[-1] if output.splitlines() else "missing"
+        actual_ato = output.replace("\x00", "").strip().splitlines()[-1] if output.replace("\x00", "").strip().splitlines() else "missing"
         expected_ato = resolved.get("atopile", {}).get("version")
         add(checks, "wsl-atopile", ok and actual_ato == expected_ato, f"expected={expected_ato};actual={actual_ato}")
     else:
@@ -89,38 +92,81 @@ def main() -> int:
     add(checks, "java", bool(java), java or "not found")
     freerouting_resolved = resolved.get("freerouting", {})
     freerouting = root / "tools/freerouting/freerouting-latest.jar"
-    freerouting_hash = hashlib.sha256(freerouting.read_bytes()).hexdigest() if freerouting.is_file() else "missing"
+    freerouting_hash = hashlib.sha256(freerouting.read_bytes()).hexdigest().upper() if freerouting.is_file() else "missing"
     add(checks, "freerouting", freerouting_hash == freerouting_resolved.get("sha256"), f"expected={freerouting_resolved.get('sha256')};actual={freerouting_hash}")
 
     konnect_resolved = resolved.get("konnect")
-    if konnect_resolved:
+    konnect_disabled = isinstance(konnect_resolved, dict) and konnect_resolved.get("disabled") is True
+    if not konnect_disabled and (konnect_resolved or policy.get("konnect", {}).get("enabled_by_default", False)):
         konnect = root / "tools/konnect/konnect.exe"
         ok, output = run([str(konnect), "--version"], root) if konnect.is_file() else (False, "missing")
-        binary_hash = hashlib.sha256(konnect.read_bytes()).hexdigest() if konnect.is_file() else "missing"
+        binary_hash = hashlib.sha256(konnect.read_bytes()).hexdigest().upper() if konnect.is_file() else "missing"
         add(
             checks, "konnect",
-            ok
+            bool(konnect_resolved)
+            and ok
             and output == konnect_resolved.get("binary_version")
             and binary_hash == konnect_resolved.get("binary_sha256"),
             f"version={output};sha256={binary_hash}",
         )
 
-    if args.deep and (root / "scripts/krt_flow.py").is_file():
+    if tier == "deep" and (root / "scripts/krt_flow.py").is_file():
         ok, output = run([sys.executable, "scripts/krt_flow.py", "check"], root, 120)
         add(checks, "krt-check", ok, output[-300:])
-    if args.deep and (houtini / "package.json").is_file():
+    if tier == "deep" and (houtini / "package.json").is_file():
         npm = ["cmd.exe", "/d", "/s", "/c", "npm", "test"] if os.name == "nt" else ["npm", "test"]
         ok, output = run(npm, houtini, 180)
         add(checks, "houtini-tests", ok, output[-300:])
-    if args.deep and wsl and (root / "ato.yaml").is_file():
+    if tier == "deep" and wsl and (root / "ato.yaml").is_file():
         windows_root = str(root)
         linux_root = "/mnt/" + windows_root[0].lower() + windows_root[2:].replace("\\", "/") if len(windows_root) > 2 and windows_root[1] == ":" else windows_root
         ok, output = run([wsl, "-d", args.distro, "--", "bash", "-lc", f"cd {json.dumps(linux_root)} && ato --non-interactive build"], root, 300)
         add(checks, "atopile-build", ok, output[-300:])
 
+    required_by_tier = {
+        "minimal": {
+            "project:ato.yaml", "project:config/pcb-flow.json", "project:config/kicad-routing-tools.json",
+            "project:config/toolchain-policy.json", "project:config/board-stack.json", "project:config/pcb-acceptance.json", "project:config/requirements.json",
+            "project:handoff/stages/CURRENT_STAGE.json", "project:mcp-config", "python",
+        },
+        "standard": {
+            "project:ato.yaml", "project:config/pcb-flow.json", "project:config/kicad-routing-tools.json",
+            "project:config/toolchain-policy.json", "project:config/board-stack.json", "project:config/pcb-acceptance.json", "project:config/requirements.json",
+            "project:handoff/stages/CURRENT_STAGE.json", "project:resolved-toolchain", "project:mcp-config",
+            "kicad-cli", "git", "python", "wsl", "wsl-atopile", "node", "houtini-commit",
+            "houtini-build", "krt-repository", "krt-python", "krt-commit", "java", "freerouting",
+        },
+        "deep": {item["name"] for item in checks if item["required"]},
+    }
+    for item in checks:
+        item["required"] = item["name"] in required_by_tier[tier]
     required_ok = all(item["ok"] for item in checks if item["required"])
     optional_ok = all(item["ok"] for item in checks if not item["required"])
-    print(json.dumps({"ready": required_ok, "optional_ready": optional_ok, "checks": checks}, ensure_ascii=False, separators=(",", ":")))
+    names = {item["name"] for item in checks if not item["ok"]}
+    suggestions: list[str] = []
+    if "project:mcp-config" in names:
+        suggestions.append("Run: python scripts/init_project.py --project-name <name>")
+    if "project:resolved-toolchain" in names:
+        suggestions.append("After installing tools manually, run: python scripts/record_toolchain_receipt.py")
+    if "wsl" in names or "wsl-atopile" in names:
+        suggestions.append(f"Install atopile manually in WSL {args.distro}, then verify: wsl.exe -d {args.distro} -- bash -lc 'ato --version'")
+    if "houtini-commit" in names and not houtini_ok:
+        suggestions.append("Clone the configured Houtini fork to tools/houtini-lm.")
+    if "houtini-build" in names:
+        suggestions.append("Run npm ci and npm run build in tools/houtini-lm.")
+    if "krt-repository" in names:
+        suggestions.append("Clone the configured KRT fork to tools/KiCadRoutingTools and check out codex/repository-support.")
+    if "krt-commit" in names and krt_ok and expected_krt:
+        suggestions.append("Check out the KRT commit recorded in build/toolchain-resolved.json, or record a receipt for the reviewed local commit.")
+    if "krt-python" in names:
+        suggestions.append("Create .venv-routingtools, install tools/KiCadRoutingTools/requirements.txt, then run its build_router.py manually.")
+    if "freerouting" in names:
+        suggestions.append("Download the reviewed FreeRouting JAR manually to tools/freerouting/freerouting-latest.jar.")
+    if "konnect" in names:
+        suggestions.append("Download Konnect manually to tools/konnect/konnect.exe, or disable it with init_project.py --no-konnect.")
+    # Windows consoles can still use a legacy code page; JSON escapes keep this
+    # machine-readable even when a tool log includes characters such as emoji.
+    print(json.dumps({"tier": tier, "ready": required_ok, "optional_ready": optional_ok, "checks": checks, "manual_suggestions": suggestions}, ensure_ascii=True, separators=(",", ":")))
     return 0 if required_ok else 1
 
 

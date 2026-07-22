@@ -4,14 +4,19 @@
     "repository": "tools/KiCadRoutingTools",
     "python": ".venv-routingtools/Scripts/python.exe",
     "router_script": "route.py",
-    "commit": null
+    "commit": "abd7f2c32c4987a6865a95690dd6df268ad2d6cd"
   },
   "kicad_cli": "C:/Program Files/KiCad/10.0/bin/kicad-cli.exe",
+  "board_stack": "config/board-stack.json",
+  "acceptance_policy": "config/pcb-acceptance.json",
+  "acceptance": {
+    "require_router_complete": true,
+    "require_audit_pass": true,
+    "require_project_rules": true
+  },
+  "manufacturing_profile": "config/manufacturing-profile.json",
   "guardrails": {
-    "forbidden_signal_layers": [
-      "In1.Cu",
-      "In2.Cu"
-    ]
+    "forbidden_signal_layers": []
   },
   "profiles": {
     "outer_low_risk": {
@@ -32,14 +37,10 @@
       "routing": {
         "layers": [
           "F.Cu",
-          "In1.Cu",
-          "In2.Cu",
           "B.Cu"
         ],
         "layer_costs": [
           1.0,
-          -1.0,
-          -1.0,
           3.0
         ],
         "track_width": null,
@@ -50,7 +51,7 @@
         "max_ripup": 3,
         "hole_to_hole_clearance": null,
         "board_edge_clearance": null,
-        "fab_overrides": "config/krt-fab-overrides.txt",
+        "fab_overrides": null,
         "extra_args": []
       }
     }
@@ -60,11 +61,6 @@
     "report_dir": "build/reports/krt",
     "history": "build/reports/krt/history.jsonl",
     "receipt_max_items": 8
-  },
-  "acceptance": {
-    "require_router_complete": true,
-    "require_audit_pass": true,
-    "require_project_rules": true
   },
   "attempt_policy": {
     "max_identical_attempts": 2

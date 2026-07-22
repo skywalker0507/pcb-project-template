@@ -9,8 +9,8 @@
     "ref": "pcb-ai-adapter"
   },
   "kicad_routing_tools": {
-    "repository": "https://github.com/drandyhaas/KiCadRoutingTools.git",
-    "ref": "main",
+    "repository": "https://github.com/skywalker0507/KiCadRoutingTools.git",
+    "ref": "codex/repository-support",
     "native_release": "latest"
   },
   "konnect": {

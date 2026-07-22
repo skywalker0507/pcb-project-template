@@ -50,7 +50,8 @@ python scripts/init_project.py --project-name my-board
 python scripts/check_pcb_environment.py --deep
 ```
 
-Use `--no-konnect` only when Konnect should not be installed. Restart Codex
+Use `--no-konnect` only when Konnect should not be configured. Install the
+binary manually before recording the toolchain receipt. Restart Codex
 after initialization. Konnect is AGPL-3.0; businesses that cannot
 meet that license's obligations should obtain a commercial license or leave
 the option disabled.

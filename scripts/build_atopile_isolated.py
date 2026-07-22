@@ -32,6 +32,22 @@ def windows_to_wsl(path: Path) -> str:
     return f"/mnt/{drive.lower()}/{tail.replace(os.sep, '/')}"
 
 
+def classify_failure(log: str) -> dict[str, object] | None:
+    rules = [
+        ("component_data_unreachable", r"Fetching component data failed|Name or service not known", "Restore component-data access or provide a reviewed offline component cache; do not change electrical sources merely to bypass picking."),
+        ("package_compiler_incompatible", r"trait not found|Incompatible interface types", "Review the exact upstream package/compiler compatibility issue; keep any local migration patch separately reviewed."),
+        ("dependency_resolution", r"Failed to resolve.*dependency|ConnectError", "Check the local dependency cache and immutable package revision before retrying."),
+        ("source_validation", r"SyntaxError|TypeError|Ercfault", "Inspect the cited .ato source location and resolve the electrical validation error."),
+    ]
+    for name, pattern, next_action in rules:
+        if re.search(pattern, log, re.IGNORECASE):
+            matches = [line.strip() for line in log.splitlines() if re.search(pattern, line, re.IGNORECASE)]
+            return {"class": name, "evidence": matches[-3:], "next": next_action}
+    if "Build failed" in log:
+        return {"class": "unclassified_build_failure", "evidence": log.splitlines()[-8:], "next": "Inspect only the bounded build log tail, then add a deterministic classifier if this recurs."}
+    return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--build", default="default")
@@ -115,6 +131,7 @@ def main() -> int:
                 "build_id": build_id,
                 "log": str(args.log.resolve()),
                 "restored_board_sha256": after.upper(),
+                "failure": classify_failure(log_text) if exit_code else None,
             },
             separators=(",", ":"),
         )

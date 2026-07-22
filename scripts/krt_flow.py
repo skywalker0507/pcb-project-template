@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Token-efficient, policy-driven adapter for KiCadRoutingTools.
 
-The upstream checkout is treated as immutable. Full router output is written to
+The configured KRT checkout is treated as immutable. Full router output is written to
 disk; stdout receives one compact JSON receipt suitable for an AI tool call.
 """
 
@@ -19,6 +19,12 @@ import shutil
 import subprocess
 import sys
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from pcb_policy import load_acceptance, reviewed_routing_rules
+from design_policy import require_policy
+from stage_policy import require_operation
+from create_houtini_job import create_job
 
 
 DEFAULT_CONFIG = Path("config/kicad-routing-tools.json")
@@ -80,6 +86,45 @@ def resolve(root: Path, value: str) -> Path:
     return candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
 
 
+def require_active_stack(config: dict[str, Any], root: Path, profile: dict[str, Any]) -> None:
+    stack_value = config.get("board_stack")
+    if not stack_value:
+        return
+    stack = json.loads(resolve(root, stack_value).read_text(encoding="utf-8"))
+    active = stack.get("active")
+    selected = stack.get("profiles", {}).get(active)
+    if not isinstance(selected, dict):
+        raise SystemExit(f"Invalid active board stack profile: {active!r}")
+    expected_layers = selected.get("copper_layers")
+    configured_layers = profile.get("routing", {}).get("layers")
+    expected_forbidden = selected.get("forbidden_signal_layers", [])
+    configured_forbidden = config.get("guardrails", {}).get("forbidden_signal_layers", [])
+    if configured_layers != expected_layers or configured_forbidden != expected_forbidden:
+        raise SystemExit(compact({
+            "success": False,
+            "error": "board_stack_krt_mismatch",
+            "active_stack": active,
+            "expected_layers": expected_layers,
+            "configured_layers": configured_layers,
+            "next": "Run scripts/init_project.py --layers 2 or --layers 4, then review routing policy.",
+        }))
+
+
+def require_board_stack_matches(board: Path, config: dict[str, Any], root: Path) -> None:
+    stack = json.loads(resolve(root, config["board_stack"]).read_text(encoding="utf-8"))
+    active = stack.get("active")
+    selected = stack.get("profiles", {}).get(active, {})
+    expected = selected.get("copper_layers", []) if isinstance(selected, dict) else []
+    text = board.read_text(encoding="utf-8", errors="replace")
+    missing = [layer for layer in expected if f'"{layer}" signal' not in text]
+    if missing:
+        raise SystemExit(compact({
+            "success": False, "error": "board_stack_board_mismatch", "active_stack": active,
+            "missing_signal_layers": missing,
+            "next": "Do not rewrite an existing board automatically. Create a matching new board or change its layer stack in KiCad, then rerun this check.",
+        }))
+
+
 def net_names(board: Path) -> list[str]:
     text = board.read_text(encoding="utf-8", errors="replace")
     names = set(re.findall(r'\(net\s+(?:\d+\s+)?"([^"]+)"\)', text))
@@ -99,6 +144,16 @@ def expand_nets(board: Path, includes: list[str], excludes: list[str]) -> list[s
         if not any(fnmatch.fnmatchcase(name, pattern) for pattern in excludes)
     }
     return sorted(selected)
+
+
+def suggested_low_risk_nets(board: Path, excludes: list[str], limit: int = 8) -> list[str]:
+    """Suggest actual board nets only; never silently select them for routing."""
+    names = net_names(board)
+    candidates = [
+        name for name in names
+        if not any(fnmatch.fnmatchcase(name, pattern) for pattern in excludes)
+    ]
+    return candidates[:limit]
 
 
 def project_default_clearance(board: Path) -> float | None:
@@ -241,6 +296,42 @@ def concise_metrics(metrics: dict[str, Any] | None, max_items: int) -> dict[str,
         "vias": metrics.get("vias"),
         "widths_mm": bounded(widths, max_items),
         "forbidden_segments": metrics.get("forbidden_segments", {}),
+    }
+
+
+def candidate_diff(before: dict[str, Any], after: dict[str, Any] | None, audit: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Triage-only geometry/DRC delta; it is intentionally not acceptance."""
+    if after is None:
+        return None
+    layers = sorted(set(before.get("segments", {})) | set(after.get("segments", {})))
+    segment_delta = {
+        layer: after.get("segments", {}).get(layer, 0) - before.get("segments", {}).get(layer, 0)
+        for layer in layers
+        if after.get("segments", {}).get(layer, 0) != before.get("segments", {}).get(layer, 0)
+    }
+    before_widths = set(before.get("widths_mm", []))
+    return {
+        "segment_delta_by_layer": segment_delta,
+        "via_delta": after.get("vias", 0) - before.get("vias", 0),
+        "new_widths_mm": sorted(set(after.get("widths_mm", [])) - before_widths),
+        "forbidden_segments_after": after.get("forbidden_segments", {}),
+        "new_drc_violation_count": (audit or {}).get("new_violation_count"),
+        "unconnected_delta": (audit or {}).get("unconnected_delta"),
+        "limits": ["Triage only: this summary does not prove routing, placement, return-path, or release acceptance."],
+    }
+
+
+def concise_candidate_diff(value: dict[str, Any] | None, max_items: int) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    return {
+        "segment_delta_by_layer": bounded(sorted(value.get("segment_delta_by_layer", {}).items()), max_items),
+        "via_delta": value.get("via_delta"),
+        "new_widths_mm": bounded(value.get("new_widths_mm", []), max_items),
+        "forbidden_segments_after": value.get("forbidden_segments_after", {}),
+        "new_drc_violation_count": value.get("new_drc_violation_count"),
+        "unconnected_delta": value.get("unconnected_delta"),
+        "limits": value.get("limits", []),
     }
 
 
@@ -437,9 +528,22 @@ def command_check(args: argparse.Namespace) -> int:
     config, root = load_config(args.config)
     state = tool_state(config, root)
     board = resolve(root, args.input) if args.input else None
+    project_ready = None
+    stack_ready = None
+    next_steps: list[str] = []
+    if board and board.is_file():
+        project_ready = board.with_suffix(".kicad_pro").is_file()
+        if not project_ready:
+            next_steps.append("Create a .kicad_pro by running init_project.py for a new scaffold or opening/saving the board in KiCad.")
+        try:
+            require_board_stack_matches(board, config, root)
+            stack_ready = True
+        except SystemExit:
+            stack_ready = False
+            next_steps.append("Make the actual KiCad board layer stack match config/board-stack.json; do not rewrite an existing board automatically.")
     max_items = int(config.get("artifacts", {}).get("receipt_max_items", 8))
     result = {
-        "success": state["ok"] and (board is None or board.is_file()),
+        "success": state["ok"] and (board is None or (board.is_file() and project_ready and stack_ready)),
         "tool": {
             "expected_commit": state["expected_commit"],
             "actual_commit": state["actual_commit"],
@@ -450,6 +554,9 @@ def command_check(args: argparse.Namespace) -> int:
         "input": str(board) if board else None,
         "input_sha256": sha256(board) if board and board.is_file() else None,
         "profiles": bounded(sorted(config.get("profiles", {})), max_items),
+        "project_ready": project_ready,
+        "board_stack_ready": stack_ready,
+        "next": next_steps,
     }
     print(compact(result))
     return 0 if result["success"] else 1
@@ -460,6 +567,7 @@ def command_route(args: argparse.Namespace) -> int:
     if args.profile not in config.get("profiles", {}):
         raise SystemExit(f"Unknown profile: {args.profile}")
     profile = copy.deepcopy(config["profiles"][args.profile])
+    require_active_stack(config, root, profile)
     if args.grid_step is not None:
         profile["routing"]["grid_step"] = args.grid_step
     if args.max_ripup is not None:
@@ -468,13 +576,36 @@ def command_route(args: argparse.Namespace) -> int:
     output = resolve(root, args.output)
     if not source.is_file():
         raise SystemExit(f"Input board not found: {source}")
+    require_board_stack_matches(source, config, root)
+    source_project = source.with_suffix(".kicad_pro")
+    if not source_project.is_file():
+        raise SystemExit(compact({
+            "success": False, "error": "kicad_project_missing", "board": str(source),
+            "next": "Run python scripts/init_project.py --layers 2 (or 4) for a new scaffold, or open/save the existing board in KiCad to create its .kicad_pro before routing.",
+        }))
+    load_acceptance(resolve(root, config["acceptance_policy"]), "routing_candidate", {
+        "separate_candidate", "input_sha256_preserved", "project_rules_preserved",
+        "no_forbidden_signal_layers", "candidate_audit_pass",
+    })
+    if not args.dry_run:
+        require_operation("route")
+        require_policy("candidate_routing")
+        reviewed_routing_rules(resolve(root, config["manufacturing_profile"]))
     if output == source:
         raise SystemExit("Output must be a separate candidate; in-place routing is forbidden")
     if output.exists() and not args.force:
         raise SystemExit(f"Refusing to overwrite output: {output}")
     include = args.nets or profile.get("include_nets", [])
     if not include:
-        raise SystemExit("No include_nets configured; pass --nets explicitly")
+        raise SystemExit(compact({
+            "success": False,
+            "error": "no_include_nets",
+            "next": "Review suggested actual board nets, then pass --nets explicitly; no routing was performed.",
+            "suggested_low_risk_nets": bounded(
+                suggested_low_risk_nets(source, profile.get("exclude_nets", [])),
+                int(config.get("artifacts", {}).get("receipt_max_items", 8)),
+            ),
+        }))
     if "*" in include and profile.get("require_explicit_include", True) and not args.allow_all_nets:
         raise SystemExit("Wildcard '*' requires --allow-all-nets for this profile")
     wildcard_patterns = [value for value in include if any(char in value for char in "*?[")]
@@ -498,6 +629,7 @@ def command_route(args: argparse.Namespace) -> int:
         root, artifacts.get("history", "build/reports/krt/history.jsonl")
     )
     source_before = sha256(source)
+    source_metrics = board_metrics(source, config.get("guardrails", {}).get("forbidden_signal_layers", []))
     signature_payload = compact({
         "profile": args.profile,
         "tool_commit": config["tool"].get("commit"),
@@ -537,7 +669,6 @@ def command_route(args: argparse.Namespace) -> int:
         raise SystemExit("Refusing to overwrite run artifacts: " + ", ".join(map(str, collisions)))
 
     command = build_command(config, root, profile, source, output, nets)
-    source_project = source.with_suffix(".kicad_pro")
     output_project = output.with_suffix(".kicad_pro")
     source_project_hash = sha256(source_project) if source_project.is_file() else None
     started = dt.datetime.now(dt.timezone.utc)
@@ -594,6 +725,7 @@ def command_route(args: argparse.Namespace) -> int:
     }
     metrics = board_metrics(output, config.get("guardrails", {}).get("forbidden_signal_layers", [])) if output.is_file() else None
     audit = run_audit(config, root, source, output, log_path) if output.is_file() else None
+    geometry_diff = candidate_diff(source_metrics, metrics, audit)
     complete = bool(
         summary
         and not summary.get("failed_single")
@@ -641,10 +773,18 @@ def command_route(args: argparse.Namespace) -> int:
         "router": summary,
         "diagnostics": diagnostics,
         "board_metrics": metrics,
+        "candidate_diff": geometry_diff,
         "audit": audit,
         "log": str(log_path),
     }
     report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    delegation = None
+    if not accepted:
+        delegation = create_job(
+            [log_path], "krt_candidate_failure",
+            "This is an isolated candidate-routing failure. Classify router diagnostics only; do not make routing or release decisions.",
+            job_name=f"krt-{run_id}",
+        )
     receipt = {
         "success": accepted,
         "route_ok": bool(
@@ -672,6 +812,8 @@ def command_route(args: argparse.Namespace) -> int:
             "unconnected": (audit or {}).get("unconnected"),
             "in1_non_ground_segments": (audit or {}).get("in1_non_ground_segments"),
         } if audit else None,
+        "candidate_diff": concise_candidate_diff(geometry_diff, max_items),
+        "delegation": delegation,
     }
     history_path.parent.mkdir(parents=True, exist_ok=True)
     history_record = {
@@ -718,6 +860,7 @@ def command_report(args: argparse.Namespace) -> int:
         "router": concise_router(router, max_items),
         "diagnostics": report.get("diagnostics"),
         "board_metrics": concise_metrics(report.get("board_metrics"), max_items),
+        "candidate_diff": concise_candidate_diff(report.get("candidate_diff"), max_items),
         "audit": concise_audit(report.get("audit"), max_items),
         "log": report.get("log"),
         "report": str(path),

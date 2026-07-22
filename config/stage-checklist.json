@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "stages": {
+    "requirements": {
+      "objective": "Capture interfaces, rails, constraints, board outline, and manufacturer choice before selecting parts.",
+      "required_evidence": ["CURRENT_STAGE.json", "requirements recorded with explicit unknowns"],
+      "forbidden": ["routing", "manufacturing_export", "inventing electrical or fabrication values"]
+    },
+    "electrical": {
+      "objective": "Validate atopile sources and part selections.",
+      "required_evidence": ["atopile build receipt when component data is available", "selected-part provenance"],
+      "forbidden": ["manual schematic authority", "manufacturing_export"]
+    },
+    "physical": {
+      "objective": "Place reviewed blocks and preserve KiCad manual work.",
+      "required_evidence": ["board SHA", "placement review notes"],
+      "forbidden": ["unreviewed broad autorouting", "manufacturing_export"]
+    },
+    "routing": {
+      "objective": "Create isolated, audited low-risk routing candidates.",
+      "required_evidence": ["candidate receipt", "candidate DRC comparison", "reviewed routing rules when committing real copper"],
+      "notes": ["In the four_layer template, In1.Cu and In2.Cu are reserved planes; KRT signal routing is limited to outer layers."],
+      "forbidden": ["in-place KRT routing", "treating route_ok as release"]
+    },
+    "release": {
+      "objective": "Run independent DRC, copper review, and guarded manufacturing export.",
+      "required_evidence": ["release_pass=true", "matching board SHA", "selected manufacturing profile"],
+      "forbidden": ["baseline regeneration to pass", "export without release_pass"]
+    }
+  }
+}

@@ -5,6 +5,9 @@
     "build_target": "default",
     "board": "elec/layout/default/default.kicad_pcb"
   },
+  "board_stack": "config/board-stack.json",
+  "acceptance": "config/pcb-acceptance.json",
+  "stage_checklist": "config/stage-checklist.json",
   "checks": [],
   "audit": {
     "require_in1_ground": false,
@@ -24,6 +27,12 @@
   "handoff": {
     "output": "handoff/stages/CURRENT_STAGE.json",
     "max_open_items": 8,
-    "authoritative_docs": []
+    "authoritative_docs": [
+      "AGENTS.md",
+      "README.md",
+      "config/stage-checklist.json",
+      "config/pcb-acceptance.json",
+      "config/board-stack.json"
+    ]
   }
 }

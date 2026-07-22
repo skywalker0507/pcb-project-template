@@ -19,6 +19,10 @@ def main() -> int:
     parser.add_argument("--top-routes", type=int, default=5)
     parser.add_argument("--top-hpwl", type=int, default=5)
     parser.add_argument(
+        "--max-output-bytes", type=int, default=24_000,
+        help="Hard cap for a context slice that may be shown to an LLM.",
+    )
+    parser.add_argument(
         "--context",
         type=Path,
         default=ROOT / "build/delegated/pcb-context.json",
@@ -32,6 +36,10 @@ def main() -> int:
 
     context = json.loads(args.context.read_text(encoding="utf-8"))
     audit = json.loads(args.audit.read_text(encoding="utf-8"))
+    if context.get("board_sha256") != audit.get("board_sha256"):
+        raise SystemExit(
+            "Context and routing audit are from different board revisions; rerun the PCB pipeline"
+        )
     requested_nets = set(args.net)
     requested_groups = set(args.group)
     requested_refs = set(args.ref)
@@ -106,7 +114,12 @@ def main() -> int:
             "No numeric clearance, width, impedance or length rule is inferred by this report.",
         ],
     }
-    print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+    encoded = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+    if len(encoded.encode("utf-8")) > args.max_output_bytes:
+        raise SystemExit(
+            "Context slice exceeds the output cap; request fewer nets/groups/refs or lower top-* values"
+        )
+    print(encoded)
     return 0
 
 

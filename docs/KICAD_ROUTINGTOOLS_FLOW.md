@@ -1,13 +1,14 @@
 # KiCadRoutingTools AI flow
 
-This scaffold keeps the upstream KiCadRoutingTools checkout unmodified. The
+This scaffold keeps the project-maintained KiCadRoutingTools fork checkout
+unmodified. The
 adapter resolves allowed nets from project policy, captures complete logs on
 disk, emits one compact JSON receipt, verifies the input hash, and rejects
 tracks on forbidden layers. Its generic KiCad DRC gate compares the candidate
 against the input and rejects new violation objects or a higher unconnected
 count without needing a project-specific baseline.
 
-1. Run `scripts/init_project.py` to update KiCadRoutingTools to the configured latest branch.
+1. Manually clone KiCadRoutingTools to `tools/KiCadRoutingTools` at the configured branch.
 2. Create its Python environment and compiled Rust router as upstream directs.
 3. Set explicit `track_width`, `clearance`, `via_size`, and `via_drill` values
    from the reviewed KiCad project/fabricator rules.
@@ -17,6 +18,8 @@ count without needing a project-specific baseline.
 6. Preview selection with `python scripts/krt_flow.py route ... --dry-run`.
 7. Run without `--dry-run`; inspect the compact receipt first and open its log
    or report only when a specific failure needs investigation.
+8. Run `python scripts/record_toolchain_receipt.py` after a successful manual
+   installation or upgrade.
 
 Use `python scripts/krt_flow.py history` for recent outcomes and
 `python scripts/krt_flow.py report --run-id <id>` for a bounded report. These

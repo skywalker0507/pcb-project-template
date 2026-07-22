@@ -18,6 +18,18 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_KICAD_CLI = Path(r"C:\Program Files\KiCad\10.0\bin\kicad-cli.exe")
 DEFAULT_BASELINE = ROOT / "config/pcb-release-baseline.json"
 DEFAULT_ROUTING_PATHS = ROOT / "config/routing-paths.json"
+FATAL_CATEGORIES = {
+    "shorting_items",
+    "clearance",
+    "tracks_crossing",
+    "track_dangling",
+    "via_dangling",
+    "via_diameter",
+    "drill_out_of_range",
+    "annular_width",
+    "hole_clearance",
+    "copper_edge_clearance",
+}
 
 
 def balanced_forms(text: str, names: tuple[str, ...]):
@@ -207,6 +219,51 @@ def violation_items(report: str, category: str) -> list[str]:
     return sorted(items)
 
 
+def baseline_differences(
+    report: str, categories: Counter[str], baseline: dict[str, object] | None,
+) -> tuple[list[str], list[str]]:
+    """Return unexpected and missing DRC objects for a strict reviewed baseline.
+
+    A baseline is an allow-list, never a blanket permission.  In particular an
+    empty scaffold baseline accepts only a clean DRC report.
+    """
+    allowed = (baseline or {}).get("allowed_violation_items", {})
+    expected_counts = (baseline or {}).get("expected_category_counts", {})
+    if not isinstance(allowed, dict) or not isinstance(expected_counts, dict):
+        raise SystemExit("Malformed DRC baseline: expected object maps")
+
+    unexpected: list[str] = []
+    missing: list[str] = []
+    for category, actual_count in sorted(categories.items()):
+        actual = set(violation_items(report, category))
+        if category not in allowed:
+            unexpected.append(f"{category}|category not allowlisted; count={actual_count}")
+            continue
+        expected = allowed[category]
+        if not isinstance(expected, list):
+            raise SystemExit(f"Malformed DRC baseline items for {category}")
+        expected_set = {str(item) for item in expected}
+        unexpected.extend(
+            f"{category}|{item}" for item in sorted(actual - expected_set)
+        )
+        missing.extend(
+            f"{category}|{item}" for item in sorted(expected_set - actual)
+        )
+        if not actual and actual_count:
+            unexpected.append(f"{category}|unable to identify {actual_count} DRC objects")
+
+    for category, expected in sorted(expected_counts.items()):
+        if not isinstance(expected, int):
+            raise SystemExit(f"Malformed DRC baseline count for {category}")
+        actual = categories.get(category, 0)
+        if actual != expected:
+            unexpected.append(f"{category}|count expected {expected}, actual {actual}")
+    for category in set(allowed) - set(categories):
+        for item in allowed[category]:
+            missing.append(f"{category}|{item}")
+    return unexpected, missing
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -318,16 +375,9 @@ def main() -> int:
     missing_required_zones: list[dict[str, str]] = []
     if args.baseline.is_file():
         baseline = json.loads(args.baseline.read_text(encoding="utf-8"))
-        allowed_items = baseline.get("allowed_violation_items", {})
-        for category, expected in allowed_items.items():
-            actual = violation_items(report, category)
-            unexpected_violations.extend(sorted(set(actual) - set(expected)))
-        for category, expected_count in baseline.get("expected_category_counts", {}).items():
-            actual_count = categories.get(category, 0)
-            if actual_count != expected_count:
-                unexpected_violations.append(
-                    f"{category}|count expected {expected_count}, actual {actual_count}"
-                )
+        unexpected_violations, missing_baseline_violations = baseline_differences(
+            report, categories, baseline,
+        )
         actual_zones = {
             (item["layer"], item["net"])
             for item in audit["zones"]
@@ -336,14 +386,20 @@ def main() -> int:
             pair = (required["layer"], required["net"])
             if pair not in actual_zones:
                 missing_required_zones.append(required)
-    elif categories.get("unconnected_items", 0):
-        unexpected_violations.extend(audit["unconnected_signatures"])
+    else:
+        unexpected_violations, missing_baseline_violations = baseline_differences(
+            report, categories, None,
+        )
     audit["baseline"] = {
         "path": str(args.baseline.resolve()),
         "unexpected_violations": unexpected_violations,
         "missing_accepted_violations": missing_baseline_violations,
         "missing_required_zones": missing_required_zones,
     }
+    audit["baseline_pass"] = not (
+        unexpected_violations or missing_baseline_violations or missing_required_zones
+    )
+    audit["release_pass"] = audit["baseline_pass"] and not FATAL_CATEGORIES.intersection(categories)
     args.audit_json.parent.mkdir(parents=True, exist_ok=True)
     args.audit_json.write_text(
         json.dumps(audit, ensure_ascii=False, indent=2) + "\n",
@@ -357,7 +413,8 @@ def main() -> int:
                 "in1_non_ground_segments": audit["in1_non_ground_segments"],
                 "zones": audit["zones"],
                 "drc_categories": audit["drc_categories"],
-                "baseline_pass": not unexpected_violations and not missing_required_zones,
+                "baseline_pass": audit["baseline_pass"],
+                "release_pass": audit["release_pass"],
                 "longest_routed_nets": [
                     {
                         "net": item["net"],
@@ -376,21 +433,9 @@ def main() -> int:
         )
     )
 
-    fatal_categories = {
-        "shorting_items",
-        "clearance",
-        "tracks_crossing",
-        "track_dangling",
-        "via_dangling",
-        "via_diameter",
-        "drill_out_of_range",
-        "annular_width",
-        "hole_clearance",
-        "copper_edge_clearance",
-    }
-    if fatal_categories.intersection(categories):
+    if FATAL_CATEGORIES.intersection(categories):
         return 2
-    if unexpected_violations or missing_required_zones:
+    if unexpected_violations or missing_baseline_violations or missing_required_zones:
         return 4
     if args.require_in1_ground and audit["in1_non_ground_segments"] != 0:
         return 3

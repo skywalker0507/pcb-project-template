@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "active": "two_layer",
+  "profiles": {
+    "two_layer": {
+      "copper_layers": [
+        "F.Cu",
+        "B.Cu"
+      ],
+      "forbidden_signal_layers": [],
+      "gerber_layers": [
+        "F.Cu",
+        "B.Cu",
+        "F.Paste",
+        "B.Paste",
+        "F.Silkscreen",
+        "B.Silkscreen",
+        "F.Mask",
+        "B.Mask",
+        "Edge.Cuts"
+      ]
+    },
+    "four_layer": {
+      "inner_layer_intent": "In1.Cu and In2.Cu are reserved planes in this template; KRT must not route signals there.",
+      "copper_layers": [
+        "F.Cu",
+        "In1.Cu",
+        "In2.Cu",
+        "B.Cu"
+      ],
+      "forbidden_signal_layers": [
+        "In1.Cu",
+        "In2.Cu"
+      ],
+      "gerber_layers": [
+        "F.Cu",
+        "In1.Cu",
+        "In2.Cu",
+        "B.Cu",
+        "F.Paste",
+        "B.Paste",
+        "F.Silkscreen",
+        "B.Silkscreen",
+        "F.Mask",
+        "B.Mask",
+        "Edge.Cuts"
+      ]
+    }
+  },
+  "notes": [
+    "This file controls layer presence only; it deliberately contains no fabrication widths, clearances, or impedance values.",
+    "A manufacturer-specific profile must be selected and reviewed separately before routing or release."
+  ]
+}

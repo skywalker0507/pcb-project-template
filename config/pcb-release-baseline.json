@@ -3,6 +3,7 @@
   "expected_category_counts": {},
   "required_zones": [],
   "notes": [
-    "Start empty. Add only independently reviewed DRC objects."
+    "Start empty: every DRC object, including unconnected items, fails release.",
+    "Add only exact independently reviewed DRC objects to allowed_violation_items."
   ]
 }

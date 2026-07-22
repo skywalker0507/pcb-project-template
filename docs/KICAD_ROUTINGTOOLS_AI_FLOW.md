@@ -8,7 +8,8 @@ checkout. All project policy and automation live outside that directory:
 - `config/krt-fab-overrides.txt`: exact reviewed fabrication floor, which also
   disables the upstream router's automatic standard-to-advanced escalation;
 - `scripts/krt_flow.py`: compact check/route interface;
-- `scripts/init_project.py`: unified atopile, Houtini and KRT initializer.
+- `scripts/init_project.py`: project MCP configuration only;
+- `scripts/record_toolchain_receipt.py`: records a manually installed toolchain.
 
 ## AI usage protocol
 
@@ -60,10 +61,10 @@ lists live only in report files.
 python scripts/init_project.py --project-name new-board
 ```
 
-The initializer fetches the latest configured KRT branch from
-`config/toolchain-policy.json`, records its resolved commit, creates an
-isolated Python environment and builds the matching latest native router. Fill
-the profile's `null` numeric values only after
+Manually fetch the configured KRT branch from `config/toolchain-policy.json`,
+create the isolated Python environment and build the matching native router as
+upstream directs. Then run `record_toolchain_receipt.py`. Fill the profile's
+`null` numeric values only after
 reviewing the new project's KiCad rules; routing intentionally refuses to run
 while they remain unset.
 
@@ -79,9 +80,6 @@ rules. This repository's isolated experiment snapshots intentionally lack that
 companion file, so its specialized config permits them only because the
 reviewed project audit remains authoritative.
 
-The initializer also installs durable AI instructions. If the target has no
-`AGENTS.md`, it creates one; otherwise it writes
-`docs/AGENTS_KRT_FLOW_FRAGMENT.md` for deliberate merging without overwriting
-existing project rules. Identical input/net/parameter attempts are limited to
-two by default; change the routing policy or inspect the prior report instead
-of blindly repeating the same run.
+The repository supplies durable AI instructions in `AGENTS.md`. Identical
+input/net/parameter attempts are limited to two by default; change the routing
+policy or inspect the prior report instead of blindly repeating the same run.

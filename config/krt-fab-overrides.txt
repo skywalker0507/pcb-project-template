@@ -1,7 +1,3 @@
-# Fill these from reviewed KiCad/fabricator rules before routing.
-# Supplying this file disables automatic standard -> advanced escalation.
-via_diameter = 0.60
-via_drill = 0.30
-clearance = 0.20
-track_width = 0.20
-hole_to_hole = 0.25
+# Intentionally empty until a reviewed manufacturing profile supplies values.
+# Do not add values without a manufacturer source recorded in
+# config/manufacturing-profile.json.

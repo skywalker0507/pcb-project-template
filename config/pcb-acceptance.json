@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "release": {
+    "requires": ["release_pass", "board_sha256_match", "drc_zero_unconnected", "manufacturing_profile_selected", "review_pass", "review_receipt_matches_policy"],
+    "prohibits": ["route_ok_as_release_evidence", "stale_audit_receipt"]
+  },
+  "routing_candidate": {
+    "requires": ["separate_candidate", "input_sha256_preserved", "project_rules_preserved", "no_forbidden_signal_layers", "candidate_audit_pass"],
+    "does_not_prove": ["manufacturing_ready", "placement_review", "return_path_review", "release_pass"]
+  },
+  "context": {
+    "unverified_without_audit": true,
+    "does_not_prove": ["release_pass", "drc_clean"]
+  }
+}

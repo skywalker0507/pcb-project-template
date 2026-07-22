@@ -9,6 +9,10 @@ from pathlib import Path
 import subprocess
 import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from pcb_policy import load_acceptance, require_no_prohibited_evidence
+from create_houtini_job import create_job
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -66,9 +70,15 @@ def main() -> int:
     audit_config = config["audit"]
     context_config = config["context"]
     manufacturing_config = config["manufacturing"]
+    acceptance_path = ROOT / config.get("acceptance", "config/pcb-acceptance.json")
+    release_rules = load_acceptance(acceptance_path, "release", {
+        "release_pass", "board_sha256_match", "drc_zero_unconnected", "manufacturing_profile_selected",
+    })
+    require_no_prohibited_evidence(release_rules, {"matching_release_audit"})
     board = str(ROOT / project["board"])
 
     commands: list[tuple[str, list[str]]] = []
+    commands.append(("compile-design-policy", [sys.executable, "scripts/compile_design_policy.py"]))
     if args.build:
         commands.append(
             (
@@ -135,6 +145,8 @@ def main() -> int:
                     str(ROOT / manufacturing_config["output"]),
                     "--log",
                     str(ROOT / manufacturing_config["log"]),
+                    "--acceptance",
+                    str(acceptance_path),
                 ],
             )
         )
@@ -149,9 +161,17 @@ def main() -> int:
     audit = next((item["data"] for item in steps if item["name"] == "kicad-audit"), None)
     context = next((item["data"] for item in steps if item["name"] == "pcb-context"), None)
     failed = next((item for item in steps if not item["success"]), None)
+    delegation = None
+    if failed:
+        delegation = create_job(
+            [Path(str(failed["log"]))], "pipeline_failure",
+            f"The deterministic pipeline stopped at {failed['name']} with exit code {failed['exit_code']}.",
+            job_name=f"pipeline-{failed['name']}",
+        )
     summary = {
         "success": len(steps) == len(commands) and all(item["success"] for item in steps),
         "requested": {"build": args.build, "export": args.export},
+        "acceptance": {"path": str(acceptance_path), "release_requires": release_rules.get("requires", [])},
         "board_sha256": audit.get("board_sha256") if isinstance(audit, dict) else None,
         "in1_track_segments": audit.get("in1_non_ground_segments") if isinstance(audit, dict) else None,
         "drc_categories": audit.get("drc_categories") if isinstance(audit, dict) else None,
@@ -173,6 +193,7 @@ def main() -> int:
             "pcb_context": context.get("output") if isinstance(context, dict) else None,
             "logs": str(args.log_dir.resolve()),
         },
+        "delegation": delegation,
     }
     print(json.dumps(summary, ensure_ascii=False, separators=(",", ":")))
     return 0 if summary["success"] else 1

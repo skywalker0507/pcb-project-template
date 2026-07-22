@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "selected": false,
+  "manufacturer": null,
+  "source": null,
+  "notes": [
+    "Set selected=true only after choosing a manufacturer process and recording its authoritative source.",
+    "Do not add widths, clearances, impedance, or stackup values here without reviewed manufacturer evidence."
+  ]
+}

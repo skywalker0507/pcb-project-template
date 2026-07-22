@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "enabled": true,
+  "minimum_total_input_bytes": 16384,
+  "allowed_suffixes": [".log", ".rpt", ".txt", ".json", ".md", ".csv"],
+  "forbidden_suffixes": [".kicad_pcb", ".kicad_sch", ".pdf", ".zip", ".png", ".jpg", ".jpeg", ".bin"],
+  "max_paths": 4,
+  "delegate": {
+    "kind": "summarize",
+    "thinking": "disabled",
+    "max_tokens": 1200,
+    "max_chars": 4800,
+    "output_contract": "Return JSON only: classification, open_items (at most 8), evidence (path:line), unknowns. Do not recommend electrical, routing, DRC waiver, or release decisions."
+  }
+}
