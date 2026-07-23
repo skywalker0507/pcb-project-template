@@ -16,6 +16,11 @@ It combines:
 
 ## Create a project
 
+The workflow shows stable labels `01-requirements`, `02-electrical`,
+`03-physical`, `04-routing`, and `05-release`. These are navigation labels,
+not directory names: use `python scripts/stage_doctor.py` to see the current
+stage's authoritative files and allowed commands.
+
 Create a new repository from this GitHub template, clone it, then run:
 
 ```text
@@ -69,6 +74,12 @@ layer stack, manufacturing evidence, KRT policy, and acceptance rules. Changing
 any of those inputs invalidates it. A release additionally needs a SHA-bound
 physical review created by `record_physical_review.py`; `release_pass` alone is
 not sufficient.
+
+`apply_reviewed_fab_values.py` records canonical KRT names (`via_size`, not
+`via_diameter`). Compilation emits KRT, DFM and KiCad-rule artifacts under
+`build/`. Before a real KRT run on current KRT versions, explicitly synchronize
+the reviewed Default netclass using `apply_kicad_rules.py --board <board>`;
+the command is stage guarded and writes a receipt.
 
 After an intentional JLCPCB export, run `check_jlcpcb_release.py --package <export-dir> --output build/reports/jlc-package-check.json` for a compact Gerber/drill/BOM/CPL sanity receipt. It is not release approval. Only after that receipt and the matching audit have passed, create a non-overwriting evidence snapshot with `create_release_snapshot.py --package <export-dir> --package-check build/reports/jlc-package-check.json`.
 

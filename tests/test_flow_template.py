@@ -29,6 +29,7 @@ jlc_check = load("jlc_check_template", "scripts/check_jlcpcb_release.py")
 snapshot = load("snapshot_template", "scripts/create_release_snapshot.py")
 houtini_job = load("houtini_job_template", "scripts/create_houtini_job.py")
 design_policy = load("design_policy_template", "scripts/design_policy.py")
+fab_values = load("fab_values_template", "scripts/apply_reviewed_fab_values.py")
 
 
 class FlowTemplateTests(unittest.TestCase):
@@ -179,6 +180,11 @@ class FlowTemplateTests(unittest.TestCase):
             self.assertTrue(export.require_passing_physical_review(board, review, {"policy_sha256": "policy"})["review_pass"])
             with self.assertRaises(SystemExit):
                 export.require_passing_physical_review(board, review, {"policy_sha256": "changed"})
+
+    def test_fabrication_values_use_krt_via_size_name(self) -> None:
+        self.assertEqual(fab_values.parse_value("via_size=0.6"), ("via_size", 0.6))
+        with self.assertRaises(Exception):
+            fab_values.parse_value("via_diameter=0.6")
 
 
 if __name__ == "__main__":

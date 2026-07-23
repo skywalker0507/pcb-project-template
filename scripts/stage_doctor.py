@@ -15,6 +15,8 @@ def main() -> int:
     stage = current_stage()
     checklist = json.loads((ROOT / "config/stage-checklist.json").read_text(encoding="utf-8"))
     rules = checklist.get("stages", {}).get(stage["stage"], {})
+    number = rules.get("number")
+    label = f"{int(number):02d}-{stage['stage']}" if isinstance(number, int) else str(stage["stage"])
     blockers: list[str] = []
     next_command: str | None
     if stage.get("status") == "blocked_external_dependency":
@@ -40,15 +42,16 @@ def main() -> int:
     allowed_commands = {
         "requirements": ["validate_requirements", "create_stage_handoff"],
         "electrical": ["check_pcb_environment", "build_atopile_isolated", "create_stage_handoff"],
-        "physical": ["compile_design_policy", "run_pcb_pipeline", "record_physical_review", "create_stage_handoff"],
-        "routing": ["compile_design_policy", "krt_flow check", "krt_flow route", "run_freerouting_headless", "record_physical_review"],
+        "physical": ["compile_design_policy", "apply_kicad_rules", "run_pcb_pipeline", "record_physical_review", "create_stage_handoff"],
+        "routing": ["compile_design_policy", "apply_kicad_rules", "krt_flow check", "krt_flow route", "run_freerouting_headless", "record_physical_review"],
         "release": ["compile_design_policy", "record_physical_review", "run_pcb_pipeline --export", "create_release_snapshot"],
     }.get(stage["stage"], [])
     print(json.dumps({
-        "success": not blockers, "stage": stage["stage"], "status": stage.get("status"),
+        "success": not blockers, "stage": stage["stage"], "stage_number": number, "stage_label": label, "status": stage.get("status"),
         "blockers": blockers, "required_evidence": rules.get("required_evidence", []),
         "forbidden": rules.get("forbidden", []), "next_command": next_command,
         "allowed_commands": allowed_commands,
+        "stage_files": rules.get("files", []),
     }, separators=(",", ":")))
     return 0 if not blockers else 1
 

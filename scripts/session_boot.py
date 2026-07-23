@@ -21,15 +21,20 @@ def main() -> int:
     stack = load(ROOT / "config/board-stack.json")
     requirements = load(ROOT / "config/requirements.json")
     stage_rules = checklist.get("stages", {}).get(stage.get("stage"), {})
+    number = stage_rules.get("number")
+    label = f"{int(number):02d}-{stage.get('stage')}" if isinstance(number, int) else stage.get("stage")
     result = {
         "schema": 1,
         "stage": stage.get("stage"),
+        "stage_number": number,
+        "stage_label": label,
         "status": stage.get("status"),
         "objective": stage.get("objective"),
         "open_items": stage.get("open_items", [])[:8],
         "next_actions": stage.get("next_actions", [])[:8],
         "forbidden": stage_rules.get("forbidden", []),
         "required_evidence": stage_rules.get("required_evidence", []),
+        "stage_files": stage_rules.get("files", []),
         "board_stack": stack.get("active"),
         "release_requires": (acceptance.get("release") or {}).get("requires", []),
         "requirements_issues": problems(requirements)[:8],

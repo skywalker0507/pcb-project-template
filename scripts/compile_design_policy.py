@@ -7,7 +7,7 @@ import argparse
 import json
 from pathlib import Path
 
-from design_policy import DEFAULT_OUTPUT, write_policy
+from design_policy import DEFAULT_OUTPUT, DFM_ARTIFACT, KICAD_ARTIFACT, KRT_ARTIFACT, write_policy
 
 
 def main() -> int:
@@ -15,7 +15,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args()
     policy = write_policy(args.output.resolve())
-    print(json.dumps({"success": True, "output": str(args.output.resolve()), "policy_sha256": policy["policy_sha256"], "capabilities": policy["capabilities"], "issues": policy["issues"]}, separators=(",", ":")))
+    print(json.dumps({"success": True, "output": str(args.output.resolve()), "policy_sha256": policy["policy_sha256"], "capabilities": policy["capabilities"], "issues": policy["issues"], "artifacts": {"krt": str(KRT_ARTIFACT), "dfm": str(DFM_ARTIFACT), "kicad": str(KICAD_ARTIFACT)}}, separators=(",", ":")))
     return 0
 
 

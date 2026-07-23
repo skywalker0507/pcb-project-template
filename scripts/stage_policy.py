@@ -12,6 +12,7 @@ ALLOWED = {
     "route": {"routing"},
     "candidate_route": {"physical", "routing"},
     "record_review": {"physical", "routing", "release"},
+    "apply_rules": {"physical", "routing"},
     "export": {"release"},
 }
 

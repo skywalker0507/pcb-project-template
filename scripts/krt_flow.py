@@ -589,8 +589,15 @@ def command_route(args: argparse.Namespace) -> int:
     })
     if not args.dry_run:
         require_operation("route")
-        require_policy("candidate_routing")
+        resolved_policy = require_policy("candidate_routing")
         reviewed_routing_rules(resolve(root, config["manufacturing_profile"]))
+        resolved_routing = resolved_policy.get("routing", {}).get("krt", {})
+        if not isinstance(resolved_routing, dict):
+            raise SystemExit("Resolved design policy has no KRT routing artifact")
+        profile["routing"].update(resolved_routing)
+        # The configured KRT revision does not support a generic overrides file.
+        # Values are passed as reviewed explicit flags from the resolved policy.
+        profile["routing"]["fab_overrides"] = None
     if output == source:
         raise SystemExit("Output must be a separate candidate; in-place routing is forbidden")
     if output.exists() and not args.force:

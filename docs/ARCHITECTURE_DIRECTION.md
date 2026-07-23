@@ -83,7 +83,8 @@ board or long log.
 1. Strengthen the requirements schema and validate required evidence before the
    physical stage.
 2. Implement `compile_design_policy.py` to produce one SHA-bound resolved
-   policy from requirements, board stack, and reviewed manufacturing values.
+   policy plus KRT, DFM, and KiCad-rule artifacts from requirements, board stack,
+   and reviewed manufacturing values.
 3. Make KRT, DFM, handoff, and export reject stale or missing resolved policy.
 4. Evolve `stage_doctor` into a small command bus with explicit allowed
    commands and evidence gaps per stage.

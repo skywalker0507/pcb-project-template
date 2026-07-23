@@ -124,6 +124,8 @@ def main() -> int:
     stage_rules = checklist.get("stages", {}).get(args.stage)
     if not isinstance(stage_rules, dict):
         raise SystemExit(f"Unknown stage {args.stage!r}; use a key from {checklist_path}")
+    stage_number = stage_rules.get("number")
+    stage_label = f"{int(stage_number):02d}-{args.stage}" if isinstance(stage_number, int) else args.stage
     limit = int(config["handoff"].get("max_open_items", 8))
     if len(args.open_item) > limit or len(args.next_action) > limit:
         raise SystemExit(f"Handoff lists are limited to {limit} items")
@@ -152,12 +154,15 @@ def main() -> int:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "project": config["project"]["name"],
         "stage": args.stage,
+        "stage_number": stage_number,
+        "stage_label": stage_label,
         "status": args.status,
         "objective": args.objective,
         "stage_rules": {
             "required_evidence": stage_rules.get("required_evidence", []),
             "forbidden": stage_rules.get("forbidden", []),
         },
+        "stage_files": stage_rules.get("files", []),
         "source_sha256": tree_hash([ROOT / "ato.yaml", ROOT / "src"]),
         "board_sha256": (
             hashlib.sha256(board_path.read_bytes()).hexdigest().upper()
@@ -194,7 +199,7 @@ def main() -> int:
     markdown.write_text(
         "\n".join(
             [
-                f"# {config['project']['name']} — Stage {args.stage}",
+                f"# {config['project']['name']} — Stage {stage_label}",
                 "",
                 f"- Status: {args.status}",
                 f"- Objective: {args.objective}",

@@ -10,6 +10,10 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "build/design-policy-resolved.json"
+KRT_ARTIFACT = ROOT / "build/design-policy-krt.json"
+DFM_ARTIFACT = ROOT / "build/design-policy-dfm.json"
+KICAD_ARTIFACT = ROOT / "build/design-policy-kicad-rules.json"
+ROUTING_REQUIRED = {"track_width", "clearance", "via_size", "via_drill"}
 INPUTS = {
     "requirements": ROOT / "config/requirements.json",
     "board_stack": ROOT / "config/board-stack.json",
@@ -53,6 +57,17 @@ def blocking_unknowns(requirements: dict[str, Any]) -> list[str]:
     return blockers
 
 
+def canonical_routing_values(values: object) -> dict[str, float]:
+    if not isinstance(values, dict):
+        return {}
+    result = dict(values)
+    # Profile schema v1 used via_diameter. Accept it only as a read migration;
+    # all generated artifacts and newly written profiles use KRT's via_size.
+    if "via_diameter" in result and "via_size" not in result:
+        result["via_size"] = result.pop("via_diameter")
+    return {str(name): float(value) for name, value in result.items()}
+
+
 def compile_policy() -> dict[str, Any]:
     values = {name: read_json(path, name.replace("_", " ")) for name, path in INPUTS.items()}
     requirements = values["requirements"]
@@ -72,13 +87,13 @@ def compile_policy() -> dict[str, Any]:
     krt_layers = outer.get("layers") if isinstance(outer, dict) else None
     requirements_ready = requirements.get("status") == "reviewed" and not blocking_unknowns(requirements)
     routing_rules = profile.get("routing_rules") if isinstance(profile.get("routing_rules"), dict) else {}
-    reviewed_values = routing_rules.get("values") if isinstance(routing_rules, dict) else {}
+    reviewed_values = canonical_routing_values(routing_rules.get("values") if isinstance(routing_rules, dict) else {})
     routing_ready = (
         requirements_ready
         and profile.get("selected") is True
         and routing_rules.get("reviewed") is True
         and isinstance(reviewed_values, dict)
-        and {"track_width", "clearance", "via_diameter", "via_drill"}.issubset(reviewed_values)
+        and ROUTING_REQUIRED.issubset(reviewed_values)
         and krt_layers == signal_layers
     )
     issues: list[str] = []
@@ -121,6 +136,13 @@ def compile_policy() -> dict[str, Any]:
             "routing_values": reviewed_values if isinstance(reviewed_values, dict) else {},
             "evidence": routing_rules.get("evidence", []) if isinstance(routing_rules, dict) else [],
         },
+        "routing": {
+            "krt": {
+                key: reviewed_values.get(key)
+                for key in ("track_width", "clearance", "via_size", "via_drill", "hole_to_hole_clearance", "board_edge_clearance")
+            },
+            "kicad_default_netclass": {"clearance": reviewed_values.get("clearance")},
+        },
         "capabilities": {
             "physical": requirements_ready,
             "candidate_routing": routing_ready,
@@ -141,6 +163,14 @@ def write_policy(path: Path = DEFAULT_OUTPUT) -> dict[str, Any]:
     policy["policy_sha256"] = policy_sha256(policy)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(policy, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    artifacts = {
+        KRT_ARTIFACT: {"schema": 1, "policy_sha256": policy["policy_sha256"], "routing": policy["routing"]["krt"]},
+        DFM_ARTIFACT: {"schema": 1, "policy_sha256": policy["policy_sha256"], "rules": policy["routing"]["krt"]},
+        KICAD_ARTIFACT: {"schema": 1, "policy_sha256": policy["policy_sha256"], "default_netclass": policy["routing"]["kicad_default_netclass"]},
+    }
+    for artifact, value in artifacts.items():
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return policy
 
 

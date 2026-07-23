@@ -11,7 +11,7 @@ from pcb_policy import read_object, selected_manufacturing_profile, valid_source
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ALLOWED = {"via_diameter", "via_drill", "clearance", "track_width", "hole_to_hole"}
+ALLOWED = {"via_size", "via_drill", "clearance", "track_width", "hole_to_hole_clearance", "board_edge_clearance"}
 
 
 def parse_value(value: str) -> tuple[str, float]:
@@ -35,7 +35,6 @@ def main() -> int:
     parser.add_argument("--evidence", action="append", required=True, help="Source page/section or local-file locator for the reviewed values")
     parser.add_argument("--source", help="Must match the selected source unless intentionally changed")
     parser.add_argument("--profile", type=Path, default=ROOT / "config/manufacturing-profile.json")
-    parser.add_argument("--overrides", type=Path, default=ROOT / "config/krt-fab-overrides.txt")
     args = parser.parse_args()
     profile_path = args.profile.resolve()
     profile = selected_manufacturing_profile(profile_path)
@@ -48,13 +47,7 @@ def main() -> int:
         raise SystemExit("At least one non-empty --evidence is required")
     profile["routing_rules"] = {"reviewed": True, "source": source, "values": values, "evidence": evidence}
     profile_path.write_text(json.dumps(profile, indent=2) + "\n", encoding="utf-8")
-    overrides = args.overrides.resolve()
-    overrides.write_text("\n".join(f"{key} = {value:g}" for key, value in sorted(values.items())) + "\n", encoding="utf-8")
-    krt_path = ROOT / "config/kicad-routing-tools.json"
-    krt = read_object(krt_path, "KRT policy")
-    krt["profiles"]["outer_low_risk"]["routing"]["fab_overrides"] = str(overrides.relative_to(ROOT).as_posix())
-    krt_path.write_text(json.dumps(krt, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"success": True, "profile": str(profile_path), "overrides": str(overrides), "values": values, "evidence": evidence}, separators=(",", ":")))
+    print(json.dumps({"success": True, "profile": str(profile_path), "values": values, "evidence": evidence, "next": "Run python scripts/compile_design_policy.py; KRT reads its generated artifact, not this profile directly."}, separators=(",", ":")))
     return 0
 
 
