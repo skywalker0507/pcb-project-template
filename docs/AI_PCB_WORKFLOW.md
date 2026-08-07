@@ -27,7 +27,9 @@ The machine-readable stage checklist is authoritative for completion evidence an
 After board changes, run `python scripts/run_pcb_pipeline.py`. After electrical
 source changes, run it with `--build`: this creates only an isolated electrical
 candidate, then stops so it cannot audit or export a stale reviewed board.
-Deliberately import and review the candidate before running the normal KiCad
+Run `review_electrical_candidate.py --receipt <electrical-build.json> --output
+<new-review-directory>` to generate independent candidate DRC and render
+evidence. Deliberately import and review the candidate before running the normal KiCad
 pipeline. Add `--export` only after review when manufacturing output is
 intentionally regenerated.
 

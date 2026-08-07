@@ -27,7 +27,8 @@ longer exposes the required DSN/SES round trip through `kicad-cli`.
 
 ## Project policy
 
-- atopile is the schematic and electrical-design authority; do not use
+- The selected backend in `config/electrical-backend.json` is the electrical
+  authority (tscircuit by default; atopile only as its legacy adapter); do not use
   Konnect to edit generated schematics or instantiate reference circuits;
 - use Konnect only with the intended board open in KiCad and the KiCad API
   enabled;
@@ -36,6 +37,24 @@ longer exposes the required DSN/SES round trip through `kicad-cli`.
 - run `python scripts/run_pcb_pipeline.py` after live edits;
 - DRC success does not waive return-path, impedance, mechanical or fabrication
   review.
+
+## tscircuit handoff
+
+tscircuit produces Circuit JSON, a KiCad schematic, a KiCad PCB candidate and
+a local footprint library in an isolated `build/generated/tscircuit/` directory.
+It is not a live KiCad editor and it is not a replacement for Konnect. Use the
+candidate as the electrical starting point; use Konnect only after intentionally
+opening the intended KiCad board with its API socket available.
+
+Before an import, run independent review evidence:
+
+```text
+python scripts/review_electrical_candidate.py --receipt <electrical-build.json> --output <new-review-directory>
+```
+
+The command fails on any DRC violation or unconnected item, renders the candidate
+for visual inspection, and always leaves `release_ready=false`. Do not suppress
+or baseline candidate warnings merely to make this command pass.
 
 The generated MCP command uses `scripts/start_konnect_mcp.py`. On a new PC it
 creates only Konnect's `~/.konnect/.installed` marker, preventing Konnect's

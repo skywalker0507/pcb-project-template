@@ -53,8 +53,8 @@ verifying the configured value equals the KiCad Default netclass. `route_ok` is 
 
 Konnect replaces KiCAD-MCP-Server and is complementary to KRT. Use it only for
 live KiCad placement, explicit trace/via edits, queries and visual iteration.
-Do not use its schematic-writing or reference-circuit tools: atopile remains
-the electrical authority. Do not use Konnect's natural-language design audits
+Do not use its schematic-writing or reference-circuit tools: the selected
+electrical backend remains the electrical authority. Do not use Konnect's natural-language design audits
 as evidence for numeric rules or release approval. Its current `autoroute`
 tool is unavailable on KiCad 10; use the guarded KRT/FreeRouting candidate
 flows and run the deterministic audit afterward.

@@ -60,6 +60,11 @@ python scripts/check_pcb_environment.py --deep
 `--deep` includes a selected-backend smoke check and KRT capability check. A
 passing router check is not PCB release approval.
 
+The initial tscircuit entry and reviewed requirements record are a deliberately
+non-manufacturing, one-resistor smoke test. Replace both with the actual product
+requirements and design before selecting parts, opening a physical layout, or
+creating manufacturing artifacts.
+
 Before each new session, run `python scripts/session_boot.py`; it replaces opening the whole board or long logs by default. Use `python scripts/select_manufacturing_profile.py --manufacturer <name> --source <URL-or-card>` to record a reviewed process source before manufacturing export; this command does not invent fabrication values.
 
 Selecting a source does not authorize real routing. After reviewing it, record explicit values and evidence with `apply_reviewed_fab_values.py`; only then can a non-dry-run KRT attempt proceed.
@@ -90,6 +95,16 @@ Use `python scripts/stage_doctor.py` at session start. It returns the current st
 Manufacturing exports are SHA-bound to a passing KiCad release-audit receipt. Use
 `run_pcb_pipeline.py --export`; invoking the export script directly also
 requires the matching audit JSON and cannot bypass DRC approval.
+
+After `python scripts/run_pcb_pipeline.py --build`, independently inspect the
+new candidate (substitute the receipt path printed by the build):
+
+```text
+python scripts/review_electrical_candidate.py --receipt build/generated/tscircuit/<build>/electrical-build.json --output build/reports/electrical-candidate-review/<build>
+```
+
+This review intentionally fails on any KiCad DRC violation or unconnected item,
+renders the candidate, and never makes it manufacturing-ready.
 
 ## Project layout
 
