@@ -28,7 +28,7 @@ def main() -> int:
         next_command = "python scripts/validate_requirements.py" if blockers else "python scripts/validate_requirements.py --require-reviewed"
     else:
         commands = {
-            "electrical": "python scripts/check_pcb_environment.py --tier standard",
+            "electrical": "python scripts/build_electrical.py --backend tscircuit",
             "physical": "python scripts/compile_design_policy.py",
             "routing": "python scripts/krt_flow.py check --input elec/layout/default/default.kicad_pcb",
             "release": "python scripts/run_pcb_pipeline.py --export",
@@ -41,7 +41,7 @@ def main() -> int:
                 blockers = list(policy["capability_issues"][capability])[:8]
     allowed_commands = {
         "requirements": ["validate_requirements", "create_stage_handoff"],
-        "electrical": ["check_pcb_environment", "build_atopile_isolated", "create_stage_handoff"],
+        "electrical": ["check_pcb_environment", "build_electrical", "create_stage_handoff"],
         "physical": ["compile_design_policy", "apply_kicad_rules", "run_pcb_pipeline", "record_physical_review", "create_stage_handoff"],
         "routing": ["compile_design_policy", "apply_kicad_rules", "krt_flow check", "krt_flow route", "run_freerouting_headless", "record_physical_review"],
         "release": ["compile_design_policy", "record_physical_review", "run_pcb_pipeline --export", "create_release_snapshot"],

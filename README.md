@@ -1,10 +1,11 @@
 # AI PCB project template
 
-Token-efficient, reproducible atopile and KiCad project template for Codex.
+Token-efficient, reproducible tscircuit-first and KiCad project template for Codex.
 It combines:
 
-- the latest atopile release installed and built in WSL;
-- a project-scoped atopile MCP bridge;
+- a native Windows tscircuit/Bun electrical backend that emits Circuit JSON and
+  isolated KiCad candidates;
+- an optional, removable atopile compatibility adapter;
 - the latest `pcb-ai-adapter` branch of the Houtini-LM fork;
 - the project-maintained KiCadRoutingTools `codex/repository-support` checkout
   behind a guarded adapter;
@@ -40,9 +41,10 @@ network is reliable, then record their local versions and hashes with
 `python scripts/record_toolchain_receipt.py`. API keys are never written to the
 repository.
 
-System prerequisites are Git, Python 3.10+, Node.js 18+, Java 25, WSL Ubuntu
-and KiCad 10. The environment check reports missing prerequisites and manual
-remediation steps without changing the machine.
+System prerequisites are Git, Python 3.10+, Node.js 18+, Bun, Java 25 and
+KiCad 10. WSL Ubuntu and atopile are only needed when deliberately selecting
+the legacy atopile backend. The environment check reports missing prerequisites
+and manual remediation steps without changing the machine.
 
 Konnect replaces the old KiCAD-MCP-Server integration. It is complementary to
 KRT: Konnect's routing tools add explicit trace/via geometry through the live
@@ -55,7 +57,7 @@ Restart Codex after initialization. `--tier minimal` is sufficient to begin requ
 python scripts/check_pcb_environment.py --deep
 ```
 
-`--deep` includes a real atopile smoke build and KRT capability check. A
+`--deep` includes a selected-backend smoke check and KRT capability check. A
 passing router check is not PCB release approval.
 
 Before each new session, run `python scripts/session_boot.py`; it replaces opening the whole board or long logs by default. Use `python scripts/select_manufacturing_profile.py --manufacturer <name> --source <URL-or-card>` to record a reviewed process source before manufacturing export; this command does not invent fabrication values.
@@ -91,7 +93,8 @@ requires the matching audit JSON and cannot bypass DRC approval.
 
 ## Project layout
 
-- `src/`: single electrical design authority;
+- `tscircuit/`: default electrical design authority and locked native toolchain;
+- `src/` and `ato.yaml`: optional legacy atopile source only;
 - `elec/layout/`: single KiCad layout authority;
 - `config/`: reviewed project and tool policy;
 - `scripts/`: deterministic project-local workflow;

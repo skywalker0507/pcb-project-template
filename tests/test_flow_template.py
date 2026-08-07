@@ -30,9 +30,24 @@ snapshot = load("snapshot_template", "scripts/create_release_snapshot.py")
 houtini_job = load("houtini_job_template", "scripts/create_houtini_job.py")
 design_policy = load("design_policy_template", "scripts/design_policy.py")
 fab_values = load("fab_values_template", "scripts/apply_reviewed_fab_values.py")
+electrical_backend = load("electrical_backend_template", "scripts/electrical_backend.py")
 
 
 class FlowTemplateTests(unittest.TestCase):
+    def test_tscircuit_is_the_default_native_electrical_backend(self) -> None:
+        config = electrical_backend.read_config()
+        name, backend = electrical_backend.selected_backend(config)
+        self.assertEqual(name, "tscircuit")
+        self.assertEqual(backend["platform"], "windows-native")
+        self.assertEqual(backend["status"], "primary")
+
+    def test_atopile_is_kept_as_a_separate_legacy_adapter(self) -> None:
+        config = electrical_backend.read_config()
+        name, backend = electrical_backend.selected_backend(config, "atopile")
+        self.assertEqual(name, "atopile")
+        self.assertEqual(backend["status"], "legacy")
+        self.assertEqual(backend["driver"], "scripts/build_atopile_isolated.py")
+
     def test_stack_profiles_are_complete_and_distinct(self) -> None:
         stack = json.loads((ROOT / "config/board-stack.json").read_text(encoding="utf-8"))
         self.assertEqual(stack["profiles"]["two_layer"]["copper_layers"], ["F.Cu", "B.Cu"])

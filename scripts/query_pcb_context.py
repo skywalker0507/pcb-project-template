@@ -72,7 +72,7 @@ def main() -> int:
             "y_mm": item["y_mm"],
             "rotation_deg": item["rotation_deg"],
             "side": item["side"],
-            "atopile_address": item["atopile_address"],
+            "design_source_address": item["design_source_address"],
         }
         for item in context["components"]
     }
@@ -83,7 +83,7 @@ def main() -> int:
             "y_mm": item["y_mm"],
             "rotation_deg": item["rotation_deg"],
             "side": item["side"],
-            "atopile_address": item["atopile_address"],
+            "design_source_address": item["design_source_address"],
         }
         for item in context["components"]
         if item["ref"] in group_refs

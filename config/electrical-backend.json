@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "active": "tscircuit",
+  "contract": {
+    "candidate_root": "build/generated",
+    "required_artifacts": ["candidate_board", "circuit_json", "build_receipt"],
+    "invariant": "Electrical backends generate isolated candidates and must never overwrite elec/layout/default."
+  },
+  "backends": {
+    "tscircuit": {
+      "driver": "scripts/build_tscircuit_isolated.py",
+      "source_root": "tscircuit",
+      "entry": "src/main.tsx",
+      "runtime": "bun",
+      "platform": "windows-native",
+      "status": "primary"
+    },
+    "atopile": {
+      "driver": "scripts/build_atopile_isolated.py",
+      "source_root": "src",
+      "entry": "src/main.ato:App",
+      "runtime": "wsl-ato",
+      "platform": "compatibility-only",
+      "status": "legacy"
+    }
+  }
+}

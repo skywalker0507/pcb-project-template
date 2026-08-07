@@ -56,7 +56,7 @@ def main() -> int:
         type=Path,
         default=ROOT / "config/pcb-flow.json",
     )
-    parser.add_argument("--build", action="store_true", help="Run isolated WSL atopile build first.")
+    parser.add_argument("--build", action="store_true", help="Run the selected isolated electrical backend first.")
     parser.add_argument("--export", action="store_true", help="Regenerate JLCPCB core outputs after checks pass.")
     parser.add_argument(
         "--log-dir",
@@ -64,6 +64,8 @@ def main() -> int:
         default=ROOT / "build/logs/pcb-pipeline",
     )
     args = parser.parse_args()
+    if args.build and args.export:
+        raise SystemExit("A source build creates an unreviewed candidate; import/review it before a separate export attempt")
     args.log_dir.mkdir(parents=True, exist_ok=True)
     config = json.loads(args.config.read_text(encoding="utf-8"))
     project = config["project"]
@@ -82,74 +84,70 @@ def main() -> int:
     if args.build:
         commands.append(
             (
-                "atopile-build",
+                "electrical-build",
                 [
                     sys.executable,
-                    "scripts/build_atopile_isolated.py",
+                    "scripts/build_electrical.py",
                     "--build",
                     project["build_target"],
-                    "--board",
-                    board,
                 ],
             )
         )
-    for script in config.get("checks", []):
-        commands.append((Path(script).stem, [sys.executable, script]))
-    audit_command = [
-        sys.executable,
-        "scripts/audit_kicad_release.py",
-        "--board",
-        board,
-        "--baseline",
-        str(ROOT / audit_config["baseline"]),
-        "--routing-paths",
-        str(ROOT / audit_config["routing_paths"]),
-        "--audit-json",
-        str(ROOT / audit_config["audit_json"]),
-        "--drc-report",
-        str(ROOT / audit_config["drc_report"]),
-    ]
-    if audit_config.get("require_in1_ground", False):
-        audit_command.append("--require-in1-ground")
-    commands.extend(
-        [
-            (
-                "kicad-audit",
-                audit_command,
-            ),
-            (
-                "pcb-context",
-                [
-                    sys.executable,
-                    "scripts/extract_pcb_context.py",
-                    "--board",
-                    board,
-                    "--policy",
-                    str(ROOT / context_config["policy"]),
-                    "--output",
-                    str(ROOT / context_config["output"]),
-                ],
-            ),
+    else:
+        for script in config.get("checks", []):
+            commands.append((Path(script).stem, [sys.executable, script]))
+        audit_command = [
+            sys.executable,
+            "scripts/audit_kicad_release.py",
+            "--board",
+            board,
+            "--baseline",
+            str(ROOT / audit_config["baseline"]),
+            "--routing-paths",
+            str(ROOT / audit_config["routing_paths"]),
+            "--audit-json",
+            str(ROOT / audit_config["audit_json"]),
+            "--drc-report",
+            str(ROOT / audit_config["drc_report"]),
         ]
-    )
-    if args.export:
-        commands.append(
-            (
-                "jlcpcb-export",
-                [
-                    sys.executable,
-                    "scripts/export_jlcpcb_release.py",
-                    "--board",
-                    board,
-                    "--output",
-                    str(ROOT / manufacturing_config["output"]),
-                    "--log",
-                    str(ROOT / manufacturing_config["log"]),
-                    "--acceptance",
-                    str(acceptance_path),
-                ],
-            )
+        if audit_config.get("require_in1_ground", False):
+            audit_command.append("--require-in1-ground")
+        commands.extend(
+            [
+                ("kicad-audit", audit_command),
+                (
+                    "pcb-context",
+                    [
+                        sys.executable,
+                        "scripts/extract_pcb_context.py",
+                        "--board",
+                        board,
+                        "--policy",
+                        str(ROOT / context_config["policy"]),
+                        "--output",
+                        str(ROOT / context_config["output"]),
+                    ],
+                ),
+            ]
         )
+        if args.export:
+            commands.append(
+                (
+                    "jlcpcb-export",
+                    [
+                        sys.executable,
+                        "scripts/export_jlcpcb_release.py",
+                        "--board",
+                        board,
+                        "--output",
+                        str(ROOT / manufacturing_config["output"]),
+                        "--log",
+                        str(ROOT / manufacturing_config["log"]),
+                        "--acceptance",
+                        str(acceptance_path),
+                    ],
+                )
+            )
 
     steps = []
     for name, command in commands:
@@ -160,6 +158,7 @@ def main() -> int:
 
     audit = next((item["data"] for item in steps if item["name"] == "kicad-audit"), None)
     context = next((item["data"] for item in steps if item["name"] == "pcb-context"), None)
+    electrical = next((item["data"] for item in steps if item["name"] == "electrical-build"), None)
     failed = next((item for item in steps if not item["success"]), None)
     delegation = None
     if failed:
@@ -171,6 +170,8 @@ def main() -> int:
     summary = {
         "success": len(steps) == len(commands) and all(item["success"] for item in steps),
         "requested": {"build": args.build, "export": args.export},
+        "electrical_candidate": electrical,
+        "candidate_pending_review": args.build and not failed,
         "acceptance": {"path": str(acceptance_path), "release_requires": release_rules.get("requires", [])},
         "board_sha256": audit.get("board_sha256") if isinstance(audit, dict) else None,
         "in1_track_segments": audit.get("in1_non_ground_segments") if isinstance(audit, dict) else None,
@@ -188,6 +189,7 @@ def main() -> int:
             else None
         ),
         "artifacts": {
+            "electrical_receipt": electrical.get("receipt") if isinstance(electrical, dict) else None,
             "audit_json": audit.get("audit_json") if isinstance(audit, dict) else None,
             "drc_report": audit.get("drc_report") if isinstance(audit, dict) else None,
             "pcb_context": context.get("output") if isinstance(context, dict) else None,

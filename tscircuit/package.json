@@ -1,0 +1,19 @@
+{
+  "name": "pcb-project-template-tscircuit",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun run scripts/build.ts",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "dependencies": {
+    "circuit-json-to-kicad": "0.0.171",
+    "polygon-clipping": "0.15.7",
+    "react": "19.1.0",
+    "tscircuit": "0.0.2248"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.16",
+    "typescript": "5.9.3"
+  }
+}

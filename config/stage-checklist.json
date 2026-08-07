@@ -10,9 +10,9 @@
     },
     "electrical": {
       "number": 2,
-      "files": ["ato.yaml", "src/", "build/logs/atopile-build.log", "build/design-policy-resolved.json"],
-      "objective": "Validate atopile sources and part selections.",
-      "required_evidence": ["atopile build receipt when component data is available", "selected-part provenance"],
+      "files": ["config/electrical-backend.json", "tscircuit/", "build/generated/", "build/design-policy-resolved.json"],
+      "objective": "Validate selected electrical backend sources and part selections.",
+      "required_evidence": ["selected-backend electrical build receipt", "selected-part provenance"],
       "forbidden": ["manual schematic authority", "manufacturing_export"]
     },
     "physical": {

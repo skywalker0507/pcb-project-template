@@ -1,8 +1,18 @@
 {
   "schema": 2,
   "mode": "latest",
-  "atopile": {
-    "package": "atopile"
+  "electrical_backends": {
+    "tscircuit": {
+      "package": "tscircuit",
+      "runtime": "bun",
+      "lockfile": "tscircuit/bun.lock",
+      "kicad_converter": "circuit-json-to-kicad"
+    },
+    "atopile": {
+      "package": "atopile",
+      "runtime": "wsl",
+      "status": "legacy_compatibility"
+    }
   },
   "houtini_lm": {
     "repository": "https://github.com/skywalker0507/houtini-lm.git",

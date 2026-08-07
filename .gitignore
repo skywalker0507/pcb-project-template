@@ -2,6 +2,7 @@
 build/
 manufacturing/
 .venv-routingtools/
+tscircuit/node_modules/
 tools/KiCadRoutingTools/
 tools/houtini-lm/
 tools/freerouting/

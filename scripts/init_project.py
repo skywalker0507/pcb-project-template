@@ -69,13 +69,19 @@ def ensure_stage_bootstrap(project_name: str) -> Path:
     return path
 
 
-def configure_project(project_name: str, distro: str, force: bool, with_konnect: bool, layers: int) -> str:
+def configure_project(project_name: str, distro: str, force: bool, with_konnect: bool, layers: int, electrical_backend: str) -> str:
     flow_path = ROOT / "config/pcb-flow.json"
     flow = json.loads(flow_path.read_text(encoding="utf-8"))
     flow["project"]["name"] = project_name
     flow["manufacturing"]["output"] = f"manufacturing/jlcpcb/{project_name}-rev-a"
     flow_path.write_text(json.dumps(flow, indent=2) + "\n", encoding="utf-8")
     configure_board_stack(layers)
+    backend_path = ROOT / "config/electrical-backend.json"
+    backend_config = json.loads(backend_path.read_text(encoding="utf-8"))
+    if electrical_backend not in backend_config.get("backends", {}):
+        raise SystemExit(f"Unknown electrical backend: {electrical_backend}")
+    backend_config["active"] = electrical_backend
+    backend_path.write_text(json.dumps(backend_config, indent=2) + "\n", encoding="utf-8")
     project_file = ensure_kicad_project()
     stage_file = ensure_stage_bootstrap(project_name)
 
@@ -83,12 +89,13 @@ def configure_project(project_name: str, distro: str, force: bool, with_konnect:
     root_wsl = windows_to_wsl(ROOT)
     node = shutil.which("node") or r"C:\Program Files\nodejs\node.exe"
     houtini = ROOT / "tools/houtini-lm/dist/index.js"
-    config = f'''[mcp_servers.atopile]
+    config = f'''[mcp_servers.tscircuit]
 type = "stdio"
-command = 'C:\\Windows\\System32\\wsl.exe'
-args = ['-d', '{distro}', '--', 'bash', '-lc', 'cd {root_wsl} && exec ./scripts/start-atopile-mcp-wsl.sh']
+command = '{node}'
+args = ['{ROOT / ".codex/mcp/tscircuit-server.mjs"}']
 cwd = '{root_windows}'
 enabled = true
+env_vars = ["PCB_PYTHON", "BUN_BINARY"]
 startup_timeout_sec = 30
 tool_timeout_sec = 300
 
@@ -151,6 +158,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-name", default=ROOT.name)
     parser.add_argument("--distro", default="Ubuntu-24.04")
+    parser.add_argument("--electrical-backend", default="tscircuit", help="Backend from config/electrical-backend.json; tscircuit is the default.")
     parser.add_argument("--force-config", action="store_true")
     parser.add_argument("--check", action="store_true", help="Run the local readiness check after configuration.")
     parser.add_argument("--layers", type=int, choices=(2, 4), default=2, help="New-project copper layer preset; no fabrication values are implied.")
@@ -161,7 +169,7 @@ def main() -> int:
     args = parser.parse_args()
     policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
     with_konnect = bool(policy["konnect"].get("enabled_by_default", True)) if args.konnect is None else args.konnect
-    message = configure_project(args.project_name, args.distro, args.force_config, with_konnect, args.layers)
+    message = configure_project(args.project_name, args.distro, args.force_config, with_konnect, args.layers, args.electrical_backend)
 
     check_exit = None
     if args.check:
@@ -172,7 +180,8 @@ def main() -> int:
     print(json.dumps({
         "success": True,
         "project": args.project_name,
-            "configured_konnect": with_konnect,
+        "configured_konnect": with_konnect,
+        "electrical_backend": args.electrical_backend,
             "layers": args.layers,
         "message": message,
         "check_exit": check_exit,

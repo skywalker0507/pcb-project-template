@@ -16,7 +16,8 @@ LLMs are narrow-interface operators, never design or release authorities.
 1. `requirements.json` is the product-intent authority: interfaces, rails,
    current, mechanics, constraints, explicit unknowns, and requested
    manufacturer.
-2. Reviewed atopile sources are the electrical-realization authority.
+2. Reviewed sources from the selected electrical backend are the
+   electrical-realization authority; tscircuit is the template default.
 3. A reviewed manufacturer capability source is the numeric fabrication
    authority. Models must never supply missing numeric values.
 4. KiCad is the physical-board authority, subject to SHA-bound audits and
@@ -41,7 +42,7 @@ requirements + reviewed frozen modules + board stack + reviewed fab capability
        +--------------------------+---------------------------+
        |                          |                           |
        v                          v                           v
-atopile contract checks   placement/critical-net checks  KRT/DFM/KiCad rules
+electrical-backend checks placement/critical-net checks  KRT/DFM/KiCad rules
        \                          |                           /
         \                         v                          /
          +---- SHA-bound DRC + physical review evidence -----+

@@ -1,21 +1,24 @@
 # Codex instructions for AI PCB projects
 
-This repository uses atopile as the electrical design authority and KiCad for
-physical PCB design. The installed compiler and manufacturer data take
-precedence over examples or model guesses.
+This repository uses a replaceable electrical backend with **tscircuit as the
+default authority** and KiCad for physical PCB design. atopile is a legacy
+compatibility adapter only. The installed backend, its lockfile, and reviewed
+manufacturer data take precedence over examples or model guesses.
 
 ## Required workflow
 
 1. Run `python scripts/session_boot.py`, then read only the cited stage rules, acceptance, and board-stack records before design work.
 2. Validate `config/requirements.json`, then translate its interfaces, rails, constraints and blocks.
-3. Search atopile packages and inspect standard-library interfaces before use.
-4. Validate changed `.ato` sources and build after meaningful changes.
+3. Inspect the selected backend in `config/electrical-backend.json`; for
+   tscircuit, use local locked dependencies and Circuit JSON/KiCad candidates.
+4. Validate changed electrical sources and run `build_electrical.py` after
+   meaningful changes.
 5. Preserve picked parts, net names, designators and manual KiCad layout.
 6. Run `python scripts/run_pcb_pipeline.py` after source or layout changes.
 7. Run DRC and inspect rendered copper before manufacturing export.
 8. After an intentional export, run `check_jlcpcb_release.py`; create a release snapshot only from a matching `release_pass=true` audit.
 
-Use `python scripts/check_pcb_environment.py --tier minimal` to begin requirements work; use `--tier standard` before normal design work and `--tier deep` only when an atopile build and router capability check are intended.
+Use `python scripts/check_pcb_environment.py --tier minimal` to begin requirements work; use `--tier standard` before normal design work and `--tier deep` only when the selected electrical backend build and router capability check are intended.
 
 ## Delegation boundary
 

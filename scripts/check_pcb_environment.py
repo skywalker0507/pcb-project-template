@@ -48,9 +48,22 @@ def main() -> int:
     policy = json.loads(policy_path.read_text(encoding="utf-8")) if policy_path.is_file() else {}
     resolved_path = root / "build/toolchain-resolved.json"
     resolved = json.loads(resolved_path.read_text(encoding="utf-8")) if resolved_path.is_file() else {}
+    backend_path = root / "config/electrical-backend.json"
+    backend_config = json.loads(backend_path.read_text(encoding="utf-8")) if backend_path.is_file() else {}
+    active_backend = backend_config.get("active")
+    active_backend_config = (backend_config.get("backends") or {}).get(active_backend, {})
+    if not isinstance(active_backend, str) or not isinstance(active_backend_config, dict):
+        active_backend = "invalid"
+        active_backend_config = {}
 
-    for relative in ("ato.yaml", "config/pcb-flow.json", "config/kicad-routing-tools.json", "config/toolchain-policy.json", "config/board-stack.json", "config/pcb-acceptance.json", "config/requirements.json", "handoff/stages/CURRENT_STAGE.json"):
+    for relative in ("config/electrical-backend.json", "config/pcb-flow.json", "config/kicad-routing-tools.json", "config/toolchain-policy.json", "config/board-stack.json", "config/pcb-acceptance.json", "config/requirements.json", "handoff/stages/CURRENT_STAGE.json"):
         add(checks, f"project:{relative}", (root / relative).is_file(), relative)
+    source_root = active_backend_config.get("source_root")
+    entry = active_backend_config.get("entry")
+    source_ok = isinstance(source_root, str) and isinstance(entry, str) and (root / source_root).exists()
+    if active_backend == "tscircuit" and source_ok:
+        source_ok = (root / source_root / "package.json").is_file() and (root / source_root / entry).is_file()
+    add(checks, "project:active-electrical-source", source_ok, f"backend={active_backend};source={source_root};entry={entry}")
     add(checks, "project:resolved-toolchain", resolved_path.is_file(), str(resolved_path))
     mcp_configured = (root / ".codex/config.toml").is_file() or (root / ".codex/pcb-mcp.fragment.toml").is_file()
     add(checks, "project:mcp-config", mcp_configured, ".codex/config.toml or merge fragment")
@@ -61,17 +74,25 @@ def main() -> int:
     add(checks, "python", sys.version_info >= (3, 10), sys.version.split()[0])
 
     wsl = shutil.which("wsl.exe") or shutil.which("wsl")
-    add(checks, "wsl", bool(wsl), wsl or "not found")
-    if wsl:
+    if active_backend != "atopile":
+        add(checks, "wsl", True, "not selected", required=False)
+        add(checks, "wsl-atopile", True, "not selected", required=False)
+    elif wsl:
+        add(checks, "wsl", True, wsl, required=True)
         ok, output = run([wsl, "-d", args.distro, "--", "bash", "-lc", "command -v uv && command -v ato && ato --version | tail -n 1"], root)
         actual_ato = output.replace("\x00", "").strip().splitlines()[-1] if output.replace("\x00", "").strip().splitlines() else "missing"
         expected_ato = resolved.get("atopile", {}).get("version")
-        add(checks, "wsl-atopile", ok and actual_ato == expected_ato, f"expected={expected_ato};actual={actual_ato}")
+        add(checks, "wsl-atopile", ok and actual_ato == expected_ato, f"expected={expected_ato};actual={actual_ato}", required=active_backend == "atopile")
     else:
-        add(checks, "wsl-atopile", False, "WSL unavailable")
+        add(checks, "wsl", False, "WSL unavailable", required=True)
+        add(checks, "wsl-atopile", False, "WSL unavailable", required=active_backend == "atopile")
 
     node = shutil.which("node")
     add(checks, "node", bool(node), node or "not found")
+    bun = shutil.which("bun")
+    tscircuit_root = root / "tscircuit"
+    add(checks, "bun", bool(bun), bun or "not found", required=active_backend == "tscircuit")
+    add(checks, "tscircuit-lockfile", (tscircuit_root / "bun.lock").is_file(), str(tscircuit_root / "bun.lock"), required=active_backend == "tscircuit")
     houtini = root / "tools/houtini-lm"
     houtini_ok, houtini_head = git_head(houtini, root)
     expected_houtini = resolved.get("houtini_lm", {}).get("commit")
@@ -117,29 +138,40 @@ def main() -> int:
         npm = ["cmd.exe", "/d", "/s", "/c", "npm", "test"] if os.name == "nt" else ["npm", "test"]
         ok, output = run(npm, houtini, 180)
         add(checks, "houtini-tests", ok, output[-300:])
-    if tier == "deep" and wsl and (root / "ato.yaml").is_file():
+    if tier == "deep" and active_backend == "atopile" and wsl and (root / "ato.yaml").is_file():
         windows_root = str(root)
         linux_root = "/mnt/" + windows_root[0].lower() + windows_root[2:].replace("\\", "/") if len(windows_root) > 2 and windows_root[1] == ":" else windows_root
         ok, output = run([wsl, "-d", args.distro, "--", "bash", "-lc", f"cd {json.dumps(linux_root)} && ato --non-interactive build"], root, 300)
         add(checks, "atopile-build", ok, output[-300:])
+    if tier == "deep" and active_backend == "tscircuit" and bun and tscircuit_root.is_dir():
+        ok, output = run([bun, "run", "typecheck"], tscircuit_root, 180)
+        add(checks, "tscircuit-typecheck", ok, output[-300:])
 
     required_by_tier = {
         "minimal": {
-            "project:ato.yaml", "project:config/pcb-flow.json", "project:config/kicad-routing-tools.json",
+            "project:config/electrical-backend.json", "project:active-electrical-source", "project:config/pcb-flow.json", "project:config/kicad-routing-tools.json",
             "project:config/toolchain-policy.json", "project:config/board-stack.json", "project:config/pcb-acceptance.json", "project:config/requirements.json",
             "project:handoff/stages/CURRENT_STAGE.json", "project:mcp-config", "python",
         },
         "standard": {
-            "project:ato.yaml", "project:config/pcb-flow.json", "project:config/kicad-routing-tools.json",
+            "project:config/electrical-backend.json", "project:active-electrical-source", "project:config/pcb-flow.json", "project:config/kicad-routing-tools.json",
             "project:config/toolchain-policy.json", "project:config/board-stack.json", "project:config/pcb-acceptance.json", "project:config/requirements.json",
             "project:handoff/stages/CURRENT_STAGE.json", "project:resolved-toolchain", "project:mcp-config",
-            "kicad-cli", "git", "python", "wsl", "wsl-atopile", "node", "houtini-commit",
+            "kicad-cli", "git", "python", "node", "houtini-commit",
             "houtini-build", "krt-repository", "krt-python", "krt-commit", "java", "freerouting",
         },
         "deep": {item["name"] for item in checks if item["required"]},
     }
     for item in checks:
         item["required"] = item["name"] in required_by_tier[tier]
+    if active_backend == "tscircuit":
+        for item in checks:
+            if item["name"] in {"bun", "tscircuit-lockfile"}:
+                item["required"] = tier in {"standard", "deep"}
+    elif active_backend == "atopile":
+        for item in checks:
+            if item["name"] in {"wsl", "wsl-atopile"}:
+                item["required"] = tier in {"standard", "deep"}
     required_ok = all(item["ok"] for item in checks if item["required"])
     optional_ok = all(item["ok"] for item in checks if not item["required"])
     names = {item["name"] for item in checks if not item["ok"]}
@@ -148,8 +180,10 @@ def main() -> int:
         suggestions.append("Run: python scripts/init_project.py --project-name <name>")
     if "project:resolved-toolchain" in names:
         suggestions.append("After installing tools manually, run: python scripts/record_toolchain_receipt.py")
-    if "wsl" in names or "wsl-atopile" in names:
+    if active_backend == "atopile" and ("wsl" in names or "wsl-atopile" in names):
         suggestions.append(f"Install atopile manually in WSL {args.distro}, then verify: wsl.exe -d {args.distro} -- bash -lc 'ato --version'")
+    if active_backend == "tscircuit" and ("bun" in names or "tscircuit-lockfile" in names):
+        suggestions.append("Install Bun natively, then run bun install in tscircuit/ to restore the locked tscircuit toolchain.")
     if "houtini-commit" in names and not houtini_ok:
         suggestions.append("Clone the configured Houtini fork to tools/houtini-lm.")
     if "houtini-build" in names:

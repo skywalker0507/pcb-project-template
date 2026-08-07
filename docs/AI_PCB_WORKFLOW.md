@@ -24,9 +24,12 @@ Keep API keys in Windows user environment variables such as
 
 The machine-readable stage checklist is authoritative for completion evidence and forbidden actions. The numbered list is explanatory only. `route_ok` means a guarded routing action ran; it is not release approval.
 
-After source or board changes, run `python scripts/run_pcb_pipeline.py`. Add
-`--build` when electrical source changed. Add `--export` only after review when
-manufacturing output is intentionally regenerated.
+After board changes, run `python scripts/run_pcb_pipeline.py`. After electrical
+source changes, run it with `--build`: this creates only an isolated electrical
+candidate, then stops so it cannot audit or export a stale reviewed board.
+Deliberately import and review the candidate before running the normal KiCad
+pipeline. Add `--export` only after review when manufacturing output is
+intentionally regenerated.
 
 Before physical/routing/release work, run `python scripts/compile_design_policy.py`.
 KRT, FreeRouting candidates and export require a fresh policy with the relevant
@@ -38,7 +41,10 @@ next meaningful stage in a fresh Codex session.
 
 ## Tool roles
 
-- atopile: electrical design, parts, nets and generated board baseline;
+- tscircuit (default): TypeScript/React electrical design, Circuit JSON, and
+  isolated KiCad candidate baseline;
+- atopile (legacy adapter): optional compatibility backend only; it must not be
+  required by a tscircuit project;
 - Konnect MCP: live placement, routing, rendering and operations not represented
   by deterministic scripts;
 - Houtini-LM: bounded, non-authoritative text work;

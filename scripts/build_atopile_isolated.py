@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 
@@ -53,6 +54,14 @@ def main() -> int:
     parser.add_argument("--build", default="default")
     parser.add_argument("--board", type=Path)
     parser.add_argument(
+        "--output", type=Path,
+        help="Optional isolated candidate directory for a successful generated board.",
+    )
+    parser.add_argument(
+        "--receipt", type=Path,
+        help="Optional common electrical-backend receipt path.",
+    )
+    parser.add_argument(
         "--log",
         type=Path,
         default=ROOT / "build/logs/ato-build-isolated.log",
@@ -82,6 +91,13 @@ def main() -> int:
         raise SystemExit(f"Routed board not found: {board}")
     if guard.exists():
         raise SystemExit(f"Guard path already exists: {guard}")
+    candidate_board = None
+    if args.output:
+        output = args.output.resolve()
+        if output.exists() and any(output.iterdir()):
+            raise SystemExit(f"Candidate output already exists and is not empty: {output}")
+        output.mkdir(parents=True, exist_ok=True)
+        candidate_board = output / "candidate.kicad_pcb"
 
     before = sha256(board)
     args.log.parent.mkdir(parents=True, exist_ok=True)
@@ -108,13 +124,21 @@ def main() -> int:
                 log.write(line)
         exit_code = process.wait()
     finally:
-        if board.exists():
-            if args.verbose:
-                print(f"DISCARDING_GENERATED_BOARD={board}")
-            board.unlink()
-        if not guard.exists():
-            raise RuntimeError("Routed-board guard disappeared during build")
-        os.replace(guard, board)
+        # The protected board restoration runs even if candidate capture fails.
+        # A failed copy must never leave the manual KiCad board behind a guard.
+        try:
+            if board.exists():
+                if exit_code == 0 and candidate_board:
+                    if candidate_board.exists():
+                        raise RuntimeError(f"Refusing to overwrite existing candidate board: {candidate_board}")
+                    shutil.copy2(board, candidate_board)
+                if args.verbose:
+                    print(f"DISCARDING_GENERATED_BOARD={board}")
+                board.unlink()
+        finally:
+            if not guard.exists():
+                raise RuntimeError("Routed-board guard disappeared during build")
+            os.replace(guard, board)
 
     after = sha256(board)
     if after != before:
@@ -122,20 +146,24 @@ def main() -> int:
     log_text = args.log.read_text(encoding="utf-8", errors="replace")
     build_ids = re.findall(r"\bBuild ([0-9a-f]{8,})\b|\[([0-9a-f]{8,})\]", log_text)
     build_id = next((left or right for left, right in reversed(build_ids)), None)
-    print(
-        json.dumps(
-            {
-                "success": exit_code == 0,
-                "exit_code": exit_code,
-                "build": args.build,
-                "build_id": build_id,
-                "log": str(args.log.resolve()),
-                "restored_board_sha256": after.upper(),
-                "failure": classify_failure(log_text) if exit_code else None,
-            },
-            separators=(",", ":"),
-        )
-    )
+    payload = {
+        "schema": 1,
+        "kind": "electrical_build",
+        "backend": "atopile",
+        "success": exit_code == 0,
+        "exit_code": exit_code,
+        "build": args.build,
+        "build_id": build_id,
+        "log": str(args.log.resolve()),
+        "candidate_board": str(candidate_board.resolve()) if exit_code == 0 and candidate_board else None,
+        "restored_board_sha256": after.upper(),
+        "failure": classify_failure(log_text) if exit_code else None,
+        "isolation": "Generated candidate copied before restoring the protected KiCad board.",
+    }
+    if args.receipt:
+        args.receipt.resolve().parent.mkdir(parents=True, exist_ok=True)
+        args.receipt.resolve().write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(payload, separators=(",", ":")))
     return exit_code
 
 

@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import shutil
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,7 +28,7 @@ def sha256(path: Path) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--distro", default="Ubuntu")
+    parser.add_argument("--distro", default="Ubuntu-24.04")
     parser.add_argument("--output", type=Path, default=RECEIPT)
     parser.add_argument("--without-konnect", action="store_true")
     args = parser.parse_args()
@@ -40,15 +41,37 @@ def main() -> int:
     if missing:
         raise SystemExit("Cannot record an incomplete local toolchain:\n" + "\n".join(missing))
 
-    atopile_version = output(["wsl.exe", "-d", args.distro, "--", "bash", "-lc", "export PATH=\"$HOME/.local/bin:$PATH\"; ato --version | tail -n 1"])
+    backend_config = json.loads((ROOT / "config/electrical-backend.json").read_text(encoding="utf-8"))
+    active_backend = backend_config.get("active")
+    backends = backend_config.get("backends", {})
+    if not isinstance(active_backend, str) or active_backend not in backends:
+        raise SystemExit("config/electrical-backend.json has no valid active backend")
     receipt: dict[str, object] = {
         "schema": 1,
         "mode": "manual",
-        "atopile": {"version": atopile_version},
+        "electrical_backend": {"active": active_backend},
         "houtini_lm": {"commit": output(["git", "-C", str(houtini), "rev-parse", "HEAD"]), "version": json.loads((houtini / "package.json").read_text(encoding="utf-8"))["version"]},
         "kicad_routing_tools": {"commit": output(["git", "-C", str(krt), "rev-parse", "HEAD"])},
         "freerouting": {"sha256": sha256(jar)},
     }
+    if active_backend == "tscircuit":
+        root = ROOT / "tscircuit"
+        bun = shutil.which("bun")
+        lock = root / "bun.lock"
+        package = root / "package.json"
+        if not bun or not lock.is_file() or not package.is_file():
+            raise SystemExit("tscircuit receipt needs native Bun plus tscircuit/package.json and tscircuit/bun.lock")
+        package_data = json.loads(package.read_text(encoding="utf-8"))
+        receipt["tscircuit"] = {
+            "bun_version": output([bun, "--version"]),
+            "package_version": package_data.get("dependencies", {}).get("tscircuit"),
+            "package_sha256": sha256(package),
+            "lock_sha256": sha256(lock),
+        }
+    elif active_backend == "atopile":
+        receipt["atopile"] = {"version": output(["wsl.exe", "-d", args.distro, "--", "bash", "-lc", "export PATH=\"$HOME/.local/bin:$PATH\"; ato --version | tail -n 1"])}
+    else:
+        raise SystemExit(f"No receipt strategy is configured for electrical backend: {active_backend}")
     konnect = ROOT / "tools/konnect/konnect.exe"
     if args.without_konnect:
         receipt["konnect"] = {"disabled": True}

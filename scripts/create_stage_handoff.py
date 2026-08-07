@@ -13,6 +13,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pcb_policy import relative_to
+from electrical_backend import read_config, selected_backend
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,7 +26,10 @@ def tree_hash(paths: list[Path]) -> str:
         if path.is_file():
             files.append(path)
         elif path.is_dir():
-            files.extend(item for item in path.rglob("*") if item.is_file())
+            files.extend(
+                item for item in path.rglob("*")
+                if item.is_file() and not {"node_modules", "dist", ".git"}.intersection(item.relative_to(ROOT).parts)
+            )
     for path in sorted(files):
         digest.update(path.relative_to(ROOT).as_posix().encode())
         digest.update(b"\0")
@@ -119,6 +123,8 @@ def main() -> int:
     args = parser.parse_args()
 
     config = json.loads(args.config.read_text(encoding="utf-8"))
+    backend_config = read_config()
+    backend_name, backend = selected_backend(backend_config)
     checklist_path = ROOT / config.get("stage_checklist", "config/stage-checklist.json")
     checklist = json.loads(checklist_path.read_text(encoding="utf-8"))
     stage_rules = checklist.get("stages", {}).get(args.stage)
@@ -163,7 +169,11 @@ def main() -> int:
             "forbidden": stage_rules.get("forbidden", []),
         },
         "stage_files": stage_rules.get("files", []),
-        "source_sha256": tree_hash([ROOT / "ato.yaml", ROOT / "src"]),
+        "electrical_backend": backend_name,
+        "source_sha256": tree_hash([
+            ROOT / "config/electrical-backend.json",
+            ROOT / str(backend["source_root"]),
+        ]),
         "board_sha256": (
             hashlib.sha256(board_path.read_bytes()).hexdigest().upper()
             if board_path.is_file()

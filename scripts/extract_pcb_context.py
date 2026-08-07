@@ -97,7 +97,9 @@ def main() -> int:
         }
         position = footprint.GetPosition()
         x, y = mm(position.x), mm(position.y)
-        address = fields.get("atopile_address", "")
+        # Keep old generated boards readable while presenting backend-neutral
+        # provenance to downstream AI/context tooling.
+        address = fields.get("design_source_address") or fields.get("atopile_address", "")
         group = address.split(".", 1)[0] if address else "mechanical_or_external"
         group_positions[group].append((x, y, footprint.GetReference()))
         fpid = footprint.GetFPID()
@@ -123,7 +125,7 @@ def main() -> int:
                 "y_mm": y,
                 "rotation_deg": round(footprint.GetOrientationDegrees(), 3),
                 "side": board.GetLayerName(footprint.GetLayer()),
-                "atopile_address": address,
+                "design_source_address": address,
                 "group": group,
                 "pads": pads,
             }
