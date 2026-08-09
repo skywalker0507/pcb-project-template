@@ -12,7 +12,7 @@ import shutil
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RECEIPT = ROOT / "build/toolchain-resolved.json"
+RECEIPT = ROOT / "build/00-shared/evidence/toolchain/toolchain-resolved.json"
 
 
 def output(command: list[str], cwd: Path = ROOT) -> str:

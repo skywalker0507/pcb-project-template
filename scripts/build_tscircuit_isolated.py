@@ -53,6 +53,48 @@ def footprint_forms(board_text: str):
                     break
 
 
+def footprint_geometry_signature(form: str) -> tuple[str, ...]:
+    """Return the copper/silkscreen geometry that defines a footprint library item.
+
+    tscircuit embeds instance-specific properties (reference, value and UUIDs)
+    in every board footprint.  Those are intentionally not part of the library
+    identity: two 0402 capacitors with different values have the same land
+    pattern.  Keep a conflict failure for a genuine pad or drawing mismatch.
+    """
+    geometry: list[str] = []
+    for match in re.finditer(r"\(pad\b", form):
+        depth = 0
+        quoted = False
+        escaped = False
+        for index in range(match.start(), len(form)):
+            char = form[index]
+            if quoted:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    quoted = False
+            elif char == '"':
+                quoted = True
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    pad = form[match.start(): index + 1]
+                    pad = re.sub(r"\s*\(net\s+\d+\s+\"[^\"]*\"\)", "", pad)
+                    pad = re.sub(r"\s*\(uuid\s+[^)]+\)", "", pad)
+                    pad = re.sub(
+                        r"-?\d+\.\d+",
+                        lambda value: format(float(value.group()), ".6g"),
+                        pad,
+                    )
+                    geometry.append(pad)
+                    break
+    return tuple(geometry)
+
+
 def materialize_footprint_library(candidate_board: Path, output: Path) -> Path | None:
     """Vendor tscircuit's embedded footprint forms for KiCad DRC resolution."""
     text = candidate_board.read_text(encoding="utf-8")
@@ -73,9 +115,9 @@ def materialize_footprint_library(candidate_board: Path, output: Path) -> Path |
             flags=re.DOTALL,
         )
         existing = library.get(name)
-        if existing is not None and existing != normalized:
-            raise SystemExit(f"tscircuit emitted conflicting embedded footprint definitions for {name}")
-        library[name] = normalized
+        if existing is not None and footprint_geometry_signature(existing) != footprint_geometry_signature(normalized):
+            raise SystemExit(f"tscircuit emitted conflicting embedded footprint geometry for {name}")
+        library.setdefault(name, normalized)
     if not library:
         return None
     pretty = output / "tscircuit.pretty"

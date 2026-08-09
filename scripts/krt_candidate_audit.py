@@ -8,6 +8,7 @@ from collections import Counter
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 from typing import Any
@@ -62,10 +63,18 @@ def category_counts(report: dict[str, Any]) -> Counter[str]:
 
 
 def item_identity(item: dict[str, Any]) -> tuple[Any, ...]:
+    description = str(item.get("description") or "")
+    track = re.fullmatch(r"Track \[(.+)] on ([^,]+), length [0-9.]+ mm", description)
+    if track:
+        # KiCad may choose a different one of two overlapping, collinear track
+        # objects after an unrelated board save. Preserve the physical
+        # net/layer pair in the fingerprint without treating segment length,
+        # start position, or UUID selection as a new DRC violation.
+        return ("track", track.group(1), track.group(2))
     pos = item.get("pos") or {}
     return (
         item.get("uuid"),
-        item.get("description"),
+        description,
         round(float(pos.get("x", 0)), 4),
         round(float(pos.get("y", 0)), 4),
     )
@@ -75,6 +84,7 @@ def violation_identity(violation: dict[str, Any]) -> tuple[Any, ...]:
     return (
         violation.get("type", "unknown"),
         violation.get("severity"),
+        violation.get("description"),
         tuple(sorted(item_identity(item) for item in violation.get("items", []))),
     )
 
@@ -84,7 +94,7 @@ def main() -> int:
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--candidate", required=True, type=Path)
     parser.add_argument("--kicad-cli", required=True, type=Path)
-    parser.add_argument("--work-dir", type=Path, default=Path("build/reports/krt/drc"))
+    parser.add_argument("--work-dir", type=Path, default=Path("build/06-routing/tmp/manual/drc"))
     parser.add_argument("--report", type=Path)
     parser.add_argument("--max-preview", type=int, default=6)
     args = parser.parse_args()

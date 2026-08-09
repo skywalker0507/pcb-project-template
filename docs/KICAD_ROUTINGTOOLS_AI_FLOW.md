@@ -24,15 +24,14 @@ python scripts/krt_flow.py check --input elec/layout/default/default.kicad_pcb
 python scripts/krt_flow.py route \
   --profile outer_low_risk \
   --input elec/layout/default/default.kicad_pcb \
-  --output build/candidates/krt-low-risk.kicad_pcb \
   --run-id low-risk-01 \
   --dry-run
 ```
 
 Remove `--dry-run` only after checking the resolved net list. The command
-returns one compact JSON line. Full router and audit output stays under
-`build/logs/krt/`; the complete machine-readable decision record stays under
-`build/reports/krt/`.
+returns one compact JSON line. Unless `--output` is explicitly supplied, the
+candidate and full log stay under `build/06-routing/tmp/<run-id>/`; the bounded
+decision report stays under `build/06-routing/evidence/<run-id>/`.
 
 The adapter always passes `--no-fix-drc-settings`. Older KRT revisions also
 receive `--no-clamp-netclasses`; newer revisions removed that switch, so the

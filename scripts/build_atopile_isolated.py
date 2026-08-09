@@ -64,7 +64,7 @@ def main() -> int:
     parser.add_argument(
         "--log",
         type=Path,
-        default=ROOT / "build/logs/ato-build-isolated.log",
+        default=ROOT / "build/03-electrical/tmp/legacy-atopile/ato-build-isolated.log",
     )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()

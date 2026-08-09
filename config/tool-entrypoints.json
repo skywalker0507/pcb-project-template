@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "policy": {
+    "prefer_existing_scripts": true,
+    "direct_tool_binary_invocation_forbidden": true,
+    "diagnostic_version_and_hash_checks_allowed": true,
+    "new_wrapper_requires_inventory_review": true
+  },
+  "entrypoints": {
+    "electrical_build": "scripts/build_electrical.py",
+    "pcb_pipeline": "scripts/run_pcb_pipeline.py",
+    "pcb_context": "scripts/query_pcb_context.py",
+    "krt": "scripts/krt_flow.py",
+    "freerouting": "scripts/run_freerouting_headless.py",
+    "candidate_audit": "scripts/krt_candidate_audit.py",
+    "konnect": "scripts/start_konnect_mcp.py",
+    "houtini_gate": "scripts/create_houtini_job.py",
+    "artifact_store": "scripts/artifact_store.py",
+    "environment": "scripts/check_pcb_environment.py",
+    "script_search": "scripts/find_existing_script.py"
+  },
+  "stage_capabilities": {
+    "requirements": ["script_search", "environment", "artifact_store"],
+    "parts": ["script_search", "environment", "artifact_store"],
+    "electrical": ["script_search", "electrical_build", "pcb_pipeline", "artifact_store"],
+    "electrical_freeze": ["script_search", "electrical_build", "pcb_pipeline", "artifact_store"],
+    "physical": ["script_search", "pcb_pipeline", "pcb_context", "konnect", "artifact_store"],
+    "routing": ["script_search", "krt", "freerouting", "candidate_audit", "pcb_pipeline", "pcb_context", "konnect", "artifact_store"],
+    "release": ["script_search", "pcb_pipeline", "pcb_context", "artifact_store"],
+    "prototype": ["script_search", "pcb_pipeline", "artifact_store"]
+  },
+  "freerouting": {
+    "required_flags": ["--gui.enabled=false"],
+    "diagnostic_command": "python scripts/run_freerouting_headless.py --check",
+    "forbid_direct_java_jar_outside_entrypoint": true,
+    "reason": "GUI mode has caused hangs and other automation failures; all routing must use the guarded headless wrapper."
+  }
+}

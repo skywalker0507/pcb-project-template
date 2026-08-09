@@ -41,7 +41,7 @@ longer exposes the required DSN/SES round trip through `kicad-cli`.
 ## tscircuit handoff
 
 tscircuit produces Circuit JSON, a KiCad schematic, a KiCad PCB candidate and
-a local footprint library in an isolated `build/generated/tscircuit/` directory.
+a local footprint library in an isolated `build/03-electrical/tmp/<run-id>/` directory.
 It is not a live KiCad editor and it is not a replacement for Konnect. Use the
 candidate as the electrical starting point; use Konnect only after intentionally
 opening the intended KiCad board with its API socket available.

@@ -11,9 +11,10 @@ STAGE_PATH = ROOT / "handoff/stages/CURRENT_STAGE.json"
 ALLOWED = {
     "route": {"routing"},
     "candidate_route": {"physical", "routing"},
-    "record_review": {"physical", "routing", "release"},
+    "record_review": {"physical", "routing", "release", "prototype"},
     "apply_rules": {"physical", "routing"},
     "export": {"release"},
+    "prototype_measure": {"prototype"},
 }
 
 

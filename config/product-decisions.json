@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "project": "esp32-s3-remote-flashing-probe",
+  "revision": "Rev A",
+  "status": "confirmed",
+  "confirmed_at": "2026-08-08",
+  "decisions": {
+    "initial_target_family": "STM32",
+    "future_target_expansion": true,
+    "operating_mode": "Wi-Fi-connected standalone remote programmer; no PC is required during target programming.",
+    "target_power": "The probe must never power the target; the target is self-powered.",
+    "target_connectors": ["J2", "J3"],
+    "board_outline_revision": "Rev A uses a 44 mm × 80 mm rectangular outline. Routing validation showed that 42 mm could preserve the signal interfaces but left no continuous corridor for the reviewed 1.27 mm V3V3 distribution geometry. The additional 2 mm is placed only on the left edge for a dedicated power trunk and continuous inner-plane extension; no mounting-hole or enclosure constraint requires the narrower outline.",
+    "manufacturing": "JLCPCB four-layer PCB with SMT assembly; initial prototype quantity 5-10 boards.",
+    "retained_features": ["J4 expansion header", "LED1 power LED", "LED2 status LED", "SW1 reset button", "SW2 boot/provision button"],
+    "firmware_validation": "The user has validated SWD programming with an ATK-DNESP32S3M; firmware implementation is out of PCB scope."
+  },
+  "invariants": [
+    "VTREF is target-provided only and must not be tied to probe 3V3 or USB_5V.",
+    "J2 and J3 are alternative interfaces and only one target may be attached at a time.",
+    "The established J2/J3 signal contract carries STM32 SWD, NRST, BOOT0, and UART signals."
+  ]
+}

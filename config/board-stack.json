@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "active": "two_layer",
+  "active": "four_layer",
   "profiles": {
     "two_layer": {
       "copper_layers": [
@@ -21,7 +21,11 @@
       ]
     },
     "four_layer": {
-      "inner_layer_intent": "In1.Cu and In2.Cu are reserved planes in this template; KRT must not route signals there.",
+      "inner_layer_intent": "In1.Cu and In2.Cu are continuous GND reference planes in Rev A; KRT must not route signals there.",
+      "plane_nets": {
+        "In1.Cu": "GND",
+        "In2.Cu": "GND"
+      },
       "copper_layers": [
         "F.Cu",
         "In1.Cu",

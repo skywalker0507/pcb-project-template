@@ -1,28 +1,33 @@
 {
   "schema": 1,
   "project": {
-    "name": "pcb-project-template",
+    "name": "esp32-s3-remote-flashing-probe",
     "build_target": "default",
-    "board": "elec/layout/default/default.kicad_pcb"
+    "board": "elec/layout/rev-a-clearance-fixes-v346/rev-a-clearance-fixes.kicad_pcb"
   },
   "board_stack": "config/board-stack.json",
   "acceptance": "config/pcb-acceptance.json",
   "stage_checklist": "config/stage-checklist.json",
-  "checks": [],
+  "checks": [
+    "scripts/check_tool_entrypoints.py",
+    "scripts/validate_power_component_review.py"
+  ],
   "audit": {
-    "require_in1_ground": false,
+    "require_in1_ground": true,
     "baseline": "config/pcb-release-baseline.json",
     "routing_paths": "config/routing-paths.json",
-    "audit_json": "build/reports/final-routing-audit.json",
-    "drc_report": "build/reports/final-kicad-cli-drc.rpt"
+    "physical_review": "build/07-release/release/rev-a-v346/physical-review.json",
+    "audit_json": "build/07-release/evidence/manual/final-routing-audit.json",
+    "drc_report": "build/07-release/evidence/manual/drc/kicad-cli-drc.rpt"
   },
   "context": {
     "policy": "config/net-review-policy.json",
-    "output": "build/delegated/pcb-context.json"
+    "output": "build/07-release/tmp/manual/context/pcb-context.json"
   },
   "manufacturing": {
-    "output": "manufacturing/jlcpcb/pcb-project-template-rev-a",
-    "log": "build/logs/jlcpcb-export.log"
+    "output": "manufacturing/jlcpcb/esp32-s3-remote-flashing-probe-rev-a",
+    "log": "build/07-release/tmp/manual/jlcpcb-export.log",
+    "assembly_parts": "config/jlcpcb-parts.json"
   },
   "handoff": {
     "output": "handoff/stages/CURRENT_STAGE.json",

@@ -66,7 +66,7 @@ def main() -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=ROOT / "build/delegated/pcb-context.json",
+        default=ROOT / "build/07-release/tmp/manual/context/pcb-context.json",
     )
     parser.add_argument(
         "--policy",

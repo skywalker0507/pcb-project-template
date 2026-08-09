@@ -37,7 +37,7 @@ requirements + reviewed frozen modules + board stack + reviewed fab capability
                       compile_design_policy.py
                                   |
                                   v
-                  build/design-policy-resolved.json
+                  build/00-shared/evidence/design-policy/design-policy-resolved.json
                                   |
        +--------------------------+---------------------------+
        |                          |                           |

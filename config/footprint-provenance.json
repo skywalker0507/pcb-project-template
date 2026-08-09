@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "purpose": "Tracks primary-source land-pattern evidence before a footprint is used for physical freeze or geometry-sensitive routing.",
+  "parts": {
+    "J1": {
+      "mpn": "USB4105-GF-A",
+      "manufacturer": "GCT",
+      "status": "verified",
+      "primary_source": {
+        "url": "https://gct.co/files/drawings/usb4105.pdf",
+        "revision": "B4",
+        "date": "2023-12-18",
+        "sha256": "FB331FBABEE8392ED2937ED757C1610CB0F174B84625147C0B580A18EEA8C0E5"
+      },
+      "verification": {
+        "board": "elec/layout/rev-a-placement-v56/rev-a-placement.kicad_pcb",
+        "board_sha256": "A5D9576881BDF93C191DEB46BAF8C682FE4695E60A1DA1D397B1751FAE607C68",
+        "reviewed": [
+          "16 SMT contacts: 12 x 0.30 mm and 4 x 0.60 mm, all 1.15 mm long",
+          "2 x 0.65 mm locating holes",
+          "4 plated shell slots with the drawing's 0.60 mm slot width and 1.00 mm copper width",
+          "Contact and shell-slot relative locations match the recommended PCB layout"
+        ]
+      },
+      "limitation": "This verifies the connector land pattern only. The interleaved USB D+/D- breakout still requires a separately reviewed routing recipe."
+    }
+  }
+}

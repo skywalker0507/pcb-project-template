@@ -18,7 +18,7 @@ decisions stay in Codex and deterministic project scripts.
 
 ## Default, low-cost path
 
-The template defaults to `deepseek-v4-flash`, disabled thinking, and a 1600
+The template defaults to `deepseek-v4-flash`, disabled thinking, and an 800
 visible-token ceiling. The active configuration, MCP fragment, and project
 initializer use the same values. Use a stronger model only through an explicit,
 reviewed per-call override; do not raise the default ceiling for routine logs.
@@ -27,7 +27,8 @@ reviewed per-call override; do not raise the default ceiling for routine logs.
 calls an LLM: it emits a job only for allowed text artifacts totalling at least
 16 KiB, and rejects boards, schematics, PDFs, binaries, paths outside this
 repository, symlinks, and short receipts. Pipeline and failed KRT candidate
-runs invoke it automatically and place a small job under `build/delegated/`.
+runs invoke it automatically and place a small job under the current run's
+`evidence/delegation/` directory.
 
 When a job says `eligible: true`, make exactly one `delegate` call using its
 `delegate` object, without first reading its source paths into Codex. The task

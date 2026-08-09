@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "status": "electrical_review",
+  "buck": {
+    "ref": "U3",
+    "mpn": "AP63203WU-7",
+    "maximum_load_current_a": 2.0,
+    "inductor_current_margin": 1.35,
+    "source": "https://www.diodes.com/datasheet/download/AP63200-AP63201-AP63203-AP63205.pdf",
+    "evidence": "The AP63203 application information requires the selected inductor DC current rating to be at least 35% higher than maximum load current."
+  },
+  "inductor": {
+    "ref": "L1",
+    "mpn": "XGL4030-472MEC",
+    "inductance_uh": 4.7,
+    "isat_20_percent_drop_a": 3.2,
+    "irms_40c_rise_a": 6.6,
+    "source": "https://www.coilcraft.com/getmedia/032d9c73-4222-482f-b6bc-7808590e27c9/xgl4030.pdf",
+    "footprint": "Inductor_SMD:L_Coilcraft_XxL4030",
+    "assembly_listing": "JLCPCB C7159276"
+  },
+  "limitations": [
+    "This is an electrical selection check, not a thermal release approval.",
+    "Validate the assembled converter temperature and selected JLCPCB assembly listing again immediately before manufacture."
+  ]
+}

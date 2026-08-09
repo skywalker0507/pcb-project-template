@@ -9,10 +9,10 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUTPUT = ROOT / "build/design-policy-resolved.json"
-KRT_ARTIFACT = ROOT / "build/design-policy-krt.json"
-DFM_ARTIFACT = ROOT / "build/design-policy-dfm.json"
-KICAD_ARTIFACT = ROOT / "build/design-policy-kicad-rules.json"
+DEFAULT_OUTPUT = ROOT / "build/00-shared/evidence/design-policy/design-policy-resolved.json"
+KRT_ARTIFACT = ROOT / "build/00-shared/evidence/design-policy/design-policy-krt.json"
+DFM_ARTIFACT = ROOT / "build/00-shared/evidence/design-policy/design-policy-dfm.json"
+KICAD_ARTIFACT = ROOT / "build/00-shared/evidence/design-policy/design-policy-kicad-rules.json"
 ROUTING_REQUIRED = {"track_width", "clearance", "via_size", "via_drill"}
 INPUTS = {
     "requirements": ROOT / "config/requirements.json",
@@ -25,6 +25,26 @@ INPUTS = {
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest().upper()
+
+
+def object_sha256(value: object) -> str:
+    canonical = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest().upper()
+
+
+def semantic_input(name: str, value: dict[str, Any]) -> object:
+    """Exclude artifact locations and receipt formatting from electrical-policy identity."""
+    if name != "krt":
+        return value
+    return {
+        "tool_commit": (value.get("tool") or {}).get("commit"),
+        "board_stack": value.get("board_stack"),
+        "acceptance_policy": value.get("acceptance_policy"),
+        "acceptance": value.get("acceptance"),
+        "manufacturing_profile": value.get("manufacturing_profile"),
+        "guardrails": value.get("guardrails"),
+        "profiles": value.get("profiles"),
+    }
 
 
 def display_path(path: Path) -> str:
@@ -114,7 +134,11 @@ def compile_policy() -> dict[str, Any]:
         "schema": 1,
         "kind": "design_policy_resolved",
         "inputs": {
-            name: {"path": display_path(path), "sha256": sha256(path)}
+            name: {
+                "path": display_path(path),
+                "sha256": object_sha256(semantic_input(name, values[name])),
+                "source_sha256": sha256(path),
+            }
             for name, path in INPUTS.items()
         },
         "requirements": {
@@ -154,7 +178,11 @@ def compile_policy() -> dict[str, Any]:
 
 
 def policy_sha256(policy: dict[str, Any]) -> str:
-    canonical = json.dumps(policy, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    stable = json.loads(json.dumps(policy))
+    for value in (stable.get("inputs") or {}).values():
+        if isinstance(value, dict):
+            value.pop("source_sha256", None)
+    canonical = json.dumps(stable, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest().upper()
 
 

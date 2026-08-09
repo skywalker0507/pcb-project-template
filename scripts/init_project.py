@@ -34,8 +34,11 @@ def configure_board_stack(layers: int) -> None:
     krt = json.loads(krt_path.read_text(encoding="utf-8"))
     profile = stack["profiles"][active]
     routing = krt["profiles"]["outer_low_risk"]["routing"]
-    routing["layers"] = profile["copper_layers"]
-    routing["layer_costs"] = [1.0] + ([3.0] if layers == 2 else [-1.0, -1.0, 3.0])
+    # KRT's routing layer list is an allow-list. Plane layers must not be
+    # included and then merely discouraged with a negative cost.
+    signal_layers = [layer for layer in profile["copper_layers"] if layer not in profile["forbidden_signal_layers"]]
+    routing["layers"] = signal_layers
+    routing["layer_costs"] = [1.0] if len(signal_layers) == 1 else [1.0, 3.0]
     krt["guardrails"]["forbidden_signal_layers"] = profile["forbidden_signal_layers"]
     krt_path.write_text(json.dumps(krt, indent=2) + "\n", encoding="utf-8")
 
@@ -116,21 +119,21 @@ HOUTINI_LM_PROVIDER = "deepseek"
 HOUTINI_LM_MODEL = "deepseek-v4-flash"
 HOUTINI_LM_ORCHESTRATOR = "codex"
 HOUTINI_LM_DEEPSEEK_THINKING = "disabled"
-HOUTINI_LM_AUTO_MAX_TOKENS = "1600"
-HOUTINI_LM_MAX_INPUT_CHARS = "120000"
+HOUTINI_LM_AUTO_MAX_TOKENS = "800"
+HOUTINI_LM_MAX_INPUT_CHARS = "24000"
 HOUTINI_LM_RESPONSE_METADATA = "none"
 HOUTINI_LM_ALLOWED_ROOTS = '{root_windows}'
 '''
     if with_konnect:
         konnect = ROOT / "tools/konnect/konnect.exe"
-        konnect_config = ROOT / "build/konnect/config.toml"
+        konnect_config = ROOT / ".codex/konnect/config.toml"
         konnect_config.parent.mkdir(parents=True, exist_ok=True)
         konnect_config.write_text(f'''kicad_cli = 'C:\\Program Files\\KiCad\\10.0\\bin\\kicad-cli.exe'
 kicad_binary = 'C:\\Program Files\\KiCad\\10.0\\bin\\kicad.exe'
 project_dir = '{root_windows}'
 ipc_address = ''
 transport = 'stdio'
-jlcpcb_db_path = '{ROOT / "build/konnect/jlcpcb.sqlite"}'
+jlcpcb_db_path = '{ROOT / "build/00-shared/tmp/konnect/jlcpcb.sqlite"}'
 log_level = 'warn'
 ''', encoding="utf-8")
         config += f'''

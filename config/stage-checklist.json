@@ -8,34 +8,55 @@
       "required_evidence": ["CURRENT_STAGE.json", "requirements recorded with explicit unknowns"],
       "forbidden": ["routing", "manufacturing_export", "inventing electrical or fabrication values"]
     },
-    "electrical": {
+    "parts": {
       "number": 2,
-      "files": ["config/electrical-backend.json", "tscircuit/", "build/generated/", "build/design-policy-resolved.json"],
+      "files": ["config/requirements.json", "config/jlcpcb-parts.json", "HARDWARE_SPEC.md"],
+      "objective": "Select exact parts and footprints with manufacturer provenance before electrical implementation.",
+      "required_evidence": ["selected-part provenance", "footprint and polarity review", "explicit availability unknowns"],
+      "forbidden": ["automatic substitution approval", "routing", "manufacturing_export"]
+    },
+    "electrical": {
+      "number": 3,
+      "files": ["config/electrical-backend.json", "tscircuit/", "build/03-electrical/", "build/00-shared/evidence/design-policy/design-policy-resolved.json"],
       "objective": "Validate selected electrical backend sources and part selections.",
       "required_evidence": ["selected-backend electrical build receipt", "selected-part provenance"],
       "forbidden": ["manual schematic authority", "manufacturing_export"]
     },
+    "electrical_freeze": {
+      "number": 4,
+      "files": ["config/electrical-backend.json", "tscircuit/", "config/requirements.json", "handoff/stages/CURRENT_STAGE.json"],
+      "objective": "Freeze reviewed connectivity, references, net names and exact part identities before physical work.",
+      "required_evidence": ["passing electrical build receipt", "designator and net-name freeze", "resolved exact-part mapping"],
+      "forbidden": ["unreviewed connectivity changes", "placement", "routing", "manufacturing_export"]
+    },
     "physical": {
-      "number": 3,
-      "files": ["elec/layout/default/", "config/board-stack.json", "build/design-policy-resolved.json"],
+      "number": 5,
+      "files": ["elec/layout/default/", "config/board-stack.json", "build/00-shared/evidence/design-policy/design-policy-resolved.json"],
       "objective": "Place reviewed blocks and preserve KiCad manual work.",
       "required_evidence": ["board SHA", "placement review notes"],
       "forbidden": ["unreviewed broad autorouting", "manufacturing_export"]
     },
     "routing": {
-      "number": 4,
-      "files": ["config/kicad-routing-tools.json", "build/design-policy-krt.json", "build/candidates/", "build/reports/krt/"],
+      "number": 6,
+      "files": ["config/kicad-routing-tools.json", "build/00-shared/evidence/design-policy/design-policy-krt.json", "build/06-routing/tmp/", "build/06-routing/evidence/"],
       "objective": "Create isolated, audited low-risk routing candidates.",
       "required_evidence": ["candidate receipt", "candidate DRC comparison", "reviewed routing rules when committing real copper"],
       "notes": ["In the four_layer template, In1.Cu and In2.Cu are reserved planes; KRT signal routing is limited to outer layers."],
       "forbidden": ["in-place KRT routing", "treating route_ok as release"]
     },
     "release": {
-      "number": 5,
-      "files": ["config/pcb-acceptance.json", "build/reports/final-routing-audit.json", "build/reports/physical-review.json", "manufacturing/"],
+      "number": 7,
+      "files": ["config/pcb-acceptance.json", "build/07-release/evidence/", "build/07-release/release/", "manufacturing/"],
       "objective": "Run independent DRC, copper review, and guarded manufacturing export.",
       "required_evidence": ["release_pass=true", "matching board SHA", "selected manufacturing profile"],
       "forbidden": ["baseline regeneration to pass", "export without release_pass"]
+    },
+    "prototype": {
+      "number": 8,
+      "files": ["manufacturing/releases/", "handoff/stages/CURRENT_STAGE.json", "build/08-prototype/evidence/"],
+      "objective": "Record assembly inspection and measured bring-up results against the exact released board.",
+      "required_evidence": ["released board SHA", "power and interface measurements", "explicit failures and rework"],
+      "forbidden": ["claiming hardware validation from DRC alone", "silently changing released manufacturing evidence"]
     }
   }
 }

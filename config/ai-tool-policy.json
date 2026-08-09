@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "priority": ["accuracy", "codex_token_efficiency", "latency"],
+  "stages": {
+    "requirements": ["houtini"],
+    "parts": ["houtini"],
+    "electrical": ["tscircuit", "houtini"],
+    "electrical_freeze": ["tscircuit", "houtini"],
+    "physical": ["konnect"],
+    "routing": ["krt", "freerouting", "konnect", "houtini"],
+    "release": ["houtini"],
+    "prototype": ["houtini"]
+  },
+  "houtini": {
+    "role": "Bounded text classification and extraction only; never PCB judgment.",
+    "max_calls_per_failure_class": 1,
+    "require_path_input": true,
+    "require_line_evidence": true
+  },
+  "krt": {
+    "role": "Isolated targeted routing candidates only.",
+    "max_identical_attempts": 2,
+    "require_independent_drc": true
+  },
+  "freerouting": {
+    "role": "Bulk routing of explicitly non-critical leftovers after critical copper is frozen.",
+    "max_profiles": 3,
+    "max_attempts_per_profile": 2,
+    "require_ignored_net_classes": true,
+    "require_independent_drc": true
+  },
+  "konnect": {
+    "role": "Live KiCad placement, queries, and a small number of explicit trace/via edits.",
+    "max_extra_toolsets": 1,
+    "allowed_toolsets": ["pcb_board", "pcb_components", "pcb_routing", "pcb_export", "verification"],
+    "forbidden_toolsets": ["sch_components", "sch_wiring", "sch_batch", "templates", "design_review", "manufacturing"],
+    "forbid_autoroute": true
+  }
+}

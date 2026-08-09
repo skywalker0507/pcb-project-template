@@ -19,6 +19,14 @@ from electrical_backend import read_config, selected_backend
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def portable_path(path: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(ROOT.resolve()).as_posix()
+    except ValueError:
+        return str(resolved)
+
+
 def tree_hash(paths: list[Path]) -> str:
     digest = hashlib.sha256()
     files: list[Path] = []
@@ -110,6 +118,15 @@ def main() -> int:
     parser.add_argument("--objective", required=True)
     parser.add_argument("--open-item", action="append", default=[])
     parser.add_argument("--next-action", action="append", default=[])
+    parser.add_argument("--blocking-condition")
+    parser.add_argument("--blocking-observations", type=int, default=0)
+    parser.add_argument("--safe-alternatives-exhausted", action="store_true")
+    parser.add_argument("--why-user-input-required")
+    parser.add_argument("--board", type=Path, help="Board represented by this handoff; defaults to the configured active board.")
+    parser.add_argument(
+        "--candidate-receipt", action="append", type=Path, default=[],
+        help="Audited isolated-candidate receipt(s) that must match --board.",
+    )
     parser.add_argument(
         "--config",
         type=Path,
@@ -135,6 +152,16 @@ def main() -> int:
     limit = int(config["handoff"].get("max_open_items", 8))
     if len(args.open_item) > limit or len(args.next_action) > limit:
         raise SystemExit(f"Handoff lists are limited to {limit} items")
+    blocked_statuses = {"blocked", "blocked_external_dependency"}
+    if args.status in blocked_statuses:
+        if not args.blocking_condition or not args.why_user_input_required:
+            raise SystemExit("Blocked handoff requires --blocking-condition and --why-user-input-required")
+        if args.blocking_observations < 3:
+            raise SystemExit("Blocked handoff requires --blocking-observations of at least 3")
+        if not args.safe_alternatives_exhausted:
+            raise SystemExit("Blocked handoff requires --safe-alternatives-exhausted")
+    elif any((args.blocking_condition, args.blocking_observations, args.safe_alternatives_exhausted, args.why_user_input_required)):
+        raise SystemExit("Blocking evidence is only valid for a blocked handoff status")
 
     if args.from_pipeline_receipt:
         try:
@@ -143,7 +170,7 @@ def main() -> int:
             raise SystemExit(f"Invalid pipeline receipt: {args.from_pipeline_receipt}: {exc}") from exc
         if not isinstance(pipeline, dict):
             raise SystemExit("Pipeline receipt must contain a JSON object")
-        pipeline["receipt_source"] = str(args.from_pipeline_receipt.resolve())
+        pipeline["receipt_source"] = portable_path(args.from_pipeline_receipt)
         if pipeline.get("success") is not False:
             raise SystemExit("--from-pipeline-receipt requires a failed pipeline receipt")
         if not args.open_item:
@@ -152,7 +179,19 @@ def main() -> int:
             args.next_action = ["Resolve the recorded failure; do not rerun unrelated stages."]
     else:
         pipeline = None if args.skip_pipeline else run_pipeline(args.config)
-    board_path = ROOT / config["project"]["board"]
+    board_path = (args.board if args.board else ROOT / config["project"]["board"]).resolve()
+    if not board_path.is_file():
+        raise SystemExit(f"Handoff board not found: {board_path}")
+    board_sha256 = hashlib.sha256(board_path.read_bytes()).hexdigest().upper()
+    candidate_receipts = []
+    for receipt_path in args.candidate_receipt:
+        try:
+            receipt = json.loads(receipt_path.resolve().read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SystemExit(f"Invalid candidate receipt: {receipt_path}: {exc}") from exc
+        if receipt.get("kind") != "routing_candidate" or receipt.get("candidate_sha256") != board_sha256:
+            raise SystemExit("Candidate receipt does not match the handoff board")
+        candidate_receipts.append(portable_path(receipt_path))
     output = ROOT / config["handoff"]["output"]
     dirty_lines = git("status", "--short").splitlines()
     handoff = {
@@ -174,11 +213,9 @@ def main() -> int:
             ROOT / "config/electrical-backend.json",
             ROOT / str(backend["source_root"]),
         ]),
-        "board_sha256": (
-            hashlib.sha256(board_path.read_bytes()).hexdigest().upper()
-            if board_path.is_file()
-            else None
-        ),
+        "board": portable_path(board_path),
+        "board_sha256": board_sha256,
+        "candidate_receipts": candidate_receipts,
         "git": {
             "commit": git("rev-parse", "HEAD"),
             "dirty": bool(dirty_lines),
@@ -195,6 +232,13 @@ def main() -> int:
             for path in config["handoff"].get("authoritative_docs", [])
         ],
     }
+    if args.status in blocked_statuses:
+        handoff["blocking_evidence"] = {
+            "condition": args.blocking_condition,
+            "observations": args.blocking_observations,
+            "safe_alternatives_exhausted": args.safe_alternatives_exhausted,
+            "why_user_input_required": args.why_user_input_required,
+        }
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
         json.dumps(handoff, ensure_ascii=False, indent=2) + "\n",
@@ -223,7 +267,7 @@ def main() -> int:
                 "## Next actions",
                 *([f"- {item}" for item in args.next_action] or ["- None"]),
                 "",
-                f"Machine-readable handoff: `{output}`",
+                f"Machine-readable handoff: `{portable_path(output)}`",
             ]
         )
         + "\n",

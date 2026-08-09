@@ -1,9 +1,12 @@
 {
   "allowed_violation_items": {},
   "expected_category_counts": {},
-  "required_zones": [],
+  "required_zones": [
+    {"layer": "In1.Cu", "net": "GND"}
+  ],
   "notes": [
     "Start empty: every DRC object, including unconnected items, fails release.",
-    "Add only exact independently reviewed DRC objects to allowed_violation_items."
+    "Add only exact independently reviewed DRC objects to allowed_violation_items.",
+    "The active four-layer USB design requires an In1.Cu GND zone as its continuous reference plane."
   ]
 }

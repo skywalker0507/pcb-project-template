@@ -21,6 +21,8 @@ import sys
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ai_tool_policy import require_tool
+from artifact_store import create_run, finish_run, relative
 from pcb_policy import load_acceptance, reviewed_routing_rules
 from design_policy import require_policy
 from stage_policy import require_operation
@@ -95,10 +97,14 @@ def require_active_stack(config: dict[str, Any], root: Path, profile: dict[str, 
     selected = stack.get("profiles", {}).get(active)
     if not isinstance(selected, dict):
         raise SystemExit(f"Invalid active board stack profile: {active!r}")
-    expected_layers = selected.get("copper_layers")
+    copper_layers = selected.get("copper_layers")
     configured_layers = profile.get("routing", {}).get("layers")
     expected_forbidden = selected.get("forbidden_signal_layers", [])
     configured_forbidden = config.get("guardrails", {}).get("forbidden_signal_layers", [])
+    # KRT routes signals only.  On the four-layer profile the inner copper
+    # layers are intentional planes and must therefore be absent from its
+    # routing-layer list, while still existing in the KiCad stackup.
+    expected_layers = [layer for layer in copper_layers if layer not in expected_forbidden] if isinstance(copper_layers, list) else None
     if configured_layers != expected_layers or configured_forbidden != expected_forbidden:
         raise SystemExit(compact({
             "success": False,
@@ -488,6 +494,7 @@ def run_audit(
         return None
     substitutions = {
         "input": str(source), "output": str(output), "root": str(root),
+        "work_dir": str(log_path.parent / "drc"),
     }
     command = [str(item).format(**substitutions) for item in command_template]
     result = subprocess.run(
@@ -564,6 +571,7 @@ def command_check(args: argparse.Namespace) -> int:
 
 def command_route(args: argparse.Namespace) -> int:
     config, root = load_config(args.config)
+    require_tool("krt")
     if args.profile not in config.get("profiles", {}):
         raise SystemExit(f"Unknown profile: {args.profile}")
     profile = copy.deepcopy(config["profiles"][args.profile])
@@ -573,7 +581,6 @@ def command_route(args: argparse.Namespace) -> int:
     if args.max_ripup is not None:
         profile["routing"]["max_ripup"] = args.max_ripup
     source = resolve(root, args.input)
-    output = resolve(root, args.output)
     if not source.is_file():
         raise SystemExit(f"Input board not found: {source}")
     require_board_stack_matches(source, config, root)
@@ -587,21 +594,21 @@ def command_route(args: argparse.Namespace) -> int:
         "separate_candidate", "input_sha256_preserved", "project_rules_preserved",
         "no_forbidden_signal_layers", "candidate_audit_pass",
     })
+    # A dry run must exercise the same resolved routing contract as a real
+    # candidate route; otherwise it can fail on template nulls or validate a
+    # different command than the one it reports.  The stage mutation guard is
+    # the only behaviour that differs for dry-run.
+    resolved_policy = require_policy("candidate_routing")
+    reviewed_routing_rules(resolve(root, config["manufacturing_profile"]))
+    resolved_routing = resolved_policy.get("routing", {}).get("krt", {})
+    if not isinstance(resolved_routing, dict):
+        raise SystemExit("Resolved design policy has no KRT routing artifact")
+    profile["routing"].update(resolved_routing)
+    # The configured KRT revision does not support a generic overrides file.
+    # Values are passed as reviewed explicit flags from the resolved policy.
+    profile["routing"]["fab_overrides"] = None
     if not args.dry_run:
         require_operation("route")
-        resolved_policy = require_policy("candidate_routing")
-        reviewed_routing_rules(resolve(root, config["manufacturing_profile"]))
-        resolved_routing = resolved_policy.get("routing", {}).get("krt", {})
-        if not isinstance(resolved_routing, dict):
-            raise SystemExit("Resolved design policy has no KRT routing artifact")
-        profile["routing"].update(resolved_routing)
-        # The configured KRT revision does not support a generic overrides file.
-        # Values are passed as reviewed explicit flags from the resolved policy.
-        profile["routing"]["fab_overrides"] = None
-    if output == source:
-        raise SystemExit("Output must be a separate candidate; in-place routing is forbidden")
-    if output.exists() and not args.force:
-        raise SystemExit(f"Refusing to overwrite output: {output}")
     include = args.nets or profile.get("include_nets", [])
     if not include:
         raise SystemExit(compact({
@@ -633,7 +640,7 @@ def command_route(args: argparse.Namespace) -> int:
     artifacts = config.get("artifacts", {})
     max_items = int(artifacts.get("receipt_max_items", 8))
     history_path = resolve(
-        root, artifacts.get("history", "build/reports/krt/history.jsonl")
+        root, artifacts.get("history", "build/06-routing/evidence/krt-history.jsonl")
     )
     source_before = sha256(source)
     source_metrics = board_metrics(source, config.get("guardrails", {}).get("forbidden_signal_layers", []))
@@ -664,10 +671,16 @@ def command_route(args: argparse.Namespace) -> int:
             "next": "Change the profile/net set/routing parameters or use --override-attempt-limit after review",
         }))
     attempt_number = prior_attempts + 1
-    timestamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    timestamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     run_id = args.run_id or f"{args.profile}-{timestamp}"
-    log_path = resolve(root, artifacts.get("log_dir", "build/logs/krt")) / f"{run_id}.log"
-    report_path = resolve(root, artifacts.get("report_dir", "build/reports/krt")) / f"{run_id}.json"
+    run = create_run("routing", "krt", run_id, allow_existing=args.force)
+    output = resolve(root, args.output) if args.output else run.tmp / "candidate.kicad_pcb"
+    if output == source:
+        raise SystemExit("Output must be a separate candidate; in-place routing is forbidden")
+    if output.exists() and not args.force:
+        raise SystemExit(f"Refusing to overwrite output: {output}")
+    log_path = run.tmp / "krt.log"
+    report_path = run.evidence / "krt-report.json"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -694,11 +707,16 @@ def command_route(args: argparse.Namespace) -> int:
             "command": command,
         }
         report_path.write_text(json.dumps(dry_report, indent=2) + "\n", encoding="utf-8")
+        finish_run(
+            run, True,
+            artifacts={"report": relative(report_path)},
+            metrics={"dry_run": True, "attempt_number": attempt_number, "net_count": len(nets)},
+        )
         print(compact({
             "success": True, "dry_run": True, "run_id": run_id,
             "attempt_number": attempt_number,
             "nets": bounded(nets, max_items),
-            "output": str(output), "report": str(report_path),
+            "output": relative(output), "report": relative(report_path),
         }))
         return 0
     if output.exists() and args.force:
@@ -790,6 +808,7 @@ def command_route(args: argparse.Namespace) -> int:
         delegation = create_job(
             [log_path], "krt_candidate_failure",
             "This is an isolated candidate-routing failure. Classify router diagnostics only; do not make routing or release decisions.",
+            output_dir=run.evidence / "delegation",
             job_name=f"krt-{run_id}",
         )
     receipt = {
@@ -841,6 +860,23 @@ def command_route(args: argparse.Namespace) -> int:
     }
     with history_path.open("a", encoding="utf-8") as handle:
         handle.write(compact(history_record) + "\n")
+    finish_run(
+        run, accepted,
+        artifacts={
+            "candidate": relative(output) if output.is_file() else None,
+            "log": relative(log_path),
+            "report": relative(report_path),
+        },
+        metrics={
+            "accepted": accepted,
+            "route_ok": receipt["route_ok"],
+            "attempt_number": attempt_number,
+            "net_count": len(nets),
+        },
+    )
+    receipt["output"] = relative(output) if output.is_file() else str(output)
+    receipt["log"] = relative(log_path)
+    receipt["report"] = relative(report_path)
     print(compact(receipt))
     return 0 if accepted else 2
 
@@ -852,7 +888,7 @@ def command_report(args: argparse.Namespace) -> int:
     if args.path:
         path = resolve(root, args.path)
     else:
-        path = resolve(root, artifacts.get("report_dir", "build/reports/krt")) / f"{args.run_id}.json"
+        path = root / "build/06-routing/evidence" / args.run_id / "krt-report.json"
     if not path.is_file():
         raise SystemExit(f"Run report not found: {path}")
     report = json.loads(path.read_text(encoding="utf-8"))
@@ -878,7 +914,7 @@ def command_report(args: argparse.Namespace) -> int:
 def command_history(args: argparse.Namespace) -> int:
     config, root = load_config(args.config)
     artifacts = config.get("artifacts", {})
-    path = resolve(root, artifacts.get("history", "build/reports/krt/history.jsonl"))
+    path = resolve(root, artifacts.get("history", "build/06-routing/evidence/krt-history.jsonl"))
     if not path.is_file():
         print(compact({"success": True, "history": [], "path": str(path)}))
         return 0
@@ -903,7 +939,7 @@ def parser() -> argparse.ArgumentParser:
     route = commands.add_parser("route", help="Run one policy-controlled route attempt")
     route.add_argument("--profile", required=True)
     route.add_argument("--input", required=True)
-    route.add_argument("--output", required=True)
+    route.add_argument("--output", help="Optional separate candidate; defaults to this run's tmp lane")
     route.add_argument("--nets", nargs="+")
     route.add_argument("--run-id")
     route.add_argument("--grid-step", type=float)

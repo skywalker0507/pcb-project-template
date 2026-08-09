@@ -8,8 +8,9 @@ import hashlib
 import json
 from pathlib import Path
 
+from artifact_store import create_run, finish_run, relative
 from design_policy import DEFAULT_OUTPUT, require_policy
-from stage_policy import require_operation
+from stage_policy import current_stage, require_operation
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,13 +24,27 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--board", type=Path, default=ROOT / "elec/layout/default/default.kicad_pcb")
     parser.add_argument("--policy", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--output", type=Path, default=ROOT / "build/reports/physical-review.json")
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--run-id")
     parser.add_argument("--placement-evidence", action="append", default=[])
     parser.add_argument("--critical-net-evidence", action="append", default=[])
     parser.add_argument("--return-path-evidence", action="append", default=[])
     args = parser.parse_args()
     require_operation("record_review")
-    policy = require_policy("release", args.policy.resolve())
+    run = None
+    if args.output is None:
+        selected_stage = str(current_stage().get("stage"))
+        artifact_stage = selected_stage if selected_stage in {"physical", "release"} else "physical"
+        run = create_run(artifact_stage, "physical-review", args.run_id)
+        output = run.evidence / "physical-review.json"
+    else:
+        output = args.output.resolve()
+    # Placement and return-path review happens before fab-specific routing
+    # geometry is approved.  Requiring the release capability here made it
+    # impossible to retain legitimate physical-stage evidence, even though
+    # the stage policy explicitly permits physical work.  Routing and release
+    # remain separately guarded by their stricter capabilities.
+    policy = require_policy("physical", args.policy.resolve())
     board = args.board.resolve()
     if not board.is_file():
         raise SystemExit(f"Board not found: {board}")
@@ -53,9 +68,15 @@ def main() -> int:
         "evidence": evidence,
         "note": "Evidence is SHA-bound reviewer evidence, not an automatic physical-quality score.",
     }
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"success": receipt["review_pass"], "output": str(args.output.resolve()), "missing_categories": missing, "board_sha256": receipt["board_sha256"]}, separators=(",", ":")))
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if run:
+        finish_run(
+            run, bool(receipt["review_pass"]),
+            artifacts={"physical_review": relative(output)},
+            metrics={"board_sha256": receipt["board_sha256"], "missing_categories": missing},
+        )
+    print(json.dumps({"success": receipt["review_pass"], "output": relative(output), "missing_categories": missing, "board_sha256": receipt["board_sha256"]}, separators=(",", ":")))
     return 0 if receipt["review_pass"] else 2
 
 

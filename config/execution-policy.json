@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "terminal_directive_examples": [
+    "继续",
+    "自行决定",
+    "直到完成",
+    "不要停",
+    "continue",
+    "finish the task"
+  ],
+  "continuation": {
+    "statuses": [
+      "in_progress"
+    ],
+    "candidate_result_is_turn_boundary": false,
+    "candidate_rejection_is_blocker": false,
+    "handoff_is_turn_boundary": false,
+    "elapsed_time_is_completion_evidence": false
+  },
+  "final_reasons": {
+    "stage_complete": {
+      "statuses": [
+        "complete",
+        "completed"
+      ],
+      "requires_empty_next_actions": true
+    },
+    "blocked": {
+      "statuses": [
+        "blocked",
+        "blocked_external_dependency"
+      ],
+      "minimum_observations": 3,
+      "requires_safe_alternatives_exhausted": true,
+      "required_evidence_fields": [
+        "condition",
+        "why_user_input_required"
+      ]
+    },
+    "user_decision": {
+      "requires_material_decision_flag": true,
+      "requires_detail": true
+    },
+    "user_stopped": {
+      "requires_detail": true
+    }
+  },
+  "gate_command": "python scripts/check_turn_exit.py"
+}

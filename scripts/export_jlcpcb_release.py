@@ -24,7 +24,8 @@ KICAD_BIN = Path(r"C:\Program Files\KiCad\10.0\bin")
 STACK_PATH = ROOT / "config/board-stack.json"
 MANUFACTURING_PROFILE_PATH = ROOT / "config/manufacturing-profile.json"
 ACCEPTANCE_PATH = ROOT / "config/pcb-acceptance.json"
-DEFAULT_REVIEW = ROOT / "build/reports/physical-review.json"
+DEFAULT_REVIEW = ROOT / "build/07-release/evidence/manual/physical-review.json"
+DEFAULT_ASSEMBLY_PARTS = ROOT / "config/jlcpcb-parts.json"
 
 
 def run(log, *args: object) -> None:
@@ -116,10 +117,11 @@ def main() -> int:
     parser.add_argument("--acceptance", type=Path, default=ACCEPTANCE_PATH)
     parser.add_argument("--design-policy", type=Path, default=DEFAULT_POLICY)
     parser.add_argument("--physical-review", type=Path, default=DEFAULT_REVIEW)
+    parser.add_argument("--assembly-parts", type=Path, default=DEFAULT_ASSEMBLY_PARTS)
     parser.add_argument(
         "--audit-json",
         type=Path,
-        default=ROOT / "build/reports/final-routing-audit.json",
+        default=ROOT / "build/07-release/evidence/manual/final-routing-audit.json",
         help="Passing audit receipt for this exact board.",
     )
     parser.add_argument(
@@ -130,7 +132,7 @@ def main() -> int:
     parser.add_argument(
         "--log",
         type=Path,
-        default=ROOT / "build/logs/jlcpcb-export.log",
+        default=ROOT / "build/07-release/tmp/manual/jlcpcb-export.log",
     )
     args = parser.parse_args()
     require_operation("export")
@@ -188,6 +190,7 @@ def main() -> int:
             )
             run(
                 log, python, ROOT / "scripts/generate-jlcpcb-assembly.py",
+                "--parts-source", args.assembly_parts.resolve(),
                 "--board-source", board, "--pos-source", position,
                 "--output-dir", assembly,
             )

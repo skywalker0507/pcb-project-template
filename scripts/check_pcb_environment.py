@@ -46,7 +46,7 @@ def main() -> int:
     checks: list[dict[str, object]] = []
     policy_path = root / "config/toolchain-policy.json"
     policy = json.loads(policy_path.read_text(encoding="utf-8")) if policy_path.is_file() else {}
-    resolved_path = root / "build/toolchain-resolved.json"
+    resolved_path = root / "build/00-shared/evidence/toolchain/toolchain-resolved.json"
     resolved = json.loads(resolved_path.read_text(encoding="utf-8")) if resolved_path.is_file() else {}
     backend_path = root / "config/electrical-backend.json"
     backend_config = json.loads(backend_path.read_text(encoding="utf-8")) if backend_path.is_file() else {}
@@ -113,21 +113,22 @@ def main() -> int:
     add(checks, "java", bool(java), java or "not found")
     freerouting_resolved = resolved.get("freerouting", {})
     freerouting = root / "tools/freerouting/freerouting-latest.jar"
-    freerouting_hash = hashlib.sha256(freerouting.read_bytes()).hexdigest().upper() if freerouting.is_file() else "missing"
-    add(checks, "freerouting", freerouting_hash == freerouting_resolved.get("sha256"), f"expected={freerouting_resolved.get('sha256')};actual={freerouting_hash}")
+    freerouting_hash = hashlib.sha256(freerouting.read_bytes()).hexdigest() if freerouting.is_file() else "missing"
+    expected_freerouting_hash = str(freerouting_resolved.get("sha256", "")).lower()
+    add(checks, "freerouting", freerouting_hash.lower() == expected_freerouting_hash, f"expected={freerouting_resolved.get('sha256')};actual={freerouting_hash}")
 
     konnect_resolved = resolved.get("konnect")
     konnect_disabled = isinstance(konnect_resolved, dict) and konnect_resolved.get("disabled") is True
     if not konnect_disabled and (konnect_resolved or policy.get("konnect", {}).get("enabled_by_default", False)):
         konnect = root / "tools/konnect/konnect.exe"
         ok, output = run([str(konnect), "--version"], root) if konnect.is_file() else (False, "missing")
-        binary_hash = hashlib.sha256(konnect.read_bytes()).hexdigest().upper() if konnect.is_file() else "missing"
+        binary_hash = hashlib.sha256(konnect.read_bytes()).hexdigest() if konnect.is_file() else "missing"
         add(
             checks, "konnect",
             bool(konnect_resolved)
             and ok
             and output == konnect_resolved.get("binary_version")
-            and binary_hash == konnect_resolved.get("binary_sha256"),
+            and binary_hash.lower() == str(konnect_resolved.get("binary_sha256", "")).lower(),
             f"version={output};sha256={binary_hash}",
         )
 
@@ -191,7 +192,7 @@ def main() -> int:
     if "krt-repository" in names:
         suggestions.append("Clone the configured KRT fork to tools/KiCadRoutingTools and check out codex/repository-support.")
     if "krt-commit" in names and krt_ok and expected_krt:
-        suggestions.append("Check out the KRT commit recorded in build/toolchain-resolved.json, or record a receipt for the reviewed local commit.")
+        suggestions.append("Check out the KRT commit recorded in build/00-shared/evidence/toolchain/toolchain-resolved.json, or record a receipt for the reviewed local commit.")
     if "krt-python" in names:
         suggestions.append("Create .venv-routingtools, install tools/KiCadRoutingTools/requirements.txt, then run its build_router.py manually.")
     if "freerouting" in names:

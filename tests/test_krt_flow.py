@@ -66,6 +66,22 @@ class KrtFlowTests(unittest.TestCase):
         new = {"type": "clearance", "severity": "error", "items": [{"uuid": "new"}]}
         self.assertNotEqual(audit.violation_identity(old), audit.violation_identity(new))
 
+    def test_drc_fingerprint_tolerates_kicad_overlapping_track_selection(self):
+        common = {
+            "type": "clearance",
+            "severity": "error",
+            "description": "Clearance violation ( clearance 0.2000 mm; actual 0.1250 mm)",
+        }
+        old = {**common, "items": [
+            {"uuid": "short", "description": "Track [USB_5V] on B.Cu, length 2.0000 mm", "pos": {"x": 115.1, "y": 108.0}},
+            {"uuid": "via", "description": "Via [V3V3] on F.Cu - B.Cu", "pos": {"x": 115.65, "y": 108.95}},
+        ]}
+        new = {**common, "items": [
+            {"uuid": "long", "description": "Track [USB_5V] on B.Cu, length 2.9500 mm", "pos": {"x": 115.1, "y": 107.05}},
+            {"uuid": "via", "description": "Via [V3V3] on F.Cu - B.Cu", "pos": {"x": 115.65, "y": 108.95}},
+        ]}
+        self.assertEqual(audit.violation_identity(old), audit.violation_identity(new))
+
     def test_protected_flags_block_equals_and_case_variants(self):
         conflicts = flow.protected_extra_conflicts([
             "--layers=F.Cu", "--Impedance=50", "--bus",

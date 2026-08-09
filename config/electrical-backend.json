@@ -2,8 +2,12 @@
   "schema": 1,
   "active": "tscircuit",
   "contract": {
-    "candidate_root": "build/generated",
-    "required_artifacts": ["candidate_board", "circuit_json", "build_receipt"],
+    "candidate_root": "build/03-electrical/tmp",
+    "required_artifacts": [
+      "candidate_board",
+      "circuit_json",
+      "build_receipt"
+    ],
     "invariant": "Electrical backends generate isolated candidates and must never overwrite elec/layout/default."
   },
   "backends": {

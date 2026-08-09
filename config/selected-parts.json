@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "status": "release_review",
+  "purpose": "Primary-source provenance for the Rev A electrical design. The SHA-bound JLCPCB assembly mapping is config/jlcpcb-parts.json; supplier stock remains volatile and must be rechecked before ordering.",
+  "parts": [
+    {"refs": ["U1"], "mpn": "ESP32-S3-WROOM-1-N16R8", "manufacturer": "Espressif", "source": "https://documentation.espressif.com/esp32-s3-wroom-1_wroom-1u_datasheet_en.pdf", "evidence": "WROOM-1 module with PCB antenna; supply range 3.0–3.6 V."},
+    {"refs": ["J1"], "mpn": "USB4105-GF-A", "manufacturer": "GCT", "source": "https://gct.co/files/drawings/usb4105.pdf", "evidence": "Revision B4 product drawing; J1 land pattern was verified against the recommended layout and is SHA-recorded in config/footprint-provenance.json."},
+    {"refs": ["J2"], "mpn": "TC2050-IDC-NL", "manufacturer": "Tag-Connect", "source": "https://www.tag-connect.com/wp-content/uploads/bsk-pdf-manager/TC2050-IDC-NL_Datasheet_8.pdf", "evidence": "10-pin Plug-of-Nails footprint with explicit keepout and solder-mask constraints."},
+    {"refs": ["U2"], "mpn": "USBLC6-2P6", "manufacturer": "STMicroelectronics", "source": "https://www.st.com/resource/en/datasheet/usblc6-2.pdf", "evidence": "Two-line, low-capacitance USB ESD protector in SOT-666. The verified pin map is 1/6 = I/O1 (D-), 3/4 = I/O2 (D+), 2 = GND, 5 = VBUS."},
+    {"refs": ["U3"], "mpn": "AP63203WU-7", "manufacturer": "Diodes Incorporated", "source": "https://www.diodes.com/datasheet/download/AP63200-AP63201-AP63203-AP63205.pdf", "evidence": "3.3 V fixed-output, 1.1 MHz, 2 A synchronous buck in TSOT26; BST-to-SW capacitor is 100 nF."},
+    {"refs": ["L1"], "mpn": "XGL4030-472MEC", "manufacturer": "Coilcraft", "source": "https://www.coilcraft.com/getmedia/032d9c73-4222-482f-b6bc-7808590e27c9/xgl4030.pdf", "evidence": "4.7 uH XGL4030 shielded inductor. Official data specifies 3.2 A at 20% inductance drop and 6.6 A for 40°C rise; the matching JLCPCB assembly listing is C7159276. Footprint authority is KiCad Inductor_SMD:L_Coilcraft_XxL4030."},
+    {"refs": ["U4"], "mpn": "TMUX1574PWR", "manufacturer": "Texas Instruments", "source": "https://www.ti.com/product/TMUX1574/part-details/TMUX1574PWR", "evidence": "16-pin TSSOP four-channel SPDT switch, bidirectional signal paths, and powered-off protection through 3.6 V."},
+    {"refs": ["U5"], "mpn": "TLV803EA26RDBZR", "manufacturer": "Texas Instruments", "source": "https://www.ti.com/product/TLV803E/part-details/TLV803EA26RDBZR", "evidence": "Active-low open-drain supervisor in 3-pin SOT-23 with fixed delay option."},
+    {"refs": ["Q1", "Q3", "Q4"], "mpn": "2N7002LT1G", "manufacturer": "onsemi", "source": "https://www.onsemi.com/PowerSolutions/MaterialComposition.do?export=pdf&opnId=2N7002LT1G", "evidence": "60 V N-channel SOT-23 MOSFET; electrical data-sheet and pinout must be attached before footprint freeze."},
+    {"refs": ["Q5"], "mpn": "AO3400A", "manufacturer": "Alpha & Omega Semiconductor", "source": "https://www.aosmd.com/res/data_sheets/AO3400A.pdf", "evidence": "30 V N-channel SOT-23 MOSFET."},
+    {"refs": ["Q2"], "mpn": "AO3401A", "manufacturer": "Alpha & Omega Semiconductor", "source": "https://aosmd.com/res/data_sheets/AO3401A.pdf", "evidence": "30 V P-channel SOT-23 MOSFET; source/drain orientation is a release-critical check."},
+    {"refs": ["D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15"], "mpn": "PESD3V3U1UL,315", "manufacturer": "Nexperia", "source": "https://www.nexperia.com/product/PESD3V3U1UL", "evidence": "Ultra-low capacitance unidirectional ESD diode in SOD882."},
+    {"refs": ["D1"], "mpn": "SMBJ5.0A", "manufacturer": "Littelfuse", "source": "https://www.littelfuse.com/products/tvs-diodes/surface-mount/smbj", "evidence": "5 V standoff unidirectional TVS in DO-214AA/SMB; assembly mapping C83333."},
+    {"refs": ["F1"], "mpn": "1206L075/16WR", "manufacturer": "Littelfuse", "source": "https://www.littelfuse.com/products/polyswitch-resettable-pptcs/surface-mount/1206l", "evidence": "750 mA hold, 16 V resettable PTC in 1206; assembly mapping C371166."},
+    {"refs": ["SW1", "SW2"], "mpn": "EVQPUJ02K", "manufacturer": "Panasonic", "source": "https://industrial.panasonic.com/ww/products/pt/tactile-switch/light-touch/number/evqpuj02k", "evidence": "Top-actuated tactile switch matching the Panasonic EVQPUJ/EVQPUA land pattern; assembly mapping C2936858."},
+    {"refs": ["LED1"], "mpn": "LTST-C190KGKT", "manufacturer": "Lite-On", "source": "https://www.lcsc.com/product-detail/C125094.html", "evidence": "Specified yellow-green 0603 power indicator; assembly mapping C125094."},
+    {"refs": ["LED2"], "mpn": "LTST-C190TBKT", "manufacturer": "Lite-On", "source": "https://www.lcsc.com/product-detail/C125096.html", "evidence": "Specified blue 0603 status indicator; assembly mapping C125096."}
+  ],
+  "release_notes": [
+    "config/jlcpcb-parts.json maps every SMD position to an exact MPN and LCSC number and is bound to the released board SHA-256.",
+    "J2 is a no-component Tag-Connect footprint; J3 and J4 are through-hole headers and are intentionally absent from the SMD assembly BOM/CPL.",
+    "PESD3V3U1UL,315 (C552530) and EVQPUJ02K (C2936858) were out of stock at the 2026-08-09 review. Do not silently substitute them; recheck stock or perform a reviewed alternate-part change before ordering.",
+    "Always inspect JLCPCB's placement preview and polarity/orientation warnings before approving an order."
+  ]
+}

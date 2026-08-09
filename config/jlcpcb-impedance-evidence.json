@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "retrieved_at": "2026-08-08",
+  "manufacturer": "JLCPCB",
+  "calculator": "https://jlcpcb.com/pcb-impedance-calculator/",
+  "calculator_api": "https://jlcpcb.com/api/jlcTools/impedance/calc",
+  "stackup": {
+    "template": "JLC04161H-3313A",
+    "layers": 4,
+    "finished_thickness_mm": 1.6,
+    "outer_copper_oz": 1.0,
+    "inner_copper_oz": 0.5,
+    "laminate": "NP-155F",
+    "l1_to_l2_prepreg_mm": 0.107,
+    "l1_to_l2_dielectric_constant": 4.1
+  },
+  "usb2_differential": {
+    "target_ohm": 90,
+    "signal_layer": "L1",
+    "reference_layer": "L2",
+    "topology": "edge-coupled coated microstrip",
+    "calculator_request_mil": {
+      "H1": 4.2,
+      "Er1": 4.1,
+      "T1": 1.6,
+      "C1": 1.2,
+      "C2": 0.6,
+      "C3": 1.2,
+      "CEr": 3.8,
+      "Zo": 90
+    },
+    "calculator_response_mil": {
+      "dImpedance": 90.0045754479,
+      "W1_base_width": 6.66289001465,
+      "W2_top_width": 5.96289001465,
+      "S1_pair_gap": 8.0
+    },
+    "pcb_geometry_mm": {
+      "base_width": 0.1692374064,
+      "pair_gap": 0.2032
+    },
+    "limitations": [
+      "This evidence binds the USB L1 differential pair only; it does not establish generic via geometry.",
+      "Final order must select the recorded JLC04161H-3313A stackup or recalculate before release."
+    ]
+  }
+}

@@ -275,12 +275,12 @@ def main() -> int:
     parser.add_argument(
         "--drc-report",
         type=Path,
-        default=ROOT / "build/reports/final-kicad-cli-drc.rpt",
+        default=ROOT / "build/07-release/evidence/manual/drc/kicad-cli-drc.rpt",
     )
     parser.add_argument(
         "--audit-json",
         type=Path,
-        default=ROOT / "build/reports/final-routing-audit.json",
+        default=ROOT / "build/07-release/evidence/manual/final-routing-audit.json",
     )
     parser.add_argument("--require-in1-ground", action="store_true")
     parser.add_argument(

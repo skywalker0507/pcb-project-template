@@ -1,10 +1,25 @@
 {
   "schema": 1,
-  "selected": false,
-  "manufacturer": null,
-  "source": null,
+  "selected": true,
+  "manufacturer": "JLCPCB",
+  "source": "https://jlcpcb.com/pcb-impedance-calculator/",
+  "routing_rules": {
+    "reviewed": true,
+    "source": "https://jlcpcb.com/pcb-impedance-calculator/",
+    "values": {
+      "track_width": 0.2,
+      "clearance": 0.2,
+      "via_size": 0.45,
+      "via_drill": 0.2
+    },
+    "evidence": [
+      "https://jlcpcb.com/capabilities/Capabilities?type=1 lines 201-202: multilayer 1 oz minimum track/spacing 0.09/0.09 mm.",
+      "https://jlcpcb.com/capabilities/Capabilities?type=1 lines 217-218: SMD pad-to-pad minimum 0.15 mm; the reviewed 0.20 mm board default preserves margin for USB-C fine pitch.",
+      "config/jlcpcb-impedance-evidence.json: USB pair retains calculator-derived 0.1692374064 mm width and 0.2032 mm gap."
+    ]
+  },
   "notes": [
-    "Set selected=true only after choosing a manufacturer process and recording its authoritative source.",
-    "Do not add widths, clearances, impedance, or stackup values here without reviewed manufacturer evidence."
+    "Selection records provenance only. Run apply_reviewed_fab_values.py after independent review before real routing.",
+    "The listed 0.20 mm default is a manufacturability rule, not an approval for high-current power copper. Power-net geometry requires its own reviewed current-capacity evidence."
   ]
 }

@@ -9,6 +9,7 @@ tools/freerouting/
 tools/konnect/
 .codex/config.toml
 .codex/pcb-mcp.fragment.toml
+.codex/konnect/
 __pycache__/
 *.py[cod]
 *.kicad_prl

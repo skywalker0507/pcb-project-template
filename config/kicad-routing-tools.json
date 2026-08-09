@@ -4,7 +4,7 @@
     "repository": "tools/KiCadRoutingTools",
     "python": ".venv-routingtools/Scripts/python.exe",
     "router_script": "route.py",
-    "commit": "abd7f2c32c4987a6865a95690dd6df268ad2d6cd"
+    "commit": "a1fe47f02e309cb27902e4027fdf23d75a0e51ff"
   },
   "kicad_cli": "C:/Program Files/KiCad/10.0/bin/kicad-cli.exe",
   "board_stack": "config/board-stack.json",
@@ -16,7 +16,10 @@
   },
   "manufacturing_profile": "config/manufacturing-profile.json",
   "guardrails": {
-    "forbidden_signal_layers": []
+    "forbidden_signal_layers": [
+      "In1.Cu",
+      "In2.Cu"
+    ]
   },
   "profiles": {
     "outer_low_risk": {
@@ -54,12 +57,76 @@
         "fab_overrides": null,
         "extra_args": []
       }
+    },
+    "outer_control_clock": {
+      "require_explicit_include": true,
+      "include_nets": [],
+      "exclude_nets": [
+        "*GND*",
+        "*gnd*",
+        "*VCC*",
+        "*vcc*",
+        "*VDD*",
+        "*vdd*",
+        "USB*",
+        "usb*"
+      ],
+      "routing": {
+        "layers": [
+          "F.Cu",
+          "B.Cu"
+        ],
+        "layer_costs": [
+          1.0,
+          3.0
+        ],
+        "track_width": null,
+        "clearance": null,
+        "via_size": null,
+        "via_drill": null,
+        "grid_step": 0.1,
+        "max_ripup": 3,
+        "hole_to_hole_clearance": null,
+        "board_edge_clearance": null,
+        "fab_overrides": null,
+        "extra_args": []
+      }
+    },
+    "outer_power": {
+      "require_explicit_include": true,
+      "include_nets": [],
+      "exclude_nets": [
+        "*GND*",
+        "*gnd*",
+        "USB*",
+        "usb*",
+        "*CLK*",
+        "*clk*"
+      ],
+      "routing": {
+        "layers": [
+          "F.Cu",
+          "B.Cu"
+        ],
+        "layer_costs": [
+          1.0,
+          3.0
+        ],
+        "track_width": 1.27,
+        "clearance": null,
+        "via_size": null,
+        "via_drill": null,
+        "grid_step": 0.1,
+        "max_ripup": 3,
+        "hole_to_hole_clearance": null,
+        "board_edge_clearance": null,
+        "fab_overrides": null,
+        "extra_args": []
+      }
     }
   },
   "artifacts": {
-    "log_dir": "build/logs/krt",
-    "report_dir": "build/reports/krt",
-    "history": "build/reports/krt/history.jsonl",
+    "history": "build/06-routing/evidence/krt-history.jsonl",
     "receipt_max_items": 8
   },
   "attempt_policy": {
@@ -77,7 +144,7 @@
       "--kicad-cli",
       "C:/Program Files/KiCad/10.0/bin/kicad-cli.exe",
       "--work-dir",
-      "build/reports/krt/drc"
+      "{work_dir}"
     ]
   }
 }

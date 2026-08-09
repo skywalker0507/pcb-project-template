@@ -8,8 +8,8 @@
   "delegate": {
     "kind": "summarize",
     "thinking": "disabled",
-    "max_tokens": 1200,
-    "max_chars": 4800,
+    "max_tokens": 800,
+    "max_chars": 3200,
     "output_contract": "Return JSON only: classification, open_items (at most 8), evidence (path:line), unknowns. Do not recommend electrical, routing, DRC waiver, or release decisions."
   }
 }

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from stage_policy import ROOT, current_stage
 from validate_requirements import problems
+from artifact_store import config as artifact_config, stage_directory
 
 
 def load(path: Path) -> dict[str, object]:
@@ -19,7 +20,11 @@ def main() -> int:
     checklist = load(ROOT / "config/stage-checklist.json")
     acceptance = load(ROOT / "config/pcb-acceptance.json")
     stack = load(ROOT / "config/board-stack.json")
+    execution = load(ROOT / "config/execution-policy.json")
     requirements = load(ROOT / "config/requirements.json")
+    artifacts = artifact_config()
+    tool_policy = load(ROOT / "config/ai-tool-policy.json")
+    entrypoint_policy = load(ROOT / "config/tool-entrypoints.json")
     stage_rules = checklist.get("stages", {}).get(stage.get("stage"), {})
     number = stage_rules.get("number")
     label = f"{int(number):02d}-{stage.get('stage')}" if isinstance(number, int) else stage.get("stage")
@@ -38,6 +43,23 @@ def main() -> int:
         "board_stack": stack.get("active"),
         "release_requires": (acceptance.get("release") or {}).get("requires", []),
         "requirements_issues": problems(requirements)[:8],
+        "execution": {
+            "continue_statuses": (execution.get("continuation") or {}).get("statuses", []),
+            "candidate_result_is_turn_boundary": (execution.get("continuation") or {}).get("candidate_result_is_turn_boundary"),
+            "candidate_rejection_is_blocker": (execution.get("continuation") or {}).get("candidate_rejection_is_blocker"),
+            "handoff_is_turn_boundary": (execution.get("continuation") or {}).get("handoff_is_turn_boundary"),
+            "final_gate": execution.get("gate_command"),
+        },
+        "artifacts": {
+            "stage_root": str(stage_directory(str(stage.get("stage")), artifacts)),
+            "lanes": artifacts.get("lanes", {}),
+            "context_budget": artifacts.get("context_budget", {}),
+        },
+        "allowed_ai_tools": (tool_policy.get("stages") or {}).get(stage.get("stage"), []),
+        "tool_entrypoints": {
+            name: (entrypoint_policy.get("entrypoints") or {}).get(name)
+            for name in (entrypoint_policy.get("stage_capabilities") or {}).get(stage.get("stage"), [])
+        },
         "read_only_default": True,
         "instruction": "Do not read a full .kicad_pcb by default; use compact receipts or query_pcb_context.py slices.",
     }

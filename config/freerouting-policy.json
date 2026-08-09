@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "max_passes": 10,
+  "max_threads": 4,
+  "optimizer_enabled": false,
+  "require_ignored_net_classes": true,
+  "notes": [
+    "Critical routes, power paths, planes and placement must be frozen before this flow.",
+    "This policy deliberately contains no invented numeric geometry rules.",
+    "A successful SES is an isolated candidate and still requires import, render and independent KiCad DRC."
+  ]
+}

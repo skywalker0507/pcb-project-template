@@ -31,6 +31,8 @@ houtini_job = load("houtini_job_template", "scripts/create_houtini_job.py")
 design_policy = load("design_policy_template", "scripts/design_policy.py")
 fab_values = load("fab_values_template", "scripts/apply_reviewed_fab_values.py")
 electrical_backend = load("electrical_backend_template", "scripts/electrical_backend.py")
+tool_entrypoints = load("tool_entrypoints_template", "scripts/check_tool_entrypoints.py")
+script_search = load("script_search_template", "scripts/find_existing_script.py")
 
 
 class FlowTemplateTests(unittest.TestCase):
@@ -95,6 +97,51 @@ class FlowTemplateTests(unittest.TestCase):
 
     def test_freerouting_defaults_to_shared_acceptance_policy(self) -> None:
         self.assertTrue(freerouting.DEFAULT_ACCEPTANCE.name == "pcb-acceptance.json")
+
+    def test_freerouting_extracts_declared_classes_without_full_dsn_context(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            dsn = Path(directory) / "candidate.dsn"
+            dsn.write_text('(network (class "Power Rails" GND VCC) (class signals RX TX))', encoding="utf-8")
+            self.assertEqual(freerouting.dsn_net_classes(dsn), {"Power Rails", "signals"})
+
+    def test_freerouting_command_is_always_headless(self) -> None:
+        command = freerouting.build_freerouting_command(
+            Path("freerouting.jar"), Path("input.dsn"), Path("output.ses"),
+            heap_gb=4,
+            policy={"optimizer_enabled": False, "max_passes": 10, "max_threads": 2},
+            ignored_net_classes=["GND", "POWER"],
+        )
+        self.assertIn("--gui.enabled=false", command)
+        self.assertEqual(command.count("--gui.enabled=false"), 1)
+        self.assertEqual(command[command.index("-inc") + 1], "GND,POWER")
+        self.assertNotIn("--gui.enabled=true", command)
+
+    def test_reviewed_tool_entrypoints_have_no_direct_freerouting_bypass(self) -> None:
+        result = tool_entrypoints.audit()
+        self.assertTrue(result["success"], result["problems"])
+        self.assertEqual(result["freerouting"]["entrypoint"], "scripts/run_freerouting_headless.py")
+
+    def test_existing_script_search_finds_freerouting_wrapper(self) -> None:
+        result = script_search.search(["freerouting"], limit=3)
+        self.assertIn("scripts/run_freerouting_headless.py", [item["path"] for item in result["results"]])
+
+    def test_artifact_store_has_eight_stages_and_three_lanes(self) -> None:
+        artifacts = json.loads((ROOT / "config/build-artifacts.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(artifacts["stages"]), 8)
+        self.assertEqual(artifacts["lanes"], {"tmp": "tmp", "evidence": "evidence", "release": "release"})
+        self.assertEqual(artifacts["context_budget"]["max_context_slice_bytes"], 6000)
+
+    def test_krt_artifact_paths_do_not_change_electrical_policy_identity(self) -> None:
+        value = {
+            "tool": {"commit": "abc"},
+            "profiles": {"outer_low_risk": {"routing": {"layers": ["F.Cu", "B.Cu"]}}},
+            "guardrails": {"forbidden_signal_layers": []},
+            "artifacts": {"log_dir": "build/old"},
+        }
+        first = design_policy.object_sha256(design_policy.semantic_input("krt", value))
+        value["artifacts"]["log_dir"] = "build/06-routing/tmp"
+        second = design_policy.object_sha256(design_policy.semantic_input("krt", value))
+        self.assertEqual(first, second)
 
     def test_requirements_reject_empty_record(self) -> None:
         self.assertIn("record at least one requirement or explicit unknown", requirements.problems({

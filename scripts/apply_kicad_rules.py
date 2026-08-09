@@ -23,7 +23,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--board", type=Path, default=ROOT / "elec/layout/default/default.kicad_pcb")
     parser.add_argument("--policy", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--receipt", type=Path, default=ROOT / "build/reports/kicad-rules-apply.json")
+    parser.add_argument("--receipt", type=Path, default=ROOT / "build/06-routing/evidence/manual/kicad-rules-apply.json")
     args = parser.parse_args()
     require_operation("apply_rules")
     policy = require_policy("candidate_routing", args.policy.resolve())

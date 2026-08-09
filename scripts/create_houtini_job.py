@@ -13,10 +13,13 @@ from pathlib import Path
 import sys
 from typing import Any
 
+from ai_tool_policy import require_tool
+from artifact_store import config as artifact_config, create_run
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_POLICY = ROOT / "config/houtini-delegation-policy.json"
-DEFAULT_OUTPUT_DIR = ROOT / "build/delegated"
+DEFAULT_OUTPUT_DIR = None
 
 
 def read_policy(path: Path) -> dict[str, Any]:
@@ -39,8 +42,9 @@ def under_root(path: Path) -> bool:
 
 def create_job(
     paths: list[Path], task_type: str, reason: str, policy_path: Path = DEFAULT_POLICY,
-    output_dir: Path = DEFAULT_OUTPUT_DIR, job_name: str | None = None,
+    output_dir: Path | None = DEFAULT_OUTPUT_DIR, job_name: str | None = None,
 ) -> dict[str, Any]:
+    require_tool("houtini")
     policy = read_policy(policy_path.resolve())
     if policy.get("enabled") is not True:
         return {"eligible": False, "reason": "delegation_disabled"}
@@ -64,6 +68,10 @@ def create_job(
     if not isinstance(delegate, dict):
         raise SystemExit("Houtini delegation policy has no delegate settings")
     safe_name = "".join(char if char.isalnum() or char in "-_" else "-" for char in (job_name or task_type))[:80]
+    if output_dir is None:
+        from stage_policy import current_stage
+        run = create_run(str(current_stage().get("stage")), "houtini", allow_existing=False)
+        output_dir = run.evidence / "delegation"
     output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     job_path = output_dir / f"{safe_name}-houtini-job.json"
@@ -79,8 +87,14 @@ def create_job(
             "paths": [str(path) for path in resolved],
             "kind": delegate.get("kind", "summarize"),
             "thinking": delegate.get("thinking", "disabled"),
-            "max_tokens": delegate.get("max_tokens", 1200),
-            "max_chars": delegate.get("max_chars", 4800),
+            "max_tokens": min(
+                int(delegate.get("max_tokens", 800)),
+                int((artifact_config().get("context_budget") or {}).get("max_delegated_output_tokens", 800)),
+            ),
+            "max_chars": min(
+                int(delegate.get("max_chars", 3200)),
+                int((artifact_config().get("context_budget") or {}).get("max_delegated_output_chars", 3200)),
+            ),
         },
     }
     job_path.write_text(json.dumps(job, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -93,7 +107,7 @@ def main() -> int:
     parser.add_argument("--reason", required=True)
     parser.add_argument("--path", type=Path, action="append", required=True)
     parser.add_argument("--policy", type=Path, default=DEFAULT_POLICY)
-    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--job-name")
     args = parser.parse_args()
     result = create_job(args.path, args.task_type, args.reason, args.policy, args.output_dir, args.job_name)
