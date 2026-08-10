@@ -1,31 +1,32 @@
 {
   "schema": 1,
-  "active": "tscircuit",
+  "active": "atopile",
   "contract": {
     "candidate_root": "build/03-electrical/tmp",
     "required_artifacts": [
       "candidate_board",
-      "circuit_json",
       "build_receipt"
     ],
-    "invariant": "Electrical backends generate isolated candidates and must never overwrite elec/layout/default."
+    "optional_artifacts_are_backend_private": true,
+    "freeze_receipt_kind": "electrical_freeze",
+    "invariant": "Reviewed atopile source is the production electrical authority. Backends generate isolated candidates and must never overwrite a reviewed physical board."
   },
   "backends": {
+    "atopile": {
+      "driver": "scripts/build_atopile_isolated.py",
+      "source_root": "src",
+      "entry": "main.ato:App",
+      "runtime": "wsl-ato",
+      "platform": "wsl-native",
+      "status": "primary"
+    },
     "tscircuit": {
       "driver": "scripts/build_tscircuit_isolated.py",
       "source_root": "tscircuit",
       "entry": "src/main.tsx",
       "runtime": "bun",
       "platform": "windows-native",
-      "status": "primary"
-    },
-    "atopile": {
-      "driver": "scripts/build_atopile_isolated.py",
-      "source_root": "src",
-      "entry": "src/main.ato:App",
-      "runtime": "wsl-ato",
-      "platform": "compatibility-only",
-      "status": "legacy"
+      "status": "experimental"
     }
   }
 }

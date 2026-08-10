@@ -9,6 +9,7 @@ still needs resolution before a human may consider importing it.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -68,7 +69,7 @@ def main() -> int:
         if not isinstance(board_value, str):
             raise ValueError("candidate_board is absent")
         board = Path(board_value).resolve()
-        board.relative_to(ROOT / "build" / "generated")
+        board.relative_to(ROOT / "build")
         if not board.is_file():
             raise ValueError("candidate_board does not exist")
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
@@ -92,6 +93,8 @@ def main() -> int:
     ])
     result.update({
         "candidate_board": str(board),
+        "candidate_board_sha256": hashlib.sha256(board.read_bytes()).hexdigest().upper(),
+        "electrical_backend": build.get("backend"),
         "drc_report": str(drc_report),
         "render": str(render),
         "commands": {"drc_exit_code": drc_code, "render_exit_code": render_code},

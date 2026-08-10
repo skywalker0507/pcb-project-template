@@ -1,7 +1,8 @@
 # Konnect integration boundary
 
-Konnect is the default live KiCad MCP backend and replaces the older
-KiCAD-MCP-Server integration. It does not replace KiCadRoutingTools (KRT).
+Konnect is the fallback/reference live KiCad MCP backend and replaces the older
+KiCAD-MCP-Server integration. EasyEDA Pro is the primary physical backend;
+Konnect does not replace KiCadRoutingTools (KRT).
 
 ## Why it replaces KiCAD-MCP-Server
 
@@ -27,8 +28,7 @@ longer exposes the required DSN/SES round trip through `kicad-cli`.
 
 ## Project policy
 
-- The selected backend in `config/electrical-backend.json` is the electrical
-  authority (tscircuit by default; atopile only as its legacy adapter); do not use
+- Reviewed atopile source is the electrical authority; do not use
   Konnect to edit generated schematics or instantiate reference circuits;
 - use Konnect only with the intended board open in KiCad and the KiCad API
   enabled;
@@ -38,13 +38,12 @@ longer exposes the required DSN/SES round trip through `kicad-cli`.
 - DRC success does not waive return-path, impedance, mechanical or fabrication
   review.
 
-## tscircuit handoff
+## KiCad fallback handoff
 
-tscircuit produces Circuit JSON, a KiCad schematic, a KiCad PCB candidate and
-a local footprint library in an isolated `build/03-electrical/tmp/<run-id>/` directory.
-It is not a live KiCad editor and it is not a replacement for Konnect. Use the
-candidate as the electrical starting point; use Konnect only after intentionally
-opening the intended KiCad board with its API socket available.
+atopile produces an isolated KiCad PCB candidate, which becomes physical input
+only after electrical validation, candidate review, and electrical freeze.
+EasyEDA import must pass parity first. Use Konnect only for an intentional
+KiCad fallback/reference operation with the intended board open.
 
 Before an import, run independent review evidence:
 

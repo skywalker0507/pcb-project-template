@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Build a tscircuit design into an isolated KiCad candidate directory.
 
-This script deliberately never writes elec/layout/default.  The tscircuit
-package owns Circuit JSON and a generated KiCad candidate; KiCad remains the
-authority for a reviewed physical board.
+This experimental adapter deliberately never writes a reviewed physical board.
+Circuit JSON remains backend-private; only the generated KiCad candidate and
+common receipt cross the electrical-backend boundary.
 """
 
 from __future__ import annotations

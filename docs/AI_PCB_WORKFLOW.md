@@ -29,9 +29,10 @@ source changes, run it with `--build`: this creates only an isolated electrical
 candidate, then stops so it cannot audit or export a stale reviewed board.
 Run `review_electrical_candidate.py --receipt <electrical-build.json> --output
 <new-review-directory>` to generate independent candidate DRC and render
-evidence. Deliberately import and review the candidate before running the normal KiCad
-pipeline. Add `--export` only after review when manufacturing output is
-intentionally regenerated.
+evidence, then create the SHA-bound electrical freeze. Import only that frozen
+`.kicad_pcb` through the EasyEDA bridge and require
+`check_easyeda_import_parity.py` to pass before placement. Add `--export` only
+after EasyEDA DRC, independent KiCad validation and JLC DFM receipts exist.
 
 Before physical/routing/release work, run `python scripts/compile_design_policy.py`.
 KRT, FreeRouting candidates and export require a fresh policy with the relevant
@@ -43,12 +44,14 @@ next meaningful stage in a fresh Codex session.
 
 ## Tool roles
 
-- tscircuit (default): TypeScript/React electrical design, Circuit JSON, and
-  isolated KiCad candidate baseline;
-- atopile (legacy adapter): optional compatibility backend only; it must not be
-  required by a tscircuit project;
-- Konnect MCP: live placement, routing, rendering and operations not represented
-  by deterministic scripts;
+- atopile (default): reviewed production electrical source and isolated KiCad
+  candidate generation;
+- tscircuit: optional experimental A/B backend; its Circuit JSON is private to
+  that adapter and is not part of the common electrical contract;
+- EasyEDA Pro: primary placement, physical editing, routing orchestration, DRC,
+  and JLC DFM backend once its official bridge/API adapter is connected;
+- KiCad CLI: interchange, independent DRC/connectivity validation, and fallback;
+- Konnect MCP: KiCad fallback/reference live operations not represented by deterministic scripts;
 - Houtini-LM: bounded, non-authoritative text work;
 - KRT: guarded candidate copper, followed by independent audit;
 - FreeRouting: headless DSN-to-SES candidate artifact only. Import its SES into

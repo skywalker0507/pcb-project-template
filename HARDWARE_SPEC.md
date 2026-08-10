@@ -3,7 +3,7 @@
 ## 1. Scope
 
 Implement the exact Rev A ESP32-S3 remote flashing probe described here. The
-first tscircuit comparison must preserve the existing topology, MPNs, connector
+first reviewed atopile migration must preserve the existing topology, MPNs, connector
 pin order and supported 3.0–3.6 V target range.
 
 Rev A is initially for STM32 targets. The ESP32-S3 connects to Wi-Fi and runs

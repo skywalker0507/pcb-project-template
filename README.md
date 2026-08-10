@@ -1,11 +1,15 @@
 # AI PCB project template
 
-Token-efficient, reproducible tscircuit-first and KiCad project template for Codex.
+Token-efficient, reproducible atopile-first PCB project template for Codex, with
+EasyEDA Pro as the primary physical backend and KiCad retained as interchange,
+independent validator, and fallback.
 It combines:
 
-- a native Windows tscircuit/Bun electrical backend that emits Circuit JSON and
-  isolated KiCad candidates;
-- an optional, removable atopile compatibility adapter;
+- reviewed atopile source as the production electrical authority and isolated
+  `.kicad_pcb` candidates as the electrical-to-physical handoff;
+- an optional experimental tscircuit/Bun backend for A/B research;
+- an EasyEDA Pro physical-backend contract with deterministic import parity,
+  DRC, and JLC DFM receipt gates (the official bridge/API adapter is pending);
 - the latest `pcb-ai-adapter` branch of the Houtini-LM fork;
 - the project-maintained KiCadRoutingTools `codex/repository-support` checkout
   behind a guarded adapter;
@@ -41,10 +45,10 @@ network is reliable, then record their local versions and hashes with
 `python scripts/record_toolchain_receipt.py`. API keys are never written to the
 repository.
 
-System prerequisites are Git, Python 3.10+, Node.js 18+, Bun, Java 25 and
-KiCad 10. WSL Ubuntu and atopile are only needed when deliberately selecting
-the legacy atopile backend. The environment check reports missing prerequisites
-and manual remediation steps without changing the machine.
+System prerequisites for the production path are Git, Python 3.10+, Java 25,
+KiCad 10, WSL Ubuntu and atopile. Node.js and Bun are required only when running
+the experimental tscircuit backend. The environment check reports missing
+prerequisites and manual remediation steps without changing the machine.
 
 Konnect replaces the old KiCAD-MCP-Server integration. It is complementary to
 KRT: Konnect's routing tools add explicit trace/via geometry through the live
@@ -60,10 +64,23 @@ python scripts/check_pcb_environment.py --deep
 `--deep` includes a selected-backend smoke check and KRT capability check. A
 passing router check is not PCB release approval.
 
-The initial tscircuit entry and reviewed requirements record are a deliberately
-non-manufacturing, one-resistor smoke test. Replace both with the actual product
-requirements and design before selecting parts, opening a physical layout, or
-creating manufacturing artifacts.
+The template `.ato` entry may be a deliberately non-manufacturing scaffold.
+Replace it with reviewed product sources before creating an electrical freeze,
+opening physical layout work, or creating manufacturing artifacts.
+
+The authority chain is:
+
+```text
+requirements -> atopile -> electrical checks -> ELECTRICAL_FREEZE
+             -> .kicad_pcb interchange -> EasyEDA Pro -> KRT
+             -> EasyEDA DRC + independent KiCad validation -> JLC DFM -> release
+```
+
+`config/backend-architecture.json` keeps electrical backend, physical backend,
+routing engine, validation backend, and manufacturing backend as separate
+roles. KRT is not coupled to the KiCad GUI. Router success never proves release.
+The pending official adapter contract is documented in
+`docs/EASYEDA_BRIDGE_CONTRACT.md`.
 
 Before each new session, run `python scripts/session_boot.py`; it replaces opening the whole board or long logs by default. Use `python scripts/select_manufacturing_profile.py --manufacturer <name> --source <URL-or-card>` to record a reviewed process source before manufacturing export; this command does not invent fabrication values.
 
@@ -113,9 +130,11 @@ copper renders alongside hash-manifested release evidence.
 
 Use `python scripts/stage_doctor.py` at session start. It returns the current stage, bounded blockers, and one next command. `config/requirements.json` is the structured requirements record; validate it with `python scripts/validate_requirements.py` before electrical capture.
 
-Manufacturing exports are SHA-bound to a passing KiCad release-audit receipt. Use
-`run_pcb_pipeline.py --export`; invoking the export script directly also
-requires the matching audit JSON and cannot bypass DRC approval.
+Manufacturing exports are SHA-bound to passing EasyEDA import parity, EasyEDA
+DRC, JLC DFM, independent KiCad release audit, and physical-review receipts.
+Use `run_pcb_pipeline.py --export`; invoking the export script directly also
+requires the matching consolidated manufacturing-gate receipt and cannot
+bypass DRC/DFM approval.
 
 After `python scripts/run_pcb_pipeline.py --build`, independently inspect the
 new candidate using the receipt path printed by the build:
@@ -160,9 +179,11 @@ python scripts/assess_routing_escalation.py --audit <rejected-audit-1.json> --au
 
 ## Project layout
 
-- `tscircuit/`: default electrical design authority and locked native toolchain;
-- `src/` and `ato.yaml`: optional legacy atopile source only;
-- `elec/layout/`: single KiCad layout authority;
+- `src/` and `ato.yaml`: production atopile electrical design authority;
+- `tscircuit/`: optional experimental electrical backend and locked native toolchain;
+- `elec/layout/`: KiCad interchange/reference boards, not a second electrical authority;
+- `config/physical-backend.json`: EasyEDA-primary and KiCad-fallback physical contract;
+- `config/backend-architecture.json`: explicit electrical/physical/routing/validation/manufacturing role separation;
 - `config/`: reviewed project and tool policy;
 - `scripts/`: deterministic project-local workflow;
 - `experiments/`: disposable candidate boards and A/B trials;

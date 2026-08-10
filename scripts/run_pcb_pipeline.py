@@ -13,6 +13,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from artifact_store import config as artifact_config, create_run, finish_run, relative
 from create_houtini_job import create_job
+from electrical_backend import read_config as read_electrical_config, selected_backend as selected_electrical_backend
 from pcb_policy import load_acceptance, require_no_prohibited_evidence
 from stage_policy import ROOT, current_stage
 
@@ -85,10 +86,12 @@ def main() -> int:
     context_output = run.tmp / "context" / "pcb-context.json"
     pipeline_summary = run.evidence / "pipeline-summary.json"
     package_audit = run.evidence / "jlcpcb-package-audit.json"
+    manufacturing_gate = run.evidence / "manufacturing-gate.json"
 
     acceptance_path = ROOT / config.get("acceptance", "config/pcb-acceptance.json")
     release_rules = load_acceptance(acceptance_path, "release", {
         "release_pass", "board_sha256_match", "drc_zero_unconnected", "manufacturing_profile_selected",
+        "electrical_freeze_pass", "easyeda_import_parity_pass", "easyeda_drc_pass", "jlc_dfm_pass",
     })
     require_no_prohibited_evidence(release_rules, {"matching_release_audit"})
     board = str(ROOT / project["board"])
@@ -97,7 +100,8 @@ def main() -> int:
     for script in config.get("checks", []):
         commands.append((Path(script).stem, [sys.executable, script]))
     if args.build:
-        electrical_output = run.tmp / "generated" / "tscircuit"
+        electrical_name, _ = selected_electrical_backend(read_electrical_config())
+        electrical_output = run.tmp / "generated" / electrical_name
         electrical_receipt = run.evidence / "electrical-build.json"
         commands.append((
             "electrical-build",
@@ -134,7 +138,20 @@ def main() -> int:
         if args.export:
             physical_review = ROOT / audit_config.get("physical_review", "build/07-release/evidence/manual/physical-review.json")
             export_log = run.tmp / "logs" / "jlcpcb-export.log"
+            gate_receipts = manufacturing_config["gate_receipts"]
             commands.extend([
+                (
+                    "manufacturing-gates",
+                    [
+                        sys.executable, "scripts/check_manufacturing_gates.py",
+                        "--board", board,
+                        "--electrical-freeze", str(ROOT / gate_receipts["electrical_freeze"]),
+                        "--import-parity", str(ROOT / gate_receipts["easyeda_import_parity"]),
+                        "--easyeda-drc", str(ROOT / gate_receipts["easyeda_drc"]),
+                        "--jlc-dfm", str(ROOT / gate_receipts["jlc_dfm"]),
+                        "--output", str(manufacturing_gate),
+                    ],
+                ),
                 (
                     "jlcpcb-export",
                     [
@@ -142,6 +159,7 @@ def main() -> int:
                         "--board", board,
                         "--audit-json", str(evidence_audit),
                         "--physical-review", str(physical_review),
+                        "--manufacturing-gates", str(manufacturing_gate),
                         "--output", str(ROOT / manufacturing_config["output"]),
                         "--log", str(export_log),
                         "--assembly-parts", str(ROOT / manufacturing_config["assembly_parts"]),
@@ -204,6 +222,7 @@ def main() -> int:
             "drc_report": relative(evidence_drc) if evidence_drc.is_file() else None,
             "pcb_context_index": relative(context_output) if context_output.is_file() else None,
             "package_audit": relative(package_audit) if package_audit.is_file() else None,
+            "manufacturing_gate": relative(manufacturing_gate) if manufacturing_gate.is_file() else None,
             "logs": relative(log_dir),
         },
         "context_metrics": {
@@ -222,6 +241,8 @@ def main() -> int:
         release_artifacts["drc_report"] = copy_release_evidence(evidence_drc, run.release / evidence_drc.name)
         if package_audit.is_file():
             release_artifacts["package_audit"] = copy_release_evidence(package_audit, run.release / package_audit.name)
+        if manufacturing_gate.is_file():
+            release_artifacts["manufacturing_gate"] = copy_release_evidence(manufacturing_gate, run.release / manufacturing_gate.name)
         physical_review = ROOT / audit_config.get("physical_review", "build/07-release/evidence/manual/physical-review.json")
         release_artifacts["physical_review"] = copy_release_evidence(physical_review, run.release / physical_review.name)
         package_reference = run.release / "package-reference.json"

@@ -25,6 +25,7 @@ STACK_PATH = ROOT / "config/board-stack.json"
 MANUFACTURING_PROFILE_PATH = ROOT / "config/manufacturing-profile.json"
 ACCEPTANCE_PATH = ROOT / "config/pcb-acceptance.json"
 DEFAULT_REVIEW = ROOT / "build/07-release/evidence/manual/physical-review.json"
+DEFAULT_MANUFACTURING_GATE = ROOT / "build/07-release/evidence/manual/manufacturing-gate.json"
 DEFAULT_ASSEMBLY_PARTS = ROOT / "config/jlcpcb-parts.json"
 
 
@@ -66,6 +67,19 @@ def require_passing_audit(board: Path, audit_path: Path) -> dict[str, object]:
     if audit.get("release_pass") is not True:
         raise SystemExit("Release audit did not pass; refusing manufacturing export")
     return audit
+
+
+def require_passing_manufacturing_gate(board: Path, gate_path: Path) -> dict[str, object]:
+    try:
+        gate = json.loads(gate_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Manufacturing gate receipt is unavailable or invalid: {gate_path}: {exc}") from exc
+    board_hash = hashlib.sha256(board.read_bytes()).hexdigest().upper()
+    if gate.get("kind") != "manufacturing_gate" or gate.get("manufacturing_gate_pass") is not True:
+        raise SystemExit("EasyEDA/JLC manufacturing gates did not pass")
+    if gate.get("board_sha256") != board_hash:
+        raise SystemExit("Manufacturing gate receipt does not match this board SHA-256")
+    return gate
 
 
 def configured_layers(board: Path, stack_path: Path) -> str:
@@ -117,6 +131,7 @@ def main() -> int:
     parser.add_argument("--acceptance", type=Path, default=ACCEPTANCE_PATH)
     parser.add_argument("--design-policy", type=Path, default=DEFAULT_POLICY)
     parser.add_argument("--physical-review", type=Path, default=DEFAULT_REVIEW)
+    parser.add_argument("--manufacturing-gates", type=Path, default=DEFAULT_MANUFACTURING_GATE)
     parser.add_argument("--assembly-parts", type=Path, default=DEFAULT_ASSEMBLY_PARTS)
     parser.add_argument(
         "--audit-json",
@@ -143,10 +158,12 @@ def main() -> int:
     release_rules = load_acceptance(args.acceptance.resolve(), "release", {
         "release_pass", "board_sha256_match", "drc_zero_unconnected", "manufacturing_profile_selected",
         "review_pass", "review_receipt_matches_policy",
+        "electrical_freeze_pass", "easyeda_import_parity_pass", "easyeda_drc_pass", "jlc_dfm_pass",
     })
     require_no_prohibited_evidence(release_rules, {"matching_release_audit"})
     design_policy = require_policy("release", args.design_policy.resolve())
     audit = require_passing_audit(board, args.audit_json.resolve())
+    manufacturing_gate = require_passing_manufacturing_gate(board, args.manufacturing_gates.resolve())
     review = require_passing_physical_review(board, args.physical_review.resolve(), design_policy)
     layers = configured_layers(board, args.board_stack.resolve())
     manufacturing_profile = require_manufacturing_profile(args.manufacturing_profile.resolve())
@@ -255,6 +272,7 @@ def main() -> int:
                 "log": str(args.log.resolve()),
                 "board_sha256": audit["board_sha256"],
                 "audit_json": str(args.audit_json.resolve()),
+                "manufacturing_gate": str(args.manufacturing_gates.resolve()),
                 "layers": layers.split(","),
                 "manufacturing_profile": str(args.manufacturing_profile.resolve()),
                 "manufacturer": manufacturing_profile["manufacturer"],

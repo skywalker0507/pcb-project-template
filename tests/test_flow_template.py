@@ -31,24 +31,88 @@ houtini_job = load("houtini_job_template", "scripts/create_houtini_job.py")
 design_policy = load("design_policy_template", "scripts/design_policy.py")
 fab_values = load("fab_values_template", "scripts/apply_reviewed_fab_values.py")
 electrical_backend = load("electrical_backend_template", "scripts/electrical_backend.py")
+physical_backend = load("physical_backend_template", "scripts/physical_backend.py")
+easyeda_parity = load("easyeda_parity_template", "scripts/check_easyeda_import_parity.py")
 tool_entrypoints = load("tool_entrypoints_template", "scripts/check_tool_entrypoints.py")
 script_search = load("script_search_template", "scripts/find_existing_script.py")
+backend_architecture = load("backend_architecture_template", "scripts/check_backend_architecture.py")
 
 
 class FlowTemplateTests(unittest.TestCase):
-    def test_tscircuit_is_the_default_native_electrical_backend(self) -> None:
+    def test_atopile_is_the_default_production_electrical_backend(self) -> None:
         config = electrical_backend.read_config()
         name, backend = electrical_backend.selected_backend(config)
-        self.assertEqual(name, "tscircuit")
-        self.assertEqual(backend["platform"], "windows-native")
-        self.assertEqual(backend["status"], "primary")
-
-    def test_atopile_is_kept_as_a_separate_legacy_adapter(self) -> None:
-        config = electrical_backend.read_config()
-        name, backend = electrical_backend.selected_backend(config, "atopile")
         self.assertEqual(name, "atopile")
-        self.assertEqual(backend["status"], "legacy")
-        self.assertEqual(backend["driver"], "scripts/build_atopile_isolated.py")
+        self.assertEqual(backend["platform"], "wsl-native")
+        self.assertEqual(backend["status"], "primary")
+        self.assertNotIn("circuit_json", config["contract"]["required_artifacts"])
+
+    def test_tscircuit_is_kept_as_a_separate_experimental_adapter(self) -> None:
+        config = electrical_backend.read_config()
+        name, backend = electrical_backend.selected_backend(config, "tscircuit")
+        self.assertEqual(name, "tscircuit")
+        self.assertEqual(backend["status"], "experimental")
+        self.assertEqual(backend["driver"], "scripts/build_tscircuit_isolated.py")
+
+    def test_physical_backend_roles_are_separate_from_routing_and_electrical(self) -> None:
+        config = physical_backend.read_config()
+        name, backend = physical_backend.selected_backend(config)
+        self.assertEqual(name, "easyeda_pro")
+        self.assertEqual(backend["role"], "primary")
+        _, fallback = physical_backend.selected_backend(config, "kicad")
+        self.assertEqual(fallback["role"], "reference_fallback")
+        architecture = json.loads((ROOT / "config/backend-architecture.json").read_text(encoding="utf-8"))
+        self.assertEqual(architecture["routing_engine"]["active"], "kicad_routing_tools")
+        self.assertTrue(architecture["routing_engine"]["independent_of_gui_backend"])
+        self.assertTrue(backend_architecture.audit()["success"])
+
+    def test_easyeda_parity_strictly_rejects_pad_net_changes(self) -> None:
+        source = {
+            "schema": 1,
+            "nets": ["GND", "VCC"],
+            "board_outline": {"sha256": "outline"},
+            "holes": [{"id": "H1", "drill": 3.0}],
+            "components": [{
+                "reference": "U1", "footprint": "Package:One", "side": "F.Cu", "rotation": 0,
+                "pads": [{"number": "1", "net": "GND", "drill": None}],
+            }],
+        }
+        imported = json.loads(json.dumps(source))
+        imported["components"][0]["pads"][0]["net"] = "VCC"
+        result = easyeda_parity.compare(source, imported)
+        self.assertFalse(result["parity_pass"])
+        self.assertTrue(result["strict_connectivity_failure"])
+        self.assertEqual(result["failures"]["pad_to_net_mapping"], ["U1.1"])
+
+    def test_easyeda_parity_accepts_identical_normalized_manifests(self) -> None:
+        manifest = {
+            "schema": 1,
+            "nets": ["GND"],
+            "board_outline": ["segment-a"],
+            "holes": [],
+            "components": [{
+                "reference": "R1", "footprint": "R_0402", "side": "F.Cu", "rotation": 90,
+                "pads": [{"number": "1", "net": "GND", "drill": None}],
+            }],
+        }
+        self.assertTrue(easyeda_parity.compare(manifest, json.loads(json.dumps(manifest)))["parity_pass"])
+
+    def test_easyeda_parity_covers_physical_identity_fields(self) -> None:
+        source = {
+            "schema": 1, "nets": ["GND"], "board_outline": ["edge-a"],
+            "holes": [{"id": "H1", "drill": 2.0}],
+            "components": [{
+                "reference": "J1", "footprint": "Connector:A", "side": "F.Cu", "rotation": 0,
+                "pads": [{"number": "1", "net": "GND", "drill": 0.5}],
+            }],
+        }
+        imported = json.loads(json.dumps(source))
+        imported["board_outline"] = ["edge-b"]
+        imported["holes"][0]["drill"] = 2.1
+        imported["components"][0].update({"footprint": "Connector:B", "side": "B.Cu", "rotation": 180})
+        imported["components"][0]["pads"][0]["drill"] = 0.6
+        failures = easyeda_parity.compare(source, imported)["failures"]
+        self.assertTrue({"board_outline", "holes", "footprints", "side", "rotation", "pad_drills"}.issubset(failures))
 
     def test_stack_profiles_are_complete_and_distinct(self) -> None:
         stack = json.loads((ROOT / "config/board-stack.json").read_text(encoding="utf-8"))
@@ -80,6 +144,22 @@ class FlowTemplateTests(unittest.TestCase):
             profile.write_text(json.dumps({"selected": False}), encoding="utf-8")
             with self.assertRaises(SystemExit):
                 export.require_manufacturing_profile(profile)
+
+    def test_export_requires_sha_bound_manufacturing_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            board = root / "board.kicad_pcb"
+            board.write_text("board", encoding="utf-8")
+            gate = root / "gate.json"
+            gate.write_text(json.dumps({
+                "kind": "manufacturing_gate",
+                "manufacturing_gate_pass": True,
+                "board_sha256": __import__("hashlib").sha256(board.read_bytes()).hexdigest().upper(),
+            }), encoding="utf-8")
+            self.assertTrue(export.require_passing_manufacturing_gate(board, gate)["manufacturing_gate_pass"])
+            gate.write_text(json.dumps({"kind": "manufacturing_gate", "manufacturing_gate_pass": True, "board_sha256": "wrong"}), encoding="utf-8")
+            with self.assertRaises(SystemExit):
+                export.require_passing_manufacturing_gate(board, gate)
 
     def test_acceptance_loader_rejects_missing_hard_rule(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

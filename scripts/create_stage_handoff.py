@@ -14,6 +14,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pcb_policy import relative_to
 from electrical_backend import read_config, selected_backend
+from physical_backend import read_config as read_physical_config, selected_backend as selected_physical_backend
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -142,6 +143,7 @@ def main() -> int:
     config = json.loads(args.config.read_text(encoding="utf-8"))
     backend_config = read_config()
     backend_name, backend = selected_backend(backend_config)
+    physical_backend_name, _ = selected_physical_backend(read_physical_config())
     checklist_path = ROOT / config.get("stage_checklist", "config/stage-checklist.json")
     checklist = json.loads(checklist_path.read_text(encoding="utf-8"))
     stage_rules = checklist.get("stages", {}).get(args.stage)
@@ -209,6 +211,10 @@ def main() -> int:
         },
         "stage_files": stage_rules.get("files", []),
         "electrical_backend": backend_name,
+        "physical_backend": physical_backend_name,
+        "routing_engine": "kicad_routing_tools",
+        "validation_backends": ["easyeda_pro_drc", "kicad_cli"],
+        "manufacturing_backend": "jlcpcb",
         "source_sha256": tree_hash([
             ROOT / "config/electrical-backend.json",
             ROOT / str(backend["source_root"]),

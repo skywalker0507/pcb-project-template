@@ -2,16 +2,17 @@
   "schema": 2,
   "mode": "latest",
   "electrical_backends": {
+    "atopile": {
+      "package": "atopile",
+      "runtime": "wsl",
+      "status": "primary"
+    },
     "tscircuit": {
       "package": "tscircuit",
       "runtime": "bun",
       "lockfile": "tscircuit/bun.lock",
-      "kicad_converter": "circuit-json-to-kicad"
-    },
-    "atopile": {
-      "package": "atopile",
-      "runtime": "wsl",
-      "status": "legacy_compatibility"
+      "kicad_converter": "circuit-json-to-kicad",
+      "status": "experimental_optional"
     }
   },
   "houtini_lm": {

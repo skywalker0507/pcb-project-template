@@ -4,9 +4,9 @@
   "stages": {
     "requirements": ["houtini"],
     "parts": ["houtini"],
-    "electrical": ["tscircuit", "houtini"],
-    "electrical_freeze": ["tscircuit", "houtini"],
-    "physical": ["konnect"],
+    "electrical": ["atopile", "tscircuit_experimental", "houtini"],
+    "electrical_freeze": ["atopile", "houtini"],
+    "physical": ["easyeda_pro", "konnect_fallback"],
     "routing": ["krt", "freerouting", "konnect", "houtini"],
     "release": ["houtini"],
     "prototype": ["houtini"]
@@ -30,7 +30,7 @@
     "require_independent_drc": true
   },
   "konnect": {
-    "role": "Live KiCad placement, queries, and a small number of explicit trace/via edits.",
+    "role": "Fallback/reference live KiCad placement, queries, and a small number of explicit trace/via edits.",
     "max_extra_toolsets": 1,
     "allowed_toolsets": ["pcb_board", "pcb_components", "pcb_routing", "pcb_export", "verification"],
     "forbidden_toolsets": ["sch_components", "sch_wiring", "sch_batch", "templates", "design_review", "manufacturing"],

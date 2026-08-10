@@ -61,11 +61,7 @@ def main() -> int:
         "--receipt", type=Path,
         help="Optional common electrical-backend receipt path.",
     )
-    parser.add_argument(
-        "--log",
-        type=Path,
-        default=ROOT / "build/03-electrical/tmp/legacy-atopile/ato-build-isolated.log",
-    )
+    parser.add_argument("--log", type=Path)
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", args.build):
@@ -76,6 +72,7 @@ def main() -> int:
         else ROOT / args.board if args.board
         else ROOT / f"elec/layout/{args.build}/{args.build}.kicad_pcb"
     ).resolve()
+    board.parent.mkdir(parents=True, exist_ok=True)
     guard = board.with_suffix(f".codex-build-guard-{os.getpid()}.kicad_pcb.bak")
     stale_guards = sorted(board.parent.glob(f"{board.stem}.codex-build-guard-*.kicad_pcb.bak"))
     if not board.exists() and len(stale_guards) == 1:
@@ -87,8 +84,6 @@ def main() -> int:
             "Stale build guards require manual inspection: "
             + ", ".join(str(path) for path in stale_guards)
         )
-    if not board.is_file():
-        raise SystemExit(f"Routed board not found: {board}")
     if guard.exists():
         raise SystemExit(f"Guard path already exists: {guard}")
     candidate_board = None
@@ -99,10 +94,17 @@ def main() -> int:
         output.mkdir(parents=True, exist_ok=True)
         candidate_board = output / "candidate.kicad_pcb"
 
-    before = sha256(board)
-    args.log.parent.mkdir(parents=True, exist_ok=True)
-    os.replace(board, guard)
+    protected_board_existed = board.is_file()
+    before = sha256(board) if protected_board_existed else None
+    log_path = args.log.resolve() if args.log else (
+        args.output.resolve() / "atopile-build.log" if args.output
+        else ROOT / "build/03-electrical/tmp/atopile/ato-build-isolated.log"
+    )
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    if protected_board_existed:
+        os.replace(board, guard)
     exit_code = 1
+    candidate_captured = False
     try:
         command = (
             f"cd {windows_to_wsl(ROOT)} && "
@@ -117,7 +119,7 @@ def main() -> int:
             errors="replace",
         )
         assert process.stdout is not None
-        with args.log.open("w", encoding="utf-8", newline="\n") as log:
+        with log_path.open("w", encoding="utf-8", newline="\n") as log:
             for line in process.stdout:
                 if args.verbose:
                     print(line, end="")
@@ -132,18 +134,24 @@ def main() -> int:
                     if candidate_board.exists():
                         raise RuntimeError(f"Refusing to overwrite existing candidate board: {candidate_board}")
                     shutil.copy2(board, candidate_board)
+                    candidate_captured = True
                 if args.verbose:
                     print(f"DISCARDING_GENERATED_BOARD={board}")
                 board.unlink()
         finally:
-            if not guard.exists():
-                raise RuntimeError("Routed-board guard disappeared during build")
-            os.replace(guard, board)
+            if protected_board_existed:
+                if not guard.exists():
+                    raise RuntimeError("Protected-board guard disappeared during build")
+                os.replace(guard, board)
 
-    after = sha256(board)
-    if after != before:
+    after = sha256(board) if protected_board_existed else None
+    if protected_board_existed and after != before:
         raise RuntimeError(f"Routed board changed: {before} -> {after}")
-    log_text = args.log.read_text(encoding="utf-8", errors="replace")
+    if exit_code == 0 and candidate_board and not candidate_captured:
+        exit_code = 1
+        with log_path.open("a", encoding="utf-8") as log:
+            log.write("\nBuild reported success but produced no KiCad PCB candidate.\n")
+    log_text = log_path.read_text(encoding="utf-8", errors="replace")
     build_ids = re.findall(r"\bBuild ([0-9a-f]{8,})\b|\[([0-9a-f]{8,})\]", log_text)
     build_id = next((left or right for left, right in reversed(build_ids)), None)
     payload = {
@@ -154,11 +162,12 @@ def main() -> int:
         "exit_code": exit_code,
         "build": args.build,
         "build_id": build_id,
-        "log": str(args.log.resolve()),
+        "log": str(log_path),
         "candidate_board": str(candidate_board.resolve()) if exit_code == 0 and candidate_board else None,
-        "restored_board_sha256": after.upper(),
+        "protected_board_existed": protected_board_existed,
+        "restored_board_sha256": after.upper() if after else None,
         "failure": classify_failure(log_text) if exit_code else None,
-        "isolation": "Generated candidate copied before restoring the protected KiCad board.",
+        "isolation": "Generated candidate copied to build/; any pre-existing KiCad board is restored byte-for-byte and a newly generated source-tree board is removed.",
     }
     if args.receipt:
         args.receipt.resolve().parent.mkdir(parents=True, exist_ok=True)

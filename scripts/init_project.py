@@ -92,12 +92,22 @@ def configure_project(project_name: str, distro: str, force: bool, with_konnect:
     root_wsl = windows_to_wsl(ROOT)
     node = shutil.which("node") or r"C:\Program Files\nodejs\node.exe"
     houtini = ROOT / "tools/houtini-lm/dist/index.js"
-    config = f'''[mcp_servers.tscircuit]
+    tscircuit_enabled = "true" if electrical_backend == "tscircuit" else "false"
+    config = f'''[mcp_servers.atopile]
+type = "stdio"
+command = 'C:\\Windows\\System32\\wsl.exe'
+args = ['-d', '{distro}', '--', 'bash', '-lc', 'cd {root_wsl} && exec ./scripts/start-atopile-mcp-wsl.sh']
+cwd = '{root_windows}'
+enabled = true
+startup_timeout_sec = 30
+tool_timeout_sec = 300
+
+[mcp_servers.tscircuit]
 type = "stdio"
 command = '{node}'
 args = ['{ROOT / ".codex/mcp/tscircuit-server.mjs"}']
 cwd = '{root_windows}'
-enabled = true
+enabled = {tscircuit_enabled}
 env_vars = ["PCB_PYTHON", "BUN_BINARY"]
 startup_timeout_sec = 30
 tool_timeout_sec = 300
@@ -161,7 +171,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-name", default=ROOT.name)
     parser.add_argument("--distro", default="Ubuntu-24.04")
-    parser.add_argument("--electrical-backend", default="tscircuit", help="Backend from config/electrical-backend.json; tscircuit is the default.")
+    parser.add_argument("--electrical-backend", default="atopile", help="Backend from config/electrical-backend.json; atopile is the production default and tscircuit is experimental.")
     parser.add_argument("--force-config", action="store_true")
     parser.add_argument("--check", action="store_true", help="Run the local readiness check after configuration.")
     parser.add_argument("--layers", type=int, choices=(2, 4), default=2, help="New-project copper layer preset; no fabrication values are implied.")

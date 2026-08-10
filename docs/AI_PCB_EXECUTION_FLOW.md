@@ -8,12 +8,13 @@ receipt can reject it safely.
 
 | Work | Tool | Boundary | Required follow-up |
 |---|---|---|---|
-| Electrical source and connectivity | tscircuit | Sole default electrical authority | electrical build and candidate review |
+| Electrical source and connectivity | atopile | Sole production electrical authority | electrical build, contract validation, candidate review, and electrical freeze |
+| Primary placement/physical editing | EasyEDA Pro bridge/API | Must consume an electrical freeze and pass deterministic import parity | EasyEDA DRC plus exported compact receipt |
+| Reference/fallback physical editing | KiCad GUI/Konnect | Interchange, debug, and fallback only; no schematic authority | save candidate and independent pipeline audit |
 | Large text/log classification | Houtini-LM | One path-based call, 800 tokens; no PCB judgment | Codex verifies cited lines |
-| Live placement or a few explicit traces/vias | Konnect | One extra on-demand PCB toolset; no schematic/review/manufacturing tools | save candidate, pipeline audit |
-| Bounded net routing | KiCadRoutingTools | Explicit nets, reviewed rules, separate candidate, two identical attempts maximum | independent KiCad DRC and physical review |
+| Bounded net routing | KiCadRoutingTools | GUI-independent engine; explicit nets, reviewed rules, separate candidate, two identical attempts maximum | EasyEDA import/diff plus independent KiCad DRC and physical review |
 | Non-critical leftover bulk routing | FreeRouting | Critical/power/high-speed work frozen; real ignored DSN classes required | import to separate candidate and independent audit |
-| DRC, release and export | Project scripts plus KiCad CLI | No natural-language approval or regenerated baseline | SHA-bound review and `release_pass=true` |
+| DRC, release and export | EasyEDA DRC, KiCad CLI, JLC DFM, and project scripts | No natural-language approval or regenerated baseline | SHA-bound gate receipts, package checks, and `release_pass=true` |
 
 ## Artifact lanes
 

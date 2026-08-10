@@ -1,22 +1,21 @@
 # Codex instructions for AI PCB projects
 
-This repository uses a replaceable electrical backend with **tscircuit as the
-default authority** and KiCad for physical PCB design. atopile is a legacy
-compatibility adapter only. The installed backend, its lockfile, and reviewed
-manufacturer data take precedence over examples or model guesses.
+This repository uses atopile as the production electrical authority, EasyEDA
+Pro as the primary physical backend, KiCad as the interchange/independent
+validation/fallback backend, and KiCadRoutingTools as a GUI-independent routing
+engine. tscircuit is experimental and optional. The installed compiler and
+reviewed manufacturer data take precedence over examples or model guesses.
 
 ## Required workflow
 
 1. Run `python scripts/session_boot.py`, then read only the cited stage rules, acceptance, and board-stack records before design work.
 2. Validate `config/requirements.json`, then translate its interfaces, rails, constraints and blocks.
-3. Inspect the selected backend in `config/electrical-backend.json`; for
-   tscircuit, use local locked dependencies and Circuit JSON/KiCad candidates.
-4. Validate changed electrical sources and run `build_electrical.py` after
-   meaningful changes.
-5. Preserve picked parts, net names, designators and manual KiCad layout.
-6. Run `python scripts/run_pcb_pipeline.py` after source or layout changes.
-7. Run DRC and inspect rendered copper before manufacturing export.
-8. After an intentional export, run `check_jlcpcb_release.py`; create a release snapshot only from a matching `release_pass=true` audit.
+3. Search atopile packages and inspect standard-library interfaces before use.
+4. Validate changed `.ato` sources and run `build_electrical.py` after meaningful changes.
+5. Create a passing, SHA-bound electrical freeze before physical work; any later electrical change returns to atopile and a new freeze.
+6. Preserve picked parts, net names, designators and reviewed manual physical work in EasyEDA or KiCad.
+7. Run `python scripts/run_pcb_pipeline.py` after source or layout changes.
+8. Require EasyEDA import parity, EasyEDA DRC, independent KiCad validation and JLC DFM before manufacturing export; create a release snapshot only from matching passing evidence.
 
 Before creating a new helper or invoking a tool binary, inspect
 `config/tool-entrypoints.json` and run `python scripts/check_tool_entrypoints.py`.
@@ -33,7 +32,7 @@ For a FreeRouting-specific diagnostic, use
 `python scripts/run_freerouting_headless.py --check`; it verifies the locked JAR
 and wrapper policy without launching Java.
 
-Use `python scripts/check_pcb_environment.py --tier minimal` to begin requirements work; use `--tier standard` before normal design work and `--tier deep` only when the selected electrical backend build and router capability check are intended.
+Use `python scripts/check_pcb_environment.py --tier minimal` to begin requirements work; use `--tier standard` before normal design work and `--tier deep` only when an atopile build and router capability check are intended.
 
 ## Artifact and context contract
 
@@ -104,6 +103,13 @@ Use deterministic scripts before repeated MCP choreography. HPWL and aggregate
 copper length are triage metrics, not acceptance. Never invent numeric widths,
 spacing or impedance, and never regenerate a DRC baseline merely to pass.
 
+EasyEDA Pro consumes only an electrically frozen `.kicad_pcb` interchange
+candidate. Its bridge/API must emit compact normalized manifests and receipts;
+`check_easyeda_import_parity.py` performs the deterministic judgment. Never ask
+an LLM to compare complete board files or copy a PCB object by object. Until the
+official bridge is connected, missing EasyEDA/JLC receipts are hard release
+failures, not permission to bypass the gate.
+
 Treat `tools/KiCadRoutingTools` as an updateable project-maintained fork
 checkout. Use
 `scripts/krt_flow.py` and `config/kicad-routing-tools.json`; start with `check`,
@@ -113,10 +119,10 @@ bypass explicit rules, forbidden-layer scans, input hashes or
 `--no-clamp-netclasses`; on newer KRT it omits the clearance ceiling only after
 verifying the configured value equals the KiCad Default netclass. `route_ok` is never release evidence and still requires independent DRC, physical review, and `release_pass=true`.
 
-Konnect replaces KiCAD-MCP-Server and is complementary to KRT. Use it only for
-live KiCad placement, explicit trace/via edits, queries and visual iteration.
-Do not use its schematic-writing or reference-circuit tools: the selected
-electrical backend remains the electrical authority. Do not use Konnect's natural-language design audits
+Konnect replaces KiCAD-MCP-Server and is complementary to KRT. It is a KiCad
+fallback/reference/debug path for live placement, explicit trace/via edits,
+queries and visual iteration. Do not use its schematic-writing or
+reference-circuit tools: atopile remains the electrical authority. Do not use Konnect's natural-language design audits
 as evidence for numeric rules or release approval. Its current `autoroute`
 tool is unavailable on KiCad 10; use the guarded KRT/FreeRouting candidate
 flows and run the deterministic audit afterward.

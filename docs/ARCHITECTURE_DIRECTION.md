@@ -16,16 +16,20 @@ LLMs are narrow-interface operators, never design or release authorities.
 1. `requirements.json` is the product-intent authority: interfaces, rails,
    current, mechanics, constraints, explicit unknowns, and requested
    manufacturer.
-2. Reviewed sources from the selected electrical backend are the
-   electrical-realization authority; tscircuit is the template default.
+2. Reviewed `.ato` sources are the production electrical-realization authority.
+   tscircuit is an optional experimental backend and cannot create a production
+   electrical freeze.
 3. A reviewed manufacturer capability source is the numeric fabrication
    authority. Models must never supply missing numeric values.
-4. KiCad is the physical-board authority, subject to SHA-bound audits and
-   reviews.
-5. A generated resolved policy is the executable contract consumed by routing,
+4. A passing `ELECTRICAL_FREEZE` is the one-way boundary into physical work.
+5. EasyEDA Pro is the primary physical backend. KiCad is the native atopile
+   interchange, independent validator, and fallback/reference backend.
+6. KiCadRoutingTools is a GUI-independent routing engine; FreeRouting is secondary.
+7. A generated resolved policy is the executable contract consumed by routing,
    DFM checks, handoffs, and release guards.
 
-No generated artifact supersedes its reviewed input. A changed input invalidates
+No generated artifact supersedes its reviewed input. EasyEDA, KiCad, KRT, and
+FreeRouting may not become electrical authorities. A changed input invalidates
 the resolved-policy receipt and all dependent evidence.
 
 ## Target pipeline
@@ -48,7 +52,8 @@ electrical-backend checks placement/critical-net checks  KRT/DFM/KiCad rules
          +---- SHA-bound DRC + physical review evidence -----+
                                   |
                                   v
-              release_pass AND review_pass -> manufacturing export
+ EasyEDA parity + EasyEDA DRC + KiCad validation + JLC DFM + release_pass
+                         AND review_pass -> manufacturing export
 ```
 
 Long text is a separate path: deterministic scripts retain logs on disk and

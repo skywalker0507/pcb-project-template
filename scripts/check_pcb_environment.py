@@ -56,13 +56,16 @@ def main() -> int:
         active_backend = "invalid"
         active_backend_config = {}
 
-    for relative in ("config/electrical-backend.json", "config/pcb-flow.json", "config/kicad-routing-tools.json", "config/toolchain-policy.json", "config/board-stack.json", "config/pcb-acceptance.json", "config/requirements.json", "handoff/stages/CURRENT_STAGE.json"):
+    for relative in ("config/electrical-backend.json", "config/backend-architecture.json", "config/physical-backend.json", "config/manufacturing-backend.json", "config/pcb-flow.json", "config/kicad-routing-tools.json", "config/toolchain-policy.json", "config/board-stack.json", "config/pcb-acceptance.json", "config/requirements.json", "handoff/stages/CURRENT_STAGE.json"):
         add(checks, f"project:{relative}", (root / relative).is_file(), relative)
     source_root = active_backend_config.get("source_root")
     entry = active_backend_config.get("entry")
     source_ok = isinstance(source_root, str) and isinstance(entry, str) and (root / source_root).exists()
     if active_backend == "tscircuit" and source_ok:
         source_ok = (root / source_root / "package.json").is_file() and (root / source_root / entry).is_file()
+    elif active_backend == "atopile" and source_ok:
+        entry_file = entry.split(":", 1)[0]
+        source_ok = (root / source_root / entry_file).is_file() and (root / "ato.yaml").is_file()
     add(checks, "project:active-electrical-source", source_ok, f"backend={active_backend};source={source_root};entry={entry}")
     add(checks, "project:resolved-toolchain", resolved_path.is_file(), str(resolved_path))
     mcp_configured = (root / ".codex/config.toml").is_file() or (root / ".codex/pcb-mcp.fragment.toml").is_file()
@@ -77,6 +80,9 @@ def main() -> int:
     if active_backend != "atopile":
         add(checks, "wsl", True, "not selected", required=False)
         add(checks, "wsl-atopile", True, "not selected", required=False)
+    elif tier == "minimal":
+        add(checks, "wsl", bool(wsl), wsl or "WSL unavailable", required=False)
+        add(checks, "wsl-atopile", True, "not probed at minimal tier", required=False)
     elif wsl:
         add(checks, "wsl", True, wsl, required=True)
         ok, output = run([wsl, "-d", args.distro, "--", "bash", "-lc", "command -v uv && command -v ato && ato --version | tail -n 1"], root)
@@ -140,9 +146,9 @@ def main() -> int:
         ok, output = run(npm, houtini, 180)
         add(checks, "houtini-tests", ok, output[-300:])
     if tier == "deep" and active_backend == "atopile" and wsl and (root / "ato.yaml").is_file():
-        windows_root = str(root)
-        linux_root = "/mnt/" + windows_root[0].lower() + windows_root[2:].replace("\\", "/") if len(windows_root) > 2 and windows_root[1] == ":" else windows_root
-        ok, output = run([wsl, "-d", args.distro, "--", "bash", "-lc", f"cd {json.dumps(linux_root)} && ato --non-interactive build"], root, 300)
+        ok, output = run([
+            sys.executable, "scripts/build_electrical.py", "--backend", "atopile", "--build", "default",
+        ], root, 300)
         add(checks, "atopile-build", ok, output[-300:])
     if tier == "deep" and active_backend == "tscircuit" and bun and tscircuit_root.is_dir():
         ok, output = run([bun, "run", "typecheck"], tscircuit_root, 180)
@@ -150,12 +156,12 @@ def main() -> int:
 
     required_by_tier = {
         "minimal": {
-            "project:config/electrical-backend.json", "project:active-electrical-source", "project:config/pcb-flow.json", "project:config/kicad-routing-tools.json",
+            "project:config/electrical-backend.json", "project:config/backend-architecture.json", "project:config/physical-backend.json", "project:config/manufacturing-backend.json", "project:active-electrical-source", "project:config/pcb-flow.json", "project:config/kicad-routing-tools.json",
             "project:config/toolchain-policy.json", "project:config/board-stack.json", "project:config/pcb-acceptance.json", "project:config/requirements.json",
             "project:handoff/stages/CURRENT_STAGE.json", "project:mcp-config", "python",
         },
         "standard": {
-            "project:config/electrical-backend.json", "project:active-electrical-source", "project:config/pcb-flow.json", "project:config/kicad-routing-tools.json",
+            "project:config/electrical-backend.json", "project:config/backend-architecture.json", "project:config/physical-backend.json", "project:config/manufacturing-backend.json", "project:active-electrical-source", "project:config/pcb-flow.json", "project:config/kicad-routing-tools.json",
             "project:config/toolchain-policy.json", "project:config/board-stack.json", "project:config/pcb-acceptance.json", "project:config/requirements.json",
             "project:handoff/stages/CURRENT_STAGE.json", "project:resolved-toolchain", "project:mcp-config",
             "kicad-cli", "git", "python", "node", "houtini-commit",

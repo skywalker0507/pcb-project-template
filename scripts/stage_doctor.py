@@ -30,9 +30,9 @@ def main() -> int:
     else:
         commands = {
             "parts": "python scripts/validate_requirements.py --require-reviewed",
-            "electrical": "python scripts/build_electrical.py --backend tscircuit",
-            "electrical_freeze": "python scripts/build_electrical.py --backend tscircuit --check",
-            "physical": "python scripts/compile_design_policy.py",
+            "electrical": "python scripts/build_electrical.py --backend atopile",
+            "electrical_freeze": "python scripts/create_electrical_freeze.py --help",
+            "physical": "python scripts/check_easyeda_import_parity.py --help",
             "routing": "python scripts/krt_flow.py check --input elec/layout/default/default.kicad_pcb",
             "release": "python scripts/run_pcb_pipeline.py --export",
             "prototype": "python scripts/artifact_store.py inventory",
@@ -47,8 +47,8 @@ def main() -> int:
         "requirements": ["validate_requirements", "create_stage_handoff"],
         "parts": ["validate_requirements", "create_stage_handoff"],
         "electrical": ["check_pcb_environment", "build_electrical", "create_stage_handoff"],
-        "electrical_freeze": ["build_electrical --check", "create_stage_handoff"],
-        "physical": ["compile_design_policy", "apply_kicad_rules", "run_pcb_pipeline", "record_physical_review", "create_stage_handoff"],
+        "electrical_freeze": ["build_electrical --check", "validate_electrical_contract", "review_electrical_candidate", "create_electrical_freeze", "create_stage_handoff"],
+        "physical": ["check_easyeda_import_parity", "compile_design_policy", "apply_kicad_rules", "run_pcb_pipeline", "record_physical_review", "create_stage_handoff"],
         "routing": ["compile_design_policy", "apply_kicad_rules", "krt_flow check", "krt_flow route", "run_freerouting_headless", "record_physical_review"],
         "release": ["compile_design_policy", "record_physical_review", "run_pcb_pipeline --export", "create_release_snapshot"],
         "prototype": ["record_prototype_measurement", "create_stage_handoff"],

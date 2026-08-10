@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "active": "jlcpcb",
+  "backends": {
+    "jlcpcb": {
+      "status": "primary",
+      "required_gates": [
+        "electrical_freeze",
+        "easyeda_import_parity",
+        "easyeda_drc",
+        "kicad_independent_drc_and_connectivity",
+        "jlc_dfm",
+        "bom_pnp_gerber_checks",
+        "release_audit"
+      ],
+      "external_receipt_checker": "scripts/check_manufacturing_gates.py",
+      "compatibility_export": "scripts/export_jlcpcb_release.py",
+      "package_checker": "scripts/check_jlcpcb_release.py"
+    }
+  },
+  "invariant": "An external tool success or router success is never manufacturing or release approval. Every gate must be deterministic, SHA-bound where applicable, and independently auditable."
+}

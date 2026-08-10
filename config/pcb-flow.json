@@ -6,9 +6,12 @@
     "board": "elec/layout/rev-a-clearance-fixes-v346/rev-a-clearance-fixes.kicad_pcb"
   },
   "board_stack": "config/board-stack.json",
+  "backend_architecture": "config/backend-architecture.json",
+  "physical_backend": "config/physical-backend.json",
   "acceptance": "config/pcb-acceptance.json",
   "stage_checklist": "config/stage-checklist.json",
   "checks": [
+    "scripts/check_backend_architecture.py",
     "scripts/check_tool_entrypoints.py",
     "scripts/validate_power_component_review.py"
   ],
@@ -25,9 +28,16 @@
     "output": "build/07-release/tmp/manual/context/pcb-context.json"
   },
   "manufacturing": {
+    "backend": "config/manufacturing-backend.json",
     "output": "manufacturing/jlcpcb/esp32-s3-remote-flashing-probe-rev-a",
     "log": "build/07-release/tmp/manual/jlcpcb-export.log",
-    "assembly_parts": "config/jlcpcb-parts.json"
+    "assembly_parts": "config/jlcpcb-parts.json",
+    "gate_receipts": {
+      "electrical_freeze": "build/04-electrical-freeze/evidence/manual/electrical-freeze.json",
+      "easyeda_import_parity": "build/05-placement/evidence/manual/easyeda-import-parity.json",
+      "easyeda_drc": "build/06-routing/evidence/manual/easyeda-drc.json",
+      "jlc_dfm": "build/07-release/evidence/manual/jlc-dfm.json"
+    }
   },
   "handoff": {
     "output": "handoff/stages/CURRENT_STAGE.json",
