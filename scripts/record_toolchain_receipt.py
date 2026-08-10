@@ -31,6 +31,7 @@ def main() -> int:
     parser.add_argument("--distro", default="Ubuntu-24.04")
     parser.add_argument("--output", type=Path, default=RECEIPT)
     parser.add_argument("--without-konnect", action="store_true")
+    parser.add_argument("--electrical-only", action="store_true", help="Record only the selected electrical compiler/runtime identity")
     args = parser.parse_args()
 
     houtini = ROOT / "tools/houtini-lm"
@@ -38,7 +39,7 @@ def main() -> int:
     jar = ROOT / "tools/freerouting/freerouting-latest.jar"
     krt_python = ROOT / ".venv-routingtools/Scripts/python.exe"
     missing = [str(path) for path in (houtini / ".git", krt / ".git", jar, krt_python) if not path.exists()]
-    if missing:
+    if missing and not args.electrical_only:
         raise SystemExit("Cannot record an incomplete local toolchain:\n" + "\n".join(missing))
 
     backend_config = json.loads((ROOT / "config/electrical-backend.json").read_text(encoding="utf-8"))
@@ -48,11 +49,8 @@ def main() -> int:
         raise SystemExit("config/electrical-backend.json has no valid active backend")
     receipt: dict[str, object] = {
         "schema": 1,
-        "mode": "manual",
+        "mode": "electrical_only" if args.electrical_only else "manual",
         "electrical_backend": {"active": active_backend},
-        "houtini_lm": {"commit": output(["git", "-C", str(houtini), "rev-parse", "HEAD"]), "version": json.loads((houtini / "package.json").read_text(encoding="utf-8"))["version"]},
-        "kicad_routing_tools": {"commit": output(["git", "-C", str(krt), "rev-parse", "HEAD"])},
-        "freerouting": {"sha256": sha256(jar)},
     }
     if active_backend == "tscircuit":
         root = ROOT / "tscircuit"
@@ -72,16 +70,22 @@ def main() -> int:
         receipt["atopile"] = {"version": output(["wsl.exe", "-d", args.distro, "--", "bash", "-lc", "export PATH=\"$HOME/.local/bin:$PATH\"; ato --version | tail -n 1"])}
     else:
         raise SystemExit(f"No receipt strategy is configured for electrical backend: {active_backend}")
-    konnect = ROOT / "tools/konnect/konnect.exe"
-    if args.without_konnect:
-        receipt["konnect"] = {"disabled": True}
-    else:
-        if not konnect.is_file():
-            raise SystemExit(f"Konnect executable not found: {konnect}; pass --without-konnect only when intentionally disabled")
-        receipt["konnect"] = {"binary_version": output([str(konnect), "--version"]), "binary_sha256": sha256(konnect)}
+    if not args.electrical_only:
+        receipt.update({
+            "houtini_lm": {"commit": output(["git", "-C", str(houtini), "rev-parse", "HEAD"]), "version": json.loads((houtini / "package.json").read_text(encoding="utf-8"))["version"]},
+            "kicad_routing_tools": {"commit": output(["git", "-C", str(krt), "rev-parse", "HEAD"])},
+            "freerouting": {"sha256": sha256(jar)},
+        })
+        konnect = ROOT / "tools/konnect/konnect.exe"
+        if args.without_konnect:
+            receipt["konnect"] = {"disabled": True}
+        else:
+            if not konnect.is_file():
+                raise SystemExit(f"Konnect executable not found: {konnect}; pass --without-konnect only when intentionally disabled")
+            receipt["konnect"] = {"binary_version": output([str(konnect), "--version"]), "binary_sha256": sha256(konnect)}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"receipt": str(args.output.resolve()), "mode": "manual"}, separators=(",", ":")))
+    print(json.dumps({"receipt": str(args.output.resolve()), "mode": receipt["mode"]}, separators=(",", ":")))
     return 0
 
 

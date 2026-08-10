@@ -13,6 +13,8 @@ import re
 import subprocess
 import sys
 
+from pcb_policy import configured_board
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_KICAD_CLI = Path(r"C:\Program Files\KiCad\10.0\bin\kicad-cli.exe")
@@ -269,7 +271,7 @@ def main() -> int:
     parser.add_argument(
         "--board",
         type=Path,
-        default=ROOT / "elec/layout/default/default.kicad_pcb",
+        default=configured_board(ROOT),
     )
     parser.add_argument("--kicad-cli", type=Path, default=DEFAULT_KICAD_CLI)
     parser.add_argument(

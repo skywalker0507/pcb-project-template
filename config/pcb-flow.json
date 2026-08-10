@@ -33,8 +33,9 @@
     "log": "build/07-release/tmp/manual/jlcpcb-export.log",
     "assembly_parts": "config/jlcpcb-parts.json",
     "gate_receipts": {
-      "electrical_freeze": "build/04-electrical-freeze/evidence/manual/electrical-freeze.json",
+      "electrical_freeze": "build/04-electrical-freeze/release/REPLACE_WITH_FREEZE_ID/electrical-freeze.json",
       "easyeda_import_parity": "build/05-placement/evidence/manual/easyeda-import-parity.json",
+      "final_electrical_parity": "build/07-release/evidence/manual/final-electrical-parity.json",
       "easyeda_drc": "build/06-routing/evidence/manual/easyeda-drc.json",
       "jlc_dfm": "build/07-release/evidence/manual/jlc-dfm.json"
     }

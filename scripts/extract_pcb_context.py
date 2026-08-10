@@ -12,6 +12,8 @@ import re
 import subprocess
 import sys
 
+from pcb_policy import configured_board
+
 
 ROOT = Path(__file__).resolve().parents[1]
 KICAD_PYTHON = Path(r"C:\Program Files\KiCad\10.0\bin\python.exe")
@@ -61,7 +63,7 @@ def main() -> int:
     parser.add_argument(
         "--board",
         type=Path,
-        default=ROOT / "elec/layout/default/default.kicad_pcb",
+        default=configured_board(ROOT),
     )
     parser.add_argument(
         "--output",

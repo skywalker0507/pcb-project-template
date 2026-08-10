@@ -8,13 +8,13 @@ receipt can reject it safely.
 
 | Work | Tool | Boundary | Required follow-up |
 |---|---|---|---|
-| Electrical source and connectivity | atopile | Sole production electrical authority | electrical build, contract validation, candidate review, and electrical freeze |
-| Primary placement/physical editing | EasyEDA Pro bridge/API | Must consume an electrical freeze and pass deterministic import parity | EasyEDA DRC plus exported compact receipt |
+| Electrical source and connectivity | atopile | Sole production electrical authority | electrical build, contract validation, candidate review, and immutable release-lane freeze bundle |
+| Primary placement/physical editing | EasyEDA Pro bridge/API | Must consume the frozen board/manifest and pass deterministic import parity | final electrical parity plus EasyEDA DRC receipt |
 | Reference/fallback physical editing | KiCad GUI/Konnect | Interchange, debug, and fallback only; no schematic authority | save candidate and independent pipeline audit |
 | Large text/log classification | Houtini-LM | One path-based call, 800 tokens; no PCB judgment | Codex verifies cited lines |
 | Bounded net routing | KiCadRoutingTools | GUI-independent engine; explicit nets, reviewed rules, separate candidate, two identical attempts maximum | EasyEDA import/diff plus independent KiCad DRC and physical review |
 | Non-critical leftover bulk routing | FreeRouting | Critical/power/high-speed work frozen; real ignored DSN classes required | import to separate candidate and independent audit |
-| DRC, release and export | EasyEDA DRC, KiCad CLI, JLC DFM, and project scripts | No natural-language approval or regenerated baseline | SHA-bound gate receipts, package checks, and `release_pass=true` |
+| DRC, release and export | Final electrical parity, EasyEDA DRC, KiCad CLI, JLC DFM, and project scripts | No natural-language approval or regenerated baseline | SHA-bound gate receipts, package checks, and `release_pass=true` |
 
 ## Artifact lanes
 
@@ -36,7 +36,8 @@ snapshots remain under `manufacturing/releases/`.
 
 ## Token rules
 
-1. Start with `session_boot.py`, `stage_doctor.py`, and `build/CURRENT.json`.
+1. Start with only `session_boot.py`; it summarizes the relevant current-stage
+   records and names any on-demand files.
 2. Read compact receipts before logs; read only the cited tail or lines on a failure.
 3. Query PCB context by net/group/ref; the default response cap is 6000 bytes.
 4. Never load a complete PCB, schematic, DSN, or SES into an LLM.

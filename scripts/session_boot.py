@@ -1,69 +1,74 @@
 #!/usr/bin/env python3
-"""Emit a compact, read-first session receipt without opening the whole PCB."""
+"""Emit the single compact navigation receipt needed at session start."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from stage_policy import ROOT, current_stage
-from validate_requirements import problems
-from artifact_store import config as artifact_config, stage_directory
+from stage_doctor import receipt as stage_receipt
+from stage_policy import ROOT
 
 
 def load(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def main() -> int:
-    stage = current_stage()
-    checklist = load(ROOT / "config/stage-checklist.json")
-    acceptance = load(ROOT / "config/pcb-acceptance.json")
+def unique_paths(values: list[object]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        if isinstance(value, str) and value not in result:
+            result.append(value)
+    return result
+
+
+def build_receipt() -> dict[str, object]:
+    navigation = stage_receipt()
     stack = load(ROOT / "config/board-stack.json")
-    execution = load(ROOT / "config/execution-policy.json")
-    requirements = load(ROOT / "config/requirements.json")
-    artifacts = artifact_config()
-    tool_policy = load(ROOT / "config/ai-tool-policy.json")
-    entrypoint_policy = load(ROOT / "config/tool-entrypoints.json")
-    stage_rules = checklist.get("stages", {}).get(stage.get("stage"), {})
-    number = stage_rules.get("number")
-    label = f"{int(number):02d}-{stage.get('stage')}" if isinstance(number, int) else stage.get("stage")
-    result = {
-        "schema": 1,
-        "stage": stage.get("stage"),
-        "stage_number": number,
-        "stage_label": label,
-        "status": stage.get("status"),
-        "objective": stage.get("objective"),
-        "open_items": stage.get("open_items", [])[:8],
-        "next_actions": stage.get("next_actions", [])[:8],
-        "forbidden": stage_rules.get("forbidden", []),
-        "required_evidence": stage_rules.get("required_evidence", []),
-        "stage_files": stage_rules.get("files", []),
-        "board_stack": stack.get("active"),
-        "release_requires": (acceptance.get("release") or {}).get("requires", []),
-        "requirements_issues": problems(requirements)[:8],
-        "execution": {
-            "continue_statuses": (execution.get("continuation") or {}).get("statuses", []),
-            "candidate_result_is_turn_boundary": (execution.get("continuation") or {}).get("candidate_result_is_turn_boundary"),
-            "candidate_rejection_is_blocker": (execution.get("continuation") or {}).get("candidate_rejection_is_blocker"),
-            "handoff_is_turn_boundary": (execution.get("continuation") or {}).get("handoff_is_turn_boundary"),
-            "final_gate": execution.get("gate_command"),
+    stage_paths = unique_paths(list(navigation.get("stage_files") or []))
+    read_if_needed = unique_paths([
+        *[value for value in stage_paths if (ROOT / value).is_file()],
+        "config/pcb-acceptance.json",
+        "config/board-stack.json",
+        "config/tool-entrypoints.json",
+    ])
+    artifact_locations = [value for value in stage_paths if not (ROOT / value).is_file()]
+    return {
+        "schema": 2,
+        "stage": {
+            "name": navigation.get("stage"),
+            "number": navigation.get("stage_number"),
+            "label": navigation.get("stage_label"),
+            "status": navigation.get("status"),
+            "objective": navigation.get("objective"),
         },
-        "artifacts": {
-            "stage_root": str(stage_directory(str(stage.get("stage")), artifacts)),
-            "lanes": artifacts.get("lanes", {}),
-            "context_budget": artifacts.get("context_budget", {}),
+        "work": {
+            "blockers": navigation.get("blockers", []),
+            "open_items": navigation.get("open_items", []),
+            "next_actions": navigation.get("stage_next_actions", []),
+            "continue_required": navigation.get("continue_required", False),
         },
-        "allowed_ai_tools": (tool_policy.get("stages") or {}).get(stage.get("stage"), []),
-        "tool_entrypoints": {
-            name: (entrypoint_policy.get("entrypoints") or {}).get(name)
-            for name in (entrypoint_policy.get("stage_capabilities") or {}).get(stage.get("stage"), [])
+        "gates": {
+            "required": navigation.get("required_evidence", []),
+            "forbidden": navigation.get("forbidden", []),
         },
-        "read_only_default": True,
-        "instruction": "Do not read a full .kicad_pcb by default; use compact receipts or query_pcb_context.py slices.",
+        "active_board_stack": stack.get("active"),
+        "next_command": navigation.get("next_command"),
+        "command_help": "python scripts/pcbctl.py --help",
+        "context": {
+            "default_read": ["AGENTS.md", "this session receipt"],
+            "read_now": [],
+            "read_if_needed": read_if_needed,
+            "artifact_locations": artifact_locations,
+            "never_load_complete": ["*.kicad_pcb", "*.kicad_sch", "*.dsn", "*.ses"],
+        },
+        "final_gate": navigation.get("final_gate"),
+        "instruction": "If next_command is present, run it unless the user named a more specific operation; load on-demand files only when needed.",
     }
-    print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+
+
+def main() -> int:
+    print(json.dumps(build_receipt(), ensure_ascii=False, separators=(",", ":")))
     return 0
 
 

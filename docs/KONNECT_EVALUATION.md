@@ -41,8 +41,9 @@ longer exposes the required DSN/SES round trip through `kicad-cli`.
 ## KiCad fallback handoff
 
 atopile produces an isolated KiCad PCB candidate, which becomes physical input
-only after electrical validation, candidate review, and electrical freeze.
-EasyEDA import must pass parity first. Use Konnect only for an intentional
+only after electrical validation, candidate review, and promotion into an
+immutable release-lane electrical freeze bundle. EasyEDA import must pass
+parity first, and final electrical parity must pass after edits. Use Konnect only for an intentional
 KiCad fallback/reference operation with the intended board open.
 
 Before an import, run independent review evidence:

@@ -21,7 +21,9 @@ LLMs are narrow-interface operators, never design or release authorities.
    electrical freeze.
 3. A reviewed manufacturer capability source is the numeric fabrication
    authority. Models must never supply missing numeric values.
-4. A passing `ELECTRICAL_FREEZE` is the one-way boundary into physical work.
+4. A passing immutable release-lane `ELECTRICAL_FREEZE` bundle is the one-way
+   boundary into physical work. Final electrical parity is measured only
+   against its frozen manifest.
 5. EasyEDA Pro is the primary physical backend. KiCad is the native atopile
    interchange, independent validator, and fallback/reference backend.
 6. KiCadRoutingTools is a GUI-independent routing engine; FreeRouting is secondary.
@@ -59,8 +61,13 @@ electrical-backend checks placement/critical-net checks  KRT/DFM/KiCad rules
 Long text is a separate path: deterministic scripts retain logs on disk and
 may create a Houtini job only when the delegation policy permits it. The
 sidekick returns a bounded JSON draft; it has no authority over any gate.
-Normal sessions begin from `session_boot` and `stage_doctor`, not from a full
-board or long log.
+Normal sessions begin from the single `session_boot` receipt, not from
+`stage_doctor`, `CURRENT.json`, a full board, or a long log. Stage doctor and
+the detailed workflow documents are loaded only for diagnosis.
+
+Validation strength follows the existing numbered stage. Explore/develop/freeze/
+release are descriptive ideas only; they must not become a parallel mode state
+machine or another set of transition configuration.
 
 ## Decisions recorded
 
@@ -92,8 +99,8 @@ board or long log.
    policy plus KRT, DFM, and KiCad-rule artifacts from requirements, board stack,
    and reviewed manufacturing values.
 3. Make KRT, DFM, handoff, and export reject stale or missing resolved policy.
-4. Evolve `stage_doctor` into a small command bus with explicit allowed
-   commands and evidence gaps per stage.
+4. Keep `pcbctl.py` a thin dispatcher over existing scripts; do not duplicate
+   stage, KRT, freeze, pipeline, or release logic in a second command bus.
 
 ### P1: accuracy checks that derive from intent
 

@@ -14,7 +14,7 @@ import zipfile
 import hashlib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from pcb_policy import load_acceptance, require_no_prohibited_evidence, selected_manufacturing_profile
+from pcb_policy import configured_board, load_acceptance, require_no_prohibited_evidence, selected_manufacturing_profile
 from design_policy import DEFAULT_OUTPUT as DEFAULT_POLICY, require_policy
 from stage_policy import require_operation
 
@@ -124,7 +124,7 @@ def main() -> int:
     parser.add_argument(
         "--board",
         type=Path,
-        default=ROOT / "elec/layout/default/default.kicad_pcb",
+        default=configured_board(ROOT),
     )
     parser.add_argument("--board-stack", type=Path, default=STACK_PATH)
     parser.add_argument("--manufacturing-profile", type=Path, default=MANUFACTURING_PROFILE_PATH)
@@ -159,6 +159,7 @@ def main() -> int:
         "release_pass", "board_sha256_match", "drc_zero_unconnected", "manufacturing_profile_selected",
         "review_pass", "review_receipt_matches_policy",
         "electrical_freeze_pass", "easyeda_import_parity_pass", "easyeda_drc_pass", "jlc_dfm_pass",
+        "final_electrical_parity_pass",
     })
     require_no_prohibited_evidence(release_rules, {"matching_release_audit"})
     design_policy = require_policy("release", args.design_policy.resolve())

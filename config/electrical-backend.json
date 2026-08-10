@@ -9,6 +9,8 @@
     ],
     "optional_artifacts_are_backend_private": true,
     "freeze_receipt_kind": "electrical_freeze",
+    "freeze_bundle_root": "build/04-electrical-freeze/release",
+    "physical_manifest_schema": 2,
     "invariant": "Reviewed atopile source is the production electrical authority. Backends generate isolated candidates and must never overwrite a reviewed physical board."
   },
   "backends": {

@@ -2,14 +2,19 @@
 
 ## Machine and project setup
 
-For every new session, read in this order: `handoff/stages/CURRENT_STAGE.json`, its `stage_rules`, `config/pcb-acceptance.json`, and `config/board-stack.json`. `--tier minimal` permits requirements work; physical work requires the relevant KiCad checks.
-
-Run `python scripts/stage_doctor.py` before choosing a workflow command. It is the authoritative navigation receipt; routing and export scripts enforce their own stage guard.
+For every new session, run `python scripts/session_boot.py`. Its receipt already
+contains the active stage, relevant rules, blockers, board-stack selection and
+next command. Read only `read_now`; treat `read_if_needed` as an index rather
+than a default reading list. `stage_doctor.py` remains an on-demand diagnostic,
+while routing and export scripts enforce their own stage guards.
 
 Run `python scripts/init_project.py --project-name <name>` on each fresh clone.
 The command only writes MCP configuration. Install or update tools manually,
 then run `python scripts/record_toolchain_receipt.py`. Restart Codex after
 `.codex/config.toml` is generated, then run the deep environment check.
+An electrical-only receipt may be created first with
+`record_toolchain_receipt.py --electrical-only`; production atopile builds and
+freezes bind this exact receipt and compiler version.
 
 Keep API keys in Windows user environment variables such as
 `DEEPSEEK_API_KEY`; never commit them.
@@ -24,15 +29,16 @@ Keep API keys in Windows user environment variables such as
 
 The machine-readable stage checklist is authoritative for completion evidence and forbidden actions. The numbered list is explanatory only. `route_ok` means a guarded routing action ran; it is not release approval.
 
-After board changes, run `python scripts/run_pcb_pipeline.py`. After electrical
-source changes, run it with `--build`: this creates only an isolated electrical
-candidate, then stops so it cannot audit or export a stale reviewed board.
+After board changes, run `python scripts/pcbctl.py verify`. After electrical
+source changes, run `python scripts/pcbctl.py build`: this creates only an
+isolated electrical candidate and cannot audit or export a stale reviewed board.
 Run `review_electrical_candidate.py --receipt <electrical-build.json> --output
 <new-review-directory>` to generate independent candidate DRC and render
-evidence, then create the SHA-bound electrical freeze. Import only that frozen
-`.kicad_pcb` through the EasyEDA bridge and require
+evidence, then create the immutable release-lane electrical freeze bundle.
+Import only its `frozen.kicad_pcb` through the EasyEDA bridge and require
 `check_easyeda_import_parity.py` to pass before placement. Add `--export` only
-after EasyEDA DRC, independent KiCad validation and JLC DFM receipts exist.
+after final electrical parity against the frozen manifest, EasyEDA DRC,
+independent KiCad validation and JLC DFM receipts exist.
 
 Before physical/routing/release work, run `python scripts/compile_design_policy.py`.
 KRT, FreeRouting candidates and export require a fresh policy with the relevant

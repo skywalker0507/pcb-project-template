@@ -19,11 +19,11 @@ reset/boot safety controls and connector protection paths excluded until a
 project-specific review explicitly enables them.
 
 ```text
-python scripts/krt_flow.py check --input elec/layout/default/default.kicad_pcb
+python scripts/krt_flow.py check --input <board-from-config/pcb-flow.json>
 
 python scripts/krt_flow.py route \
   --profile outer_low_risk \
-  --input elec/layout/default/default.kicad_pcb \
+  --input <board-from-config/pcb-flow.json> \
   --run-id low-risk-01 \
   --dry-run
 ```

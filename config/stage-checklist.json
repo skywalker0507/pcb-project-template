@@ -26,14 +26,14 @@
       "number": 4,
       "files": ["config/electrical-backend.json", "src/", "ato.yaml", "config/requirements.json", "scripts/create_electrical_freeze.py", "build/04-electrical-freeze/", "handoff/stages/CURRENT_STAGE.json"],
       "objective": "Create a SHA-bound boundary that freezes reviewed atopile connectivity, references, net names, footprints and exact part identities before physical work.",
-      "required_evidence": ["passing atopile build receipt", "passing electrical contract and candidate review receipts", "electrical_freeze receipt", "resolved exact-part mapping"],
+      "required_evidence": ["passing atopile build receipt", "passing electrical contract and candidate review receipts", "immutable release-lane electrical freeze bundle", "resolved exact-part mapping", "resolved electrical toolchain identity"],
       "forbidden": ["unreviewed connectivity changes", "placement", "routing", "manufacturing_export"]
     },
     "physical": {
       "number": 5,
       "files": ["config/physical-backend.json", "config/backend-architecture.json", "elec/layout/", "config/board-stack.json", "build/05-placement/", "build/00-shared/evidence/design-policy/design-policy-resolved.json"],
       "objective": "Import the frozen KiCad interchange board into the selected physical backend, prove parity, place reviewed blocks, and preserve backend-specific manual work.",
-      "required_evidence": ["electrical_freeze receipt", "EasyEDA import parity pass", "board SHA", "placement review notes"],
+      "required_evidence": ["immutable electrical freeze bundle", "EasyEDA import parity pass", "board SHA", "placement review notes"],
       "forbidden": ["unreviewed broad autorouting", "manufacturing_export"]
     },
     "routing": {
@@ -48,7 +48,7 @@
       "number": 7,
       "files": ["config/pcb-acceptance.json", "config/manufacturing-backend.json", "build/07-release/evidence/", "build/07-release/release/", "manufacturing/"],
       "objective": "Run EasyEDA DRC, independent KiCad DRC/connectivity validation, JLC DFM, copper review, package checks, and guarded manufacturing export.",
-      "required_evidence": ["release_pass=true", "matching board SHA", "selected manufacturing profile", "EasyEDA DRC pass", "KiCad independent validation", "JLC DFM pass", "BOM/PnP/Gerber package pass"],
+      "required_evidence": ["release_pass=true", "matching board SHA", "selected manufacturing profile", "final electrical parity pass", "EasyEDA DRC pass", "KiCad independent validation", "JLC DFM pass", "BOM/PnP/Gerber package pass"],
       "forbidden": ["baseline regeneration to pass", "export without release_pass"]
     },
     "prototype": {

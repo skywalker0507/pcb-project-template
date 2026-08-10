@@ -7,10 +7,13 @@
     "new_wrapper_requires_inventory_review": true
   },
   "entrypoints": {
+    "pcbctl": "scripts/pcbctl.py",
     "backend_architecture": "scripts/check_backend_architecture.py",
     "electrical_build": "scripts/build_electrical.py",
     "electrical_freeze": "scripts/create_electrical_freeze.py",
+    "kicad_parity_manifest": "scripts/extract_kicad_parity_manifest.py",
     "easyeda_import_parity": "scripts/check_easyeda_import_parity.py",
+    "final_electrical_parity": "scripts/check_final_electrical_parity.py",
     "manufacturing_gates": "scripts/check_manufacturing_gates.py",
     "pcb_pipeline": "scripts/run_pcb_pipeline.py",
     "pcb_context": "scripts/query_pcb_context.py",
@@ -27,10 +30,10 @@
     "requirements": ["script_search", "backend_architecture", "environment", "artifact_store"],
     "parts": ["script_search", "environment", "artifact_store"],
     "electrical": ["script_search", "electrical_build", "pcb_pipeline", "artifact_store"],
-    "electrical_freeze": ["script_search", "electrical_build", "electrical_freeze", "pcb_pipeline", "artifact_store"],
+    "electrical_freeze": ["script_search", "electrical_build", "kicad_parity_manifest", "electrical_freeze", "pcb_pipeline", "artifact_store"],
     "physical": ["script_search", "easyeda_import_parity", "pcb_pipeline", "pcb_context", "konnect", "artifact_store"],
     "routing": ["script_search", "krt", "freerouting", "candidate_audit", "pcb_pipeline", "pcb_context", "konnect", "artifact_store"],
-    "release": ["script_search", "manufacturing_gates", "pcb_pipeline", "pcb_context", "artifact_store"],
+    "release": ["script_search", "final_electrical_parity", "manufacturing_gates", "pcb_pipeline", "pcb_context", "artifact_store"],
     "prototype": ["script_search", "pcb_pipeline", "artifact_store"]
   },
   "freerouting": {

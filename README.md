@@ -5,8 +5,8 @@ EasyEDA Pro as the primary physical backend and KiCad retained as interchange,
 independent validator, and fallback.
 It combines:
 
-- reviewed atopile source as the production electrical authority and isolated
-  `.kicad_pcb` candidates as the electrical-to-physical handoff;
+- reviewed atopile source as the production electrical authority and immutable
+  release-lane freeze bundles as the only electrical-to-physical handoff;
 - an optional experimental tscircuit/Bun backend for A/B research;
 - an EasyEDA Pro physical-backend contract with deterministic import parity,
   DRC, and JLC DFM receipt gates (the official bridge/API adapter is pending);
@@ -23,8 +23,8 @@ It combines:
 
 The workflow has eight stable stages: requirements, parts, electrical,
 electrical freeze, placement, routing, release, and prototype validation. Run
-`python scripts/stage_doctor.py` to see the current stage's authoritative files
-and allowed commands.
+`python scripts/session_boot.py` once per session for the current stage, gates,
+on-demand files, and next command.
 
 Create a new repository from this GitHub template, clone it, then run:
 
@@ -44,6 +44,13 @@ downloads, clones, installs or compiles tools. Install tools manually when the
 network is reliable, then record their local versions and hashes with
 `python scripts/record_toolchain_receipt.py`. API keys are never written to the
 repository.
+
+Before a production atopile build, at minimum record the actual electrical
+compiler identity without requiring the routing toolchain to be installed:
+
+```text
+python scripts/record_toolchain_receipt.py --electrical-only
+```
 
 System prerequisites for the production path are Git, Python 3.10+, Java 25,
 KiCad 10, WSL Ubuntu and atopile. Node.js and Bun are required only when running
@@ -71,9 +78,10 @@ opening physical layout work, or creating manufacturing artifacts.
 The authority chain is:
 
 ```text
-requirements -> atopile -> electrical checks -> ELECTRICAL_FREEZE
+requirements -> atopile -> electrical checks -> immutable ELECTRICAL_FREEZE bundle
              -> .kicad_pcb interchange -> EasyEDA Pro -> KRT
-             -> EasyEDA DRC + independent KiCad validation -> JLC DFM -> release
+             -> final electrical parity + EasyEDA DRC
+             -> independent KiCad validation -> JLC DFM -> release
 ```
 
 `config/backend-architecture.json` keeps electrical backend, physical backend,
@@ -82,15 +90,31 @@ roles. KRT is not coupled to the KiCad GUI. Router success never proves release.
 The pending official adapter contract is documented in
 `docs/EASYEDA_BRIDGE_CONTRACT.md`.
 
-Before each new session, run `python scripts/session_boot.py`; it replaces opening the whole board or long logs by default. Use `python scripts/select_manufacturing_profile.py --manufacturer <name> --source <URL-or-card>` to record a reviewed process source before manufacturing export; this command does not invent fabrication values.
+Before each new session, run `python scripts/session_boot.py`; its compact
+receipt replaces separately opening `CURRENT.json`, every stage rule,
+acceptance, board-stack, workflow documentation, or long logs. Read its
+`read_if_needed` paths only when the task or a failure requires them.
 
-`session_boot.py` also returns the reviewed script entrypoints for the current
-stage. Before adding automation, run `python scripts/check_tool_entrypoints.py`
-and `python scripts/find_existing_script.py <task-keywords>`, then reuse the
-best existing script or wrapper listed in `config/tool-entrypoints.json`. In particular,
-never start the FreeRouting JAR directly: use
-`scripts/run_freerouting_headless.py`, which fixes headless mode with
-`--gui.enabled=false` and applies the project candidate guards.
+The common Agent-facing command surface has six commands and only dispatches to
+the existing guarded scripts:
+
+```text
+python scripts/pcbctl.py status
+python scripts/pcbctl.py build [build_electrical arguments]
+python scripts/pcbctl.py freeze [create_electrical_freeze arguments]
+python scripts/pcbctl.py route [krt_flow arguments]
+python scripts/pcbctl.py verify [run_pcb_pipeline arguments]
+python scripts/pcbctl.py release [run_pcb_pipeline arguments]
+```
+
+Use specialized scripts directly when detailed arguments are needed. Before
+adding automation, inspect `config/tool-entrypoints.json` or run
+`find_existing_script.py <task-keywords>`. Never start FreeRouting directly;
+reuse its reviewed headless wrapper.
+
+Use `select_manufacturing_profile.py --manufacturer <name> --source
+<URL-or-card>` to record a reviewed process source before manufacturing export;
+the command does not invent fabrication values.
 
 Selecting a source does not authorize real routing. After reviewing it, record explicit values and evidence with `apply_reviewed_fab_values.py`; only then can a non-dry-run KRT attempt proceed.
 
@@ -98,7 +122,7 @@ Before physical placement, routing, or release, compile the shared executable po
 
 ```powershell
 py -3.14 scripts/compile_design_policy.py
-py -3.14 scripts/stage_doctor.py
+py -3.14 scripts/pcbctl.py status
 ```
 
 The receipt at `build/00-shared/evidence/design-policy/design-policy-resolved.json` records semantic hashes of requirements,
@@ -128,16 +152,18 @@ snapshot with `create_release_snapshot.py --package <export-dir>
 <bottom.png>`. The snapshot retains the exact assembly-parts source and cited
 copper renders alongside hash-manifested release evidence.
 
-Use `python scripts/stage_doctor.py` at session start. It returns the current stage, bounded blockers, and one next command. `config/requirements.json` is the structured requirements record; validate it with `python scripts/validate_requirements.py` before electrical capture.
+`config/requirements.json` is the structured requirements record; validate it
+with `python scripts/validate_requirements.py` before electrical capture.
 
-Manufacturing exports are SHA-bound to passing EasyEDA import parity, EasyEDA
-DRC, JLC DFM, independent KiCad release audit, and physical-review receipts.
+Manufacturing exports are SHA-bound to passing EasyEDA import parity, final
+electrical parity against the frozen manifest, EasyEDA DRC, JLC DFM,
+independent KiCad release audit, and physical-review receipts.
 Use `run_pcb_pipeline.py --export`; invoking the export script directly also
 requires the matching consolidated manufacturing-gate receipt and cannot
 bypass DRC/DFM approval.
 
-After `python scripts/run_pcb_pipeline.py --build`, independently inspect the
-new candidate using the receipt path printed by the build:
+After `python scripts/pcbctl.py build`, independently inspect the new candidate
+using the receipt path printed by the build:
 
 ```text
 python scripts/review_electrical_candidate.py --receipt build/03-electrical/evidence/<run-id>/electrical-build.json --output build/03-electrical/evidence/<review-run-id>
@@ -145,6 +171,19 @@ python scripts/review_electrical_candidate.py --receipt build/03-electrical/evid
 
 This review intentionally fails on any KiCad DRC violation or unconnected item,
 renders the candidate, and never makes it manufacturing-ready.
+
+Create the compact schema-2 electrical manifest, validate it, and promote the
+reviewed candidate into an immutable freeze bundle:
+
+```text
+python scripts/extract_kicad_parity_manifest.py --board <candidate.kicad_pcb> --output <candidate-manifest.json>
+python scripts/validate_electrical_contract.py --receipt <electrical-build.json> --manifest <candidate-manifest.json> --output <contract.json>
+python scripts/create_electrical_freeze.py --build-receipt <electrical-build.json> --contract-receipt <contract.json> --candidate-review <candidate-review.json> --freeze-id <freeze-id>
+```
+
+Then set `manufacturing.gate_receipts.electrical_freeze` in
+`config/pcb-flow.json` to that bundle's immutable receipt. Never point it back
+to an electrical tmp candidate.
 
 ## Audited routing candidates
 

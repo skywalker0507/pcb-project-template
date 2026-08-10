@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Compare compact normalized PCB manifests for an EasyEDA import gate.
-
-The bridge/API adapter is responsible for converting each backend's data into
-this small manifest. This validator never sends or prints a full PCB.
-"""
+"""Compare schema-2 normalized PCB manifests for an EasyEDA import gate."""
 
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import hashlib
 import json
 from pathlib import Path
 from typing import Any
+
+
+LENGTH_UNIT = "nm"
+ROTATION_UNIT = "microdegree"
+FULL_ROTATION_UDEG = 360_000_000
 
 
 def file_sha256(path: Path) -> str:
@@ -22,20 +24,48 @@ def canonical(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def canonical_collection(value: Any) -> str:
+    if isinstance(value, list):
+        return canonical(sorted(value, key=canonical))
+    return canonical(value)
+
+
+def reject_floats(value: Any, label: str) -> None:
+    if isinstance(value, float):
+        raise SystemExit(f"{label} must use fixed integer units, not floating point")
+    if isinstance(value, dict):
+        for key, child in value.items():
+            reject_floats(child, f"{label}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            reject_floats(child, f"{label}[{index}]")
+
+
 def load_manifest(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise SystemExit(f"Parity manifest is unavailable or invalid: {path}: {exc}") from exc
-    if not isinstance(value, dict) or value.get("schema") != 1:
-        raise SystemExit(f"Parity manifest must use schema 1: {path}")
-    if not isinstance(value.get("components"), list):
-        raise SystemExit(f"Parity manifest needs a components list: {path}")
-    if not isinstance(value.get("nets"), list):
-        raise SystemExit(f"Parity manifest needs a nets list: {path}")
-    if "board_outline" not in value or not isinstance(value.get("holes"), list):
-        raise SystemExit(f"Parity manifest needs board_outline and holes: {path}")
+    validate_manifest(value, str(path))
     return value
+
+
+def validate_manifest(value: Any, label: str = "manifest") -> None:
+    if not isinstance(value, dict) or value.get("schema") != 2:
+        raise SystemExit(f"Parity manifest must use schema 2: {label}")
+    normalization = value.get("normalization")
+    if not isinstance(normalization, dict) or normalization.get("length_unit") != LENGTH_UNIT or normalization.get("rotation_unit") != ROTATION_UNIT:
+        raise SystemExit(f"Parity manifest must declare nm and microdegree normalization: {label}")
+    if not isinstance(value.get("board_sha256"), str) or not value["board_sha256"]:
+        raise SystemExit(f"Parity manifest needs board_sha256: {label}")
+    if not isinstance(value.get("components"), list) or not isinstance(value.get("nets"), list):
+        raise SystemExit(f"Parity manifest needs components and nets lists: {label}")
+    if "board_outline" not in value or not isinstance(value.get("holes"), list):
+        raise SystemExit(f"Parity manifest needs board_outline and holes: {label}")
+    reject_floats(value["board_outline"], f"{label}.board_outline")
+    reject_floats(value["holes"], f"{label}.holes")
+    component_map(value)
+    net_names(value)
 
 
 def net_names(manifest: dict[str, Any]) -> list[str]:
@@ -58,91 +88,158 @@ def component_map(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
         reference = component.get("reference")
         if not isinstance(reference, str) or not reference or reference in result:
             raise SystemExit("Parity-manifest component references must be non-empty and unique")
-        pads = component.get("pads")
+        for field in ("footprint", "part_identity", "side", "rotation_udeg", "pads"):
+            if field not in component:
+                raise SystemExit(f"Component {reference} is missing {field}")
+        if not isinstance(component["footprint"], str) or not component["footprint"]:
+            raise SystemExit(f"Component {reference} footprint must be a non-empty string")
+        if component["part_identity"] is not None and not isinstance(component["part_identity"], str):
+            raise SystemExit(f"Component {reference} part_identity must be a string or null")
+        if not isinstance(component["side"], str) or not component["side"]:
+            raise SystemExit(f"Component {reference} side must be a non-empty string")
+        if not isinstance(component["rotation_udeg"], int) or isinstance(component["rotation_udeg"], bool):
+            raise SystemExit(f"Component {reference} rotation_udeg must be an integer")
+        pads = component["pads"]
         if not isinstance(pads, list):
             raise SystemExit(f"Component {reference} needs a pads list")
-        numbers = [str(pad.get("number")) for pad in pads if isinstance(pad, dict)]
-        if len(numbers) != len(pads) or len(numbers) != len(set(numbers)):
-            raise SystemExit(f"Component {reference} pad numbers must be present and unique")
+        for index, pad in enumerate(pads):
+            if not isinstance(pad, dict):
+                raise SystemExit(f"Component {reference} pad {index} must be an object")
+            number = pad.get("number")
+            if not isinstance(number, str):
+                raise SystemExit(f"Component {reference} pad {index} needs a string logical number (empty is valid for NPTH)")
+            if pad.get("net") is not None and not isinstance(pad.get("net"), str):
+                raise SystemExit(f"Component {reference} pad {index} net must be a string or null")
+            if "drill_nm" not in pad or "geometry_signature" not in pad or not isinstance(pad.get("pad_type"), str):
+                raise SystemExit(f"Component {reference} pad {index} needs drill_nm, pad_type, and geometry_signature")
+            drill = pad["drill_nm"]
+            valid_drill = (
+                drill is None
+                or (isinstance(drill, int) and not isinstance(drill, bool))
+                or (isinstance(drill, list) and len(drill) == 2 and all(isinstance(item, int) and not isinstance(item, bool) for item in drill))
+            )
+            if not valid_drill:
+                raise SystemExit(f"Component {reference} pad {index} drill_nm must be an integer, integer pair, or null")
+            reject_floats(pad["geometry_signature"], f"Component {reference} pad {index} geometry_signature")
         result[reference] = component
     return result
 
 
-def pad_map(component: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return {str(pad["number"]): pad for pad in component["pads"]}
+def counter_payload(counter: Counter[Any]) -> list[dict[str, Any]]:
+    return [
+        {"item": list(item) if isinstance(item, tuple) else item, "count": count}
+        for item, count in sorted(counter.items(), key=lambda value: canonical(value[0]))
+    ]
+
+
+def pad_number_counter(component: dict[str, Any]) -> Counter[str]:
+    return Counter(str(pad["number"]) for pad in component["pads"])
+
+
+def pad_net_counter(component: dict[str, Any]) -> Counter[tuple[str, str | None]]:
+    return Counter((str(pad["number"]), pad.get("net")) for pad in component["pads"])
+
+
+def pad_physical_counter(component: dict[str, Any]) -> Counter[str]:
+    return Counter(canonical({
+        "number": str(pad["number"]),
+        "net": pad.get("net"),
+        "drill_nm": pad.get("drill_nm"),
+        "pad_type": pad.get("pad_type"),
+        "geometry_signature": pad.get("geometry_signature"),
+    }) for pad in component["pads"])
+
+
+def compare_electrical(source: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+    validate_manifest(source, "source")
+    validate_manifest(candidate, "candidate")
+    left_components = component_map(source)
+    right_components = component_map(candidate)
+    failures: dict[str, Any] = {}
+    left_refs, right_refs = sorted(left_components), sorted(right_components)
+    if left_refs != right_refs:
+        failures["component_references"] = {"source": left_refs, "candidate": right_refs}
+    footprint_mismatches: list[str] = []
+    part_mismatches: list[str] = []
+    pad_number_mismatches: dict[str, Any] = {}
+    pad_net_mismatches: dict[str, Any] = {}
+    for reference in sorted(set(left_components) & set(right_components)):
+        left, right = left_components[reference], right_components[reference]
+        if left.get("footprint") != right.get("footprint"):
+            footprint_mismatches.append(reference)
+        if left.get("part_identity") != right.get("part_identity"):
+            part_mismatches.append(reference)
+        left_numbers, right_numbers = pad_number_counter(left), pad_number_counter(right)
+        if left_numbers != right_numbers:
+            pad_number_mismatches[reference] = {"source": counter_payload(left_numbers), "candidate": counter_payload(right_numbers)}
+        left_mapping, right_mapping = pad_net_counter(left), pad_net_counter(right)
+        if left_mapping != right_mapping:
+            pad_net_mismatches[reference] = {"source": counter_payload(left_mapping), "candidate": counter_payload(right_mapping)}
+    if footprint_mismatches:
+        failures["footprints"] = footprint_mismatches
+    if part_mismatches:
+        failures["part_identity"] = part_mismatches
+    if pad_number_mismatches:
+        failures["pad_numbers"] = pad_number_mismatches
+    if pad_net_mismatches:
+        failures["pad_to_net_mapping"] = pad_net_mismatches
+    left_nets, right_nets = net_names(source), net_names(candidate)
+    if left_nets != right_nets:
+        failures["nets"] = {"source": left_nets, "candidate": right_nets}
+    return {
+        "electrical_parity_pass": not failures,
+        "component_count": {"source": len(left_components), "candidate": len(right_components)},
+        "pad_count": {
+            "source": sum(len(item["pads"]) for item in left_components.values()),
+            "candidate": sum(len(item["pads"]) for item in right_components.values()),
+        },
+        "failures": failures,
+    }
 
 
 def compare(source: dict[str, Any], imported: dict[str, Any]) -> dict[str, Any]:
-    source_components = component_map(source)
-    imported_components = component_map(imported)
-    failures: dict[str, Any] = {}
-    source_refs = sorted(source_components)
-    imported_refs = sorted(imported_components)
-    if source_refs != imported_refs:
-        failures["component_references"] = {"source": source_refs, "imported": imported_refs}
-
-    footprint_mismatches: list[str] = []
-    pad_number_mismatches: list[str] = []
-    pad_net_mismatches: list[str] = []
-    pad_drill_mismatches: list[str] = []
+    electrical = compare_electrical(source, imported)
+    failures = dict(electrical["failures"])
+    left_components, right_components = component_map(source), component_map(imported)
     side_mismatches: list[str] = []
     rotation_mismatches: list[str] = []
-    for reference in sorted(set(source_components) & set(imported_components)):
-        left = source_components[reference]
-        right = imported_components[reference]
-        if left.get("footprint") != right.get("footprint"):
-            footprint_mismatches.append(reference)
-        left_pads, right_pads = pad_map(left), pad_map(right)
-        if sorted(left_pads) != sorted(right_pads):
-            pad_number_mismatches.append(reference)
-        for number in sorted(set(left_pads) & set(right_pads)):
-            if left_pads[number].get("net") != right_pads[number].get("net"):
-                pad_net_mismatches.append(f"{reference}.{number}")
-            if canonical(left_pads[number].get("drill")) != canonical(right_pads[number].get("drill")):
-                pad_drill_mismatches.append(f"{reference}.{number}")
+    pad_geometry_mismatches: list[str] = []
+    for reference in sorted(set(left_components) & set(right_components)):
+        left, right = left_components[reference], right_components[reference]
         if left.get("side") != right.get("side"):
             side_mismatches.append(reference)
-        if canonical(left.get("rotation")) != canonical(right.get("rotation")):
+        if int(left["rotation_udeg"]) % FULL_ROTATION_UDEG != int(right["rotation_udeg"]) % FULL_ROTATION_UDEG:
             rotation_mismatches.append(reference)
-    for key, value in (
-        ("footprints", footprint_mismatches),
-        ("pad_numbers", pad_number_mismatches),
-        ("pad_to_net_mapping", pad_net_mismatches),
-        ("pad_drills", pad_drill_mismatches),
-        ("side", side_mismatches),
-        ("rotation", rotation_mismatches),
-    ):
-        if value:
-            failures[key] = value
-    source_nets, imported_nets = net_names(source), net_names(imported)
-    if source_nets != imported_nets:
-        failures["nets"] = {"source": source_nets, "imported": imported_nets}
-    if canonical(source["board_outline"]) != canonical(imported["board_outline"]):
+        if pad_physical_counter(left) != pad_physical_counter(right):
+            pad_geometry_mismatches.append(reference)
+    if side_mismatches:
+        failures["side"] = side_mismatches
+    if rotation_mismatches:
+        failures["rotation"] = rotation_mismatches
+    if pad_geometry_mismatches:
+        failures["pad_geometry"] = pad_geometry_mismatches
+    if canonical_collection(source["board_outline"]) != canonical_collection(imported["board_outline"]):
         failures["board_outline"] = True
-    if canonical(source["holes"]) != canonical(imported["holes"]):
+    if canonical_collection(source["holes"]) != canonical_collection(imported["holes"]):
         failures["holes"] = True
-    strict_keys = {"component_references", "pad_numbers", "pad_to_net_mapping", "nets"}
+    electrical_keys = {"component_references", "footprints", "part_identity", "pad_numbers", "pad_to_net_mapping", "nets"}
     return {
         "parity_pass": not failures,
-        "strict_connectivity_failure": bool(strict_keys & failures.keys()),
-        "component_count": {"source": len(source_components), "imported": len(imported_components)},
-        "pad_count": {
-            "source": sum(len(item["pads"]) for item in source_components.values()),
-            "imported": sum(len(item["pads"]) for item in imported_components.values()),
-        },
+        "strict_connectivity_failure": bool(electrical_keys & failures.keys()),
+        "component_count": electrical["component_count"],
+        "pad_count": electrical["pad_count"],
         "failures": failures,
     }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", type=Path, required=True, help="Normalized manifest from the frozen KiCad interchange board")
-    parser.add_argument("--imported", type=Path, required=True, help="Normalized manifest exported by the EasyEDA bridge after import")
+    parser.add_argument("--source", type=Path, required=True, help="Schema-2 manifest from the immutable frozen KiCad board")
+    parser.add_argument("--imported", type=Path, required=True, help="Schema-2 manifest exported by EasyEDA immediately after import")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     source_path, imported_path = args.source.resolve(), args.imported.resolve()
-    source_manifest = load_manifest(source_path)
-    imported_manifest = load_manifest(imported_path)
+    source_manifest, imported_manifest = load_manifest(source_path), load_manifest(imported_path)
     result = compare(source_manifest, imported_manifest)
     payload = {
         "schema": 1,
@@ -153,7 +250,8 @@ def main() -> int:
         "imported_manifest_sha256": file_sha256(imported_path),
         "source_board_sha256": source_manifest.get("board_sha256"),
         "imported_board_sha256": imported_manifest.get("board_sha256"),
-        "limits": "Manifests must be produced by reviewed deterministic adapters; this receipt does not prove DRC or manufacturing readiness.",
+        "normalization": source_manifest["normalization"],
+        "limits": "This import gate includes physical identity. Final electrical parity remains a separate mandatory gate after placement/routing.",
     }
     args.output.resolve().parent.mkdir(parents=True, exist_ok=True)
     args.output.resolve().write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

@@ -7,6 +7,7 @@
       "required_gates": [
         "electrical_freeze",
         "easyeda_import_parity",
+        "final_electrical_parity",
         "easyeda_drc",
         "kicad_independent_drc_and_connectivity",
         "jlc_dfm",

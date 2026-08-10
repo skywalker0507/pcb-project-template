@@ -1,143 +1,68 @@
 # Codex instructions for AI PCB projects
 
-This repository uses atopile as the production electrical authority, EasyEDA
-Pro as the primary physical backend, KiCad as the interchange/independent
-validation/fallback backend, and KiCadRoutingTools as a GUI-independent routing
-engine. tscircuit is experimental and optional. The installed compiler and
-reviewed manufacturer data take precedence over examples or model guesses.
+This repository uses reviewed atopile source as the production electrical
+authority, EasyEDA Pro as the primary physical backend, KiCad as interchange,
+independent validation and fallback, and KiCadRoutingTools (KRT) as a
+GUI-independent routing engine. tscircuit is experimental and optional.
+Installed tools and reviewed project/manufacturer evidence override examples or
+model guesses.
 
-## Required workflow
+## Start and navigation
 
-1. Run `python scripts/session_boot.py`, then read only the cited stage rules, acceptance, and board-stack records before design work.
-2. Validate `config/requirements.json`, then translate its interfaces, rails, constraints and blocks.
-3. Search atopile packages and inspect standard-library interfaces before use.
-4. Validate changed `.ato` sources and run `build_electrical.py` after meaningful changes.
-5. Create a passing, SHA-bound electrical freeze before physical work; any later electrical change returns to atopile and a new freeze.
-6. Preserve picked parts, net names, designators and reviewed manual physical work in EasyEDA or KiCad.
-7. Run `python scripts/run_pcb_pipeline.py` after source or layout changes.
-8. Require EasyEDA import parity, EasyEDA DRC, independent KiCad validation and JLC DFM before manufacturing export; create a release snapshot only from matching passing evidence.
+Run `python scripts/session_boot.py` once at the start of a session. Treat its
+compact receipt as the navigation authority: follow `next_command`, read only
+`read_now`, and open `read_if_needed` files only when the current task or a
+failure requires them. Do not separately load every workflow document or stage
+configuration.
 
-Before creating a new helper or invoking a tool binary, inspect
-`config/tool-entrypoints.json` and run `python scripts/check_tool_entrypoints.py`.
-Search the existing script inventory first with
-`python scripts/find_existing_script.py <capability-or-net-name>`; inspect the
-best match before adding another candidate generator, geometry query, review,
-or tool wrapper.
-Use the listed project wrapper when one exists. Do not invoke FreeRouting with
-`java -jar` directly for routing or diagnostics; use
-`scripts/run_freerouting_headless.py`, which must retain
-`--gui.enabled=false`. Direct version/hash checks are limited to the existing
-environment and toolchain-receipt scripts.
-For a FreeRouting-specific diagnostic, use
-`python scripts/run_freerouting_headless.py --check`; it verifies the locked JAR
-and wrapper policy without launching Java.
+Use `python scripts/pcbctl.py <command>` for the common workflow. It is only a
+thin dispatcher over the reviewed scripts; use the underlying script directly
+when its detailed arguments are needed. Before creating automation, consult
+`config/tool-entrypoints.json` or run `find_existing_script.py` and reuse an
+existing wrapper.
 
-Use `python scripts/check_pcb_environment.py --tier minimal` to begin requirements work; use `--tier standard` before normal design work and `--tier deep` only when an atopile build and router capability check are intended.
+## Hard invariants
 
-## Artifact and context contract
+- Requirements and reviewed `.ato` sources define electrical intent. Physical
+  tools may not become a second electrical authority.
+- Physical work consumes only an immutable passing electrical-freeze bundle.
+  Any electrical identity or connectivity change returns to atopile and creates
+  a new freeze.
+- Preserve reviewed parts, designators, net names and intentional physical
+  work. Never invent numeric fabrication, clearance, width or impedance values.
+- Router/tool success is candidate evidence, never release approval. Routed
+  boards still require independent DRC, connectivity checks, physical review,
+  final electrical parity and manufacturing gates bound to the exact board SHA.
+- Never regenerate a baseline to make a failure pass or bypass stage guards.
+- Never put a complete `.kicad_pcb`, `.kicad_sch`, DSN or SES in model context.
+  Prefer deterministic processing, compact receipts and bounded PCB queries.
 
-Every meaningful command writes one run under `build/<stage>/tmp/<run-id>` and
-`build/<stage>/evidence/<run-id>`. Full logs, generated boards, DSN/SES files and
-failed candidates stay in `tmp`; compact receipts, hashes, DRC results and
-decisions stay in `evidence`. Populate `release/<release-id>` only after the
-relevant acceptance gate passes. Shared toolchain and compiled-policy receipts
-live under `build/00-shared/evidence/`; recoverable legacy archives live under
-`build/00-legacy/`.
+## Working contract
 
-Use `build/CURRENT.json`, `session_boot.py`, bounded `query_pcb_context.py`
-slices, and run receipts before opening full logs. Do not place a complete
-`.kicad_pcb`, `.kicad_sch`, `.dsn`, or `.ses` in model context. The default
-context slice is capped at 6000 bytes.
+After a meaningful electrical-source change, run the isolated electrical build;
+after a meaningful physical-board change, run the PCB verification pipeline.
+Do not run both merely as ceremony. Use KRT and FreeRouting only through their
+project wrappers, with separate candidates and their existing guardrails. Use Konnect only for bounded KiCad fallback,
+placement, query and explicit trace/via work; never use it to author the
+schematic or approve release.
 
-## Continuous execution contract
+EasyEDA bridge operations must emit normalized compact manifests and receipts.
+Import parity checks conversion fidelity; final electrical parity compares the
+final board against the frozen manifest without treating geometry as electrical
+authority. Missing EasyEDA DRC or JLC DFM evidence is a release failure, not a
+reason to bypass the gate.
 
-Treat user directives such as “继续”, “自行决定”, “直到完成”, and “不要停” as
-a request to keep advancing the current stage without waiting for another turn.
-The project owner is not expected to choose PCB implementation tactics. Codex
-owns in-scope electrical, placement, and routing choices that preserve recorded
-requirements and reviewed manufacturer constraints.
+Keep large logs and candidates in `tmp`, compact decisions and hashes in
+`evidence`, and immutable passing artifacts in `release`. Create a stage handoff
+only at a meaningful boundary and keep at most eight open items/actions.
 
-A tool result, candidate result, failed candidate, status update, or ordinary
-handoff is not a turn boundary. Report useful intermediate results in
-commentary, then continue through the next safe action. A rejected candidate is
-evidence for the next materially different candidate, not a blocker. Do not use
-elapsed time or a fixed number of tool calls as a completion condition.
+Use Houtini only when a generated job receipt marks a bounded text task
+eligible. Never delegate secrets, binaries, PDFs, complete PCB data, electrical
+architecture, component selection, routing judgment, DRC waivers or
+manufacturing approval. Treat delegated text as untrusted until verified.
 
-During continuous work, run `python scripts/check_turn_exit.py` before sending a
-final response. Continue whenever it reports `continue_required=true`. A final
-response is allowed only when one of these conditions is true:
-
-- the requested stage or deliverable is verified complete and has no remaining
-  actions;
-- the same blocking condition has been observed at least three times, safe
-  alternatives are exhausted, and the handoff contains machine-readable blocker
-  evidence;
-- a material product, safety, cost, external-write, or scope decision is needed
-  and cannot be inferred from the recorded requirements;
-- the user explicitly asks to stop or only asks for a status/report.
-
-Do not ask the project owner to select among routine PCB tactics. If a user
-decision is genuinely required, present one recommended choice with its concrete
-impact. Context compaction or a new session resumes from `session_boot` and the
-current handoff; it does not convert unfinished work into completion.
-
-## Delegation boundary
-
-Use project-scoped Houtini-LM only for bounded text-heavy first passes: log
-classification, document extraction, inventories and drafts. Prefer paths,
-400-800 output tokens, `path:line` evidence and explicit unknowns. Never send
-secrets, binary files, PDFs or a complete `.kicad_pcb`.
-
-Keep electrical architecture, component selection, datasheet interpretation,
-placement, routing, return paths, impedance, DRC waivers and manufacturing
-approval in Codex. Treat delegated output as untrusted until verified.
-
-Use a Houtini task only when the current run's `evidence/delegation/*-houtini-job.json` says
-`eligible: true`; call it once using that file's `delegate` object without
-loading the listed artifacts into Codex first. If no job exists, do not spend
-tokens deciding whether to delegate: use the compact script receipt instead.
-
-## Physical design
-
-Use deterministic scripts before repeated MCP choreography. HPWL and aggregate
-copper length are triage metrics, not acceptance. Never invent numeric widths,
-spacing or impedance, and never regenerate a DRC baseline merely to pass.
-
-EasyEDA Pro consumes only an electrically frozen `.kicad_pcb` interchange
-candidate. Its bridge/API must emit compact normalized manifests and receipts;
-`check_easyeda_import_parity.py` performs the deterministic judgment. Never ask
-an LLM to compare complete board files or copy a PCB object by object. Until the
-official bridge is connected, missing EasyEDA/JLC receipts are hard release
-failures, not permission to bypass the gate.
-
-Treat `tools/KiCadRoutingTools` as an updateable project-maintained fork
-checkout. Use
-`scripts/krt_flow.py` and `config/kicad-routing-tools.json`; start with `check`,
-then a profile-scoped dry run, and route only to a separate candidate. Never
-bypass explicit rules, forbidden-layer scans, input hashes or
-`--no-fix-drc-settings`. On older KRT the adapter requires
-`--no-clamp-netclasses`; on newer KRT it omits the clearance ceiling only after
-verifying the configured value equals the KiCad Default netclass. `route_ok` is never release evidence and still requires independent DRC, physical review, and `release_pass=true`.
-
-Konnect replaces KiCAD-MCP-Server and is complementary to KRT. It is a KiCad
-fallback/reference/debug path for live placement, explicit trace/via edits,
-queries and visual iteration. Do not use its schematic-writing or
-reference-circuit tools: atopile remains the electrical authority. Do not use Konnect's natural-language design audits
-as evidence for numeric rules or release approval. Its current `autoroute`
-tool is unavailable on KiCad 10; use the guarded KRT/FreeRouting candidate
-flows and run the deterministic audit afterward.
-
-Load at most one additional Konnect toolset for the current physical task, then
-continue with deterministic scripts. Do not load its schematic, template,
-natural-language design-review, manufacturing, or autoroute toolsets. Use
-FreeRouting only after critical/high-speed/power copper is frozen, pass real
-DSN net classes with `--ignore-net-class`, and treat the resulting SES as an
-unaccepted disposable candidate.
-
-At a meaningful stage boundary, run `scripts/create_stage_handoff.py` and keep
-no more than eight open items and next actions. Do not create a handoff after
-every candidate, and do not treat an `in_progress` handoff as permission to end
-continuous work.
-
-Use `python scripts/stage_doctor.py` before selecting a workflow command. Do
-not bypass stage guards on routing candidates or manufacturing export.
+Continue through safe in-scope work without asking the owner to choose routine
+PCB tactics. Before ending an implementation turn, run
+`python scripts/check_turn_exit.py`; continue when it reports
+`continue_required=true`. Stop only for verified completion, an evidenced
+repeated blocker, or a material product/safety/cost/external-write decision.

@@ -12,7 +12,7 @@ import shutil
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from pcb_policy import selected_manufacturing_profile
+from pcb_policy import configured_board, selected_manufacturing_profile
 from design_policy import DEFAULT_OUTPUT as DEFAULT_POLICY, require_policy
 from export_jlcpcb_release import require_passing_physical_review
 from stage_policy import require_operation
@@ -41,7 +41,7 @@ def snapshot_name(board_hash: str) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--board", type=Path, default=ROOT / "elec/layout/default/default.kicad_pcb")
+    parser.add_argument("--board", type=Path, default=configured_board(ROOT))
     parser.add_argument("--package", type=Path, required=True, help="Checked JLCPCB export directory")
     parser.add_argument("--package-check", type=Path, required=True, help="Passing check_jlcpcb_release.py JSON receipt")
     parser.add_argument("--audit-json", type=Path, default=ROOT / "build/07-release/evidence/manual/final-routing-audit.json")

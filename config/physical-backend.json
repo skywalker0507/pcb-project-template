@@ -9,6 +9,7 @@
       "component_references",
       "footprints",
       "pad_numbers",
+      "pad_instances_multiset",
       "nets",
       "pad_to_net_mapping",
       "board_outline",
@@ -16,6 +17,7 @@
       "side",
       "rotation"
     ],
+    "final_electrical_parity_checker": "scripts/check_final_electrical_parity.py",
     "invariant": "Physical backends may place, route, and edit frozen physical data but may not become an electrical design authority. Connectivity changes return to atopile and a new electrical freeze."
   },
   "backends": {

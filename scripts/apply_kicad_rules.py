@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 from design_policy import DEFAULT_OUTPUT, require_policy
+from pcb_policy import configured_board
 from stage_policy import require_operation
 
 
@@ -21,7 +22,7 @@ def sha256(path: Path) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--board", type=Path, default=ROOT / "elec/layout/default/default.kicad_pcb")
+    parser.add_argument("--board", type=Path, default=configured_board(ROOT))
     parser.add_argument("--policy", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--receipt", type=Path, default=ROOT / "build/06-routing/evidence/manual/kicad-rules-apply.json")
     args = parser.parse_args()

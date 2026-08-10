@@ -108,6 +108,7 @@ def main() -> int:
     try:
         command = (
             f"cd {windows_to_wsl(ROOT)} && "
+            "printf 'CODEX_ATO_VERSION=' && ato --version | tail -n 1 && "
             f"ato build --build {args.build}"
         )
         process = subprocess.Popen(
@@ -154,6 +155,7 @@ def main() -> int:
     log_text = log_path.read_text(encoding="utf-8", errors="replace")
     build_ids = re.findall(r"\bBuild ([0-9a-f]{8,})\b|\[([0-9a-f]{8,})\]", log_text)
     build_id = next((left or right for left, right in reversed(build_ids)), None)
+    version_match = re.search(r"^CODEX_ATO_VERSION=(.+)$", log_text, re.MULTILINE)
     payload = {
         "schema": 1,
         "kind": "electrical_build",
@@ -162,6 +164,7 @@ def main() -> int:
         "exit_code": exit_code,
         "build": args.build,
         "build_id": build_id,
+        "compiler_version": version_match.group(1).strip() if version_match else None,
         "log": str(log_path),
         "candidate_board": str(candidate_board.resolve()) if exit_code == 0 and candidate_board else None,
         "protected_board_existed": protected_board_existed,

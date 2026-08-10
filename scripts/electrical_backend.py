@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 
@@ -78,12 +79,30 @@ def validate_backend(config: dict[str, Any], name: str, backend: dict[str, Any])
         raise SystemExit(f"Electrical backend {name!r} driver is unavailable: {driver}")
     if not source_root.exists():
         raise SystemExit(f"Electrical backend {name!r} source root is unavailable: {source_root}")
+    entry = str(backend["entry"])
+    entry_file, separator, symbol = entry.partition(":")
+    resolved_entry = (source_root / entry_file).resolve()
+    if not resolved_entry.is_file():
+        raise SystemExit(f"Electrical backend {name!r} entry is unavailable: {resolved_entry}")
+    canonical_entry = f"{resolved_entry.relative_to(ROOT).as_posix()}{separator}{symbol}"
+    if name == "atopile":
+        ato_yaml = ROOT / "ato.yaml"
+        try:
+            text = ato_yaml.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise SystemExit(f"atopile project configuration is unavailable: {ato_yaml}: {exc}") from exc
+        configured_entries = re.findall(r"^\s+entry:\s*([^\s#]+)", text, re.MULTILINE)
+        if canonical_entry not in configured_entries:
+            raise SystemExit(
+                f"atopile backend entry {canonical_entry!r} does not match an ato.yaml build entry: {configured_entries}"
+            )
     return {
         "backend": name,
         "status": backend["status"],
         "platform": backend["platform"],
         "driver": str(driver.relative_to(ROOT).as_posix()),
         "source_root": str(source_root.relative_to(ROOT).as_posix()),
+        "entry": canonical_entry,
         "source_sha256": source_sha256(source_root),
         "config_sha256": sha256(DEFAULT_CONFIG),
     }

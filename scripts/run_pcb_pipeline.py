@@ -92,6 +92,7 @@ def main() -> int:
     release_rules = load_acceptance(acceptance_path, "release", {
         "release_pass", "board_sha256_match", "drc_zero_unconnected", "manufacturing_profile_selected",
         "electrical_freeze_pass", "easyeda_import_parity_pass", "easyeda_drc_pass", "jlc_dfm_pass",
+        "final_electrical_parity_pass",
     })
     require_no_prohibited_evidence(release_rules, {"matching_release_audit"})
     board = str(ROOT / project["board"])
@@ -147,6 +148,7 @@ def main() -> int:
                         "--board", board,
                         "--electrical-freeze", str(ROOT / gate_receipts["electrical_freeze"]),
                         "--import-parity", str(ROOT / gate_receipts["easyeda_import_parity"]),
+                        "--final-electrical-parity", str(ROOT / gate_receipts["final_electrical_parity"]),
                         "--easyeda-drc", str(ROOT / gate_receipts["easyeda_drc"]),
                         "--jlc-dfm", str(ROOT / gate_receipts["jlc_dfm"]),
                         "--output", str(manufacturing_gate),

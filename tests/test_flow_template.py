@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -33,12 +36,90 @@ fab_values = load("fab_values_template", "scripts/apply_reviewed_fab_values.py")
 electrical_backend = load("electrical_backend_template", "scripts/electrical_backend.py")
 physical_backend = load("physical_backend_template", "scripts/physical_backend.py")
 easyeda_parity = load("easyeda_parity_template", "scripts/check_easyeda_import_parity.py")
+electrical_freeze = load("electrical_freeze_template", "scripts/create_electrical_freeze.py")
 tool_entrypoints = load("tool_entrypoints_template", "scripts/check_tool_entrypoints.py")
 script_search = load("script_search_template", "scripts/find_existing_script.py")
 backend_architecture = load("backend_architecture_template", "scripts/check_backend_architecture.py")
+pcbctl = load("pcbctl_template", "scripts/pcbctl.py")
+session_boot = load("session_boot_template", "scripts/session_boot.py")
+stage_doctor = load("stage_doctor_template", "scripts/stage_doctor.py")
+
+
+def parity_manifest(*, reference: str = "U1", pads: list[dict[str, object]] | None = None) -> dict[str, object]:
+    return {
+        "schema": 2,
+        "normalization": {"length_unit": "nm", "rotation_unit": "microdegree"},
+        "board_sha256": "A" * 64,
+        "nets": ["GND", "VCC"],
+        "board_outline": [{"kind": "segment", "start_nm": [0, 0], "end_nm": [1_000_000, 0]}],
+        "holes": [{"id": "H1", "drill_nm": 3_000_000}],
+        "components": [{
+            "reference": reference,
+            "footprint": "Package:One",
+            "part_identity": "PART-1",
+            "side": "F.Cu",
+            "rotation_udeg": 0,
+            "pads": pads or [{
+                "number": "1", "net": "GND", "drill_nm": None,
+                "pad_type": "smd", "geometry_signature": {"shape": "rect", "size_nm": [1_000, 2_000]},
+            }],
+        }],
+    }
 
 
 class FlowTemplateTests(unittest.TestCase):
+    def test_agent_facing_surface_is_bounded(self) -> None:
+        instructions = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertLessEqual(len(instructions.split()), 650)
+        self.assertNotIn("--no-clamp-netclasses", instructions)
+        receipt = session_boot.build_receipt()
+        self.assertEqual(receipt["context"]["default_read"], ["AGENTS.md", "this session receipt"])
+        self.assertEqual(receipt["context"]["read_now"], [])
+        self.assertEqual(receipt["command_help"], "python scripts/pcbctl.py --help")
+        self.assertNotIn("core_commands", receipt)
+        self.assertNotIn("release_requires", receipt)
+        self.assertNotIn("tool_entrypoints", receipt)
+
+    def test_pcbctl_is_only_a_thin_dispatcher_to_existing_scripts(self) -> None:
+        self.assertEqual(set(pcbctl.COMMANDS), {"status", "build", "freeze", "route", "verify", "release"})
+        for target in pcbctl.COMMANDS.values():
+            self.assertTrue((ROOT / target[0]).is_file())
+        routed = pcbctl.command_argv("route", ["check", "--input", "board.kicad_pcb"])
+        self.assertEqual(routed[1:], ["scripts/krt_flow.py", "check", "--input", "board.kicad_pcb"])
+        released = pcbctl.command_argv("release", ["--run-id", "test"])
+        self.assertEqual(released[1:], ["scripts/run_pcb_pipeline.py", "--export", "--run-id", "test"])
+
+    def test_stage_navigation_uses_the_configured_project_board(self) -> None:
+        original_stage = stage_doctor.current_stage
+        original_policy = stage_doctor.compile_policy
+        try:
+            stage_doctor.current_stage = lambda: {
+                "stage": "routing", "status": "in_progress", "objective": "test",
+                "open_items": [], "next_actions": [],
+            }
+            stage_doctor.compile_policy = lambda: {
+                "capabilities": {"candidate_routing": True},
+                "capability_issues": {"candidate_routing": []},
+            }
+            navigation = stage_doctor.receipt()
+        finally:
+            stage_doctor.current_stage = original_stage
+            stage_doctor.compile_policy = original_policy
+        flow = json.loads((ROOT / "config/pcb-flow.json").read_text(encoding="utf-8"))
+        self.assertIn(flow["project"]["board"], navigation["next_command"])
+        self.assertNotIn("elec/layout/default/default.kicad_pcb", navigation["next_command"])
+
+    def test_review_and_release_defaults_follow_pcb_flow_board(self) -> None:
+        flow = json.loads((ROOT / "config/pcb-flow.json").read_text(encoding="utf-8"))
+        self.assertEqual(policy.configured_board(ROOT), (ROOT / flow["project"]["board"]).resolve())
+        consumers = [
+            "apply_kicad_rules.py", "audit_kicad_release.py", "create_release_snapshot.py",
+            "export_jlcpcb_release.py", "extract_pcb_context.py", "record_physical_review.py",
+        ]
+        for name in consumers:
+            text = (ROOT / "scripts" / name).read_text(encoding="utf-8")
+            self.assertNotIn("elec/layout/default/default.kicad_pcb", text, name)
+
     def test_atopile_is_the_default_production_electrical_backend(self) -> None:
         config = electrical_backend.read_config()
         name, backend = electrical_backend.selected_backend(config)
@@ -46,6 +127,7 @@ class FlowTemplateTests(unittest.TestCase):
         self.assertEqual(backend["platform"], "wsl-native")
         self.assertEqual(backend["status"], "primary")
         self.assertNotIn("circuit_json", config["contract"]["required_artifacts"])
+        self.assertEqual(electrical_backend.validate_backend(config, name, backend)["entry"], "src/main.ato:App")
 
     def test_tscircuit_is_kept_as_a_separate_experimental_adapter(self) -> None:
         config = electrical_backend.read_config()
@@ -67,52 +149,114 @@ class FlowTemplateTests(unittest.TestCase):
         self.assertTrue(backend_architecture.audit()["success"])
 
     def test_easyeda_parity_strictly_rejects_pad_net_changes(self) -> None:
-        source = {
-            "schema": 1,
-            "nets": ["GND", "VCC"],
-            "board_outline": {"sha256": "outline"},
-            "holes": [{"id": "H1", "drill": 3.0}],
-            "components": [{
-                "reference": "U1", "footprint": "Package:One", "side": "F.Cu", "rotation": 0,
-                "pads": [{"number": "1", "net": "GND", "drill": None}],
-            }],
-        }
+        source = parity_manifest()
         imported = json.loads(json.dumps(source))
         imported["components"][0]["pads"][0]["net"] = "VCC"
         result = easyeda_parity.compare(source, imported)
         self.assertFalse(result["parity_pass"])
         self.assertTrue(result["strict_connectivity_failure"])
-        self.assertEqual(result["failures"]["pad_to_net_mapping"], ["U1.1"])
+        self.assertIn("U1", result["failures"]["pad_to_net_mapping"])
 
     def test_easyeda_parity_accepts_identical_normalized_manifests(self) -> None:
-        manifest = {
-            "schema": 1,
-            "nets": ["GND"],
-            "board_outline": ["segment-a"],
-            "holes": [],
-            "components": [{
-                "reference": "R1", "footprint": "R_0402", "side": "F.Cu", "rotation": 90,
-                "pads": [{"number": "1", "net": "GND", "drill": None}],
-            }],
-        }
+        manifest = parity_manifest(reference="R1")
         self.assertTrue(easyeda_parity.compare(manifest, json.loads(json.dumps(manifest)))["parity_pass"])
 
     def test_easyeda_parity_covers_physical_identity_fields(self) -> None:
-        source = {
-            "schema": 1, "nets": ["GND"], "board_outline": ["edge-a"],
-            "holes": [{"id": "H1", "drill": 2.0}],
-            "components": [{
-                "reference": "J1", "footprint": "Connector:A", "side": "F.Cu", "rotation": 0,
-                "pads": [{"number": "1", "net": "GND", "drill": 0.5}],
-            }],
-        }
+        source = parity_manifest(reference="J1")
         imported = json.loads(json.dumps(source))
-        imported["board_outline"] = ["edge-b"]
-        imported["holes"][0]["drill"] = 2.1
-        imported["components"][0].update({"footprint": "Connector:B", "side": "B.Cu", "rotation": 180})
-        imported["components"][0]["pads"][0]["drill"] = 0.6
+        imported["board_outline"][0]["end_nm"] = [2_000_000, 0]
+        imported["holes"][0]["drill_nm"] = 2_100_000
+        imported["components"][0].update({"footprint": "Connector:B", "side": "B.Cu", "rotation_udeg": 180_000_000})
+        imported["components"][0]["pads"][0]["drill_nm"] = 600_000
         failures = easyeda_parity.compare(source, imported)["failures"]
-        self.assertTrue({"board_outline", "holes", "footprints", "side", "rotation", "pad_drills"}.issubset(failures))
+        self.assertTrue({"board_outline", "holes", "footprints", "side", "rotation", "pad_geometry"}.issubset(failures))
+
+    def test_parity_supports_duplicate_logical_pad_numbers(self) -> None:
+        pads = [
+            {"number": "1", "net": "GND", "drill_nm": None, "pad_type": "smd", "geometry_signature": {"x_nm": 0}},
+            {"number": "1", "net": "GND", "drill_nm": None, "pad_type": "smd", "geometry_signature": {"x_nm": 1_000}},
+        ]
+        source = parity_manifest(pads=pads)
+        imported = json.loads(json.dumps(source))
+        imported["components"][0]["pads"].reverse()
+        self.assertTrue(easyeda_parity.compare(source, imported)["parity_pass"])
+
+    def test_final_electrical_parity_ignores_physical_changes_but_rejects_connectivity_changes(self) -> None:
+        frozen = parity_manifest()
+        final = json.loads(json.dumps(frozen))
+        final["components"][0]["side"] = "B.Cu"
+        final["components"][0]["rotation_udeg"] = 90_000_000
+        final["board_outline"][0]["end_nm"] = [2_000_000, 0]
+        self.assertTrue(easyeda_parity.compare_electrical(frozen, final)["electrical_parity_pass"])
+        final["components"][0]["pads"][0]["net"] = "VCC"
+        self.assertFalse(easyeda_parity.compare_electrical(frozen, final)["electrical_parity_pass"])
+
+    def test_manifest_rejects_floating_geometry(self) -> None:
+        manifest = parity_manifest()
+        manifest["holes"][0]["drill_nm"] = 3.0
+        with self.assertRaises(SystemExit):
+            easyeda_parity.validate_manifest(manifest)
+
+    def test_freeze_promotion_moves_bundle_into_immutable_release_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = root / "tmp" / "bundle"
+            bundle.mkdir(parents=True)
+            (bundle / "frozen.kicad_pcb").write_text("board", encoding="utf-8")
+            release = root / "release" / "freeze-1"
+            electrical_freeze.promote_bundle(bundle, release)
+            self.assertFalse(bundle.exists())
+            self.assertTrue((release / "frozen.kicad_pcb").is_file())
+            with self.assertRaises(SystemExit):
+                electrical_freeze.promote_bundle(root / "other", release)
+
+    def test_manufacturing_gate_requires_final_parity_and_live_immutable_freeze_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            board = root / "final.kicad_pcb"
+            frozen_board = root / "frozen.kicad_pcb"
+            frozen_manifest = root / "frozen-electrical-manifest.json"
+            board.write_text("final", encoding="utf-8")
+            frozen_board.write_text("frozen", encoding="utf-8")
+            frozen_manifest.write_text("{}", encoding="utf-8")
+            digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest().upper()
+            freeze_path = root / "electrical-freeze.json"
+            freeze = {
+                "schema": 2, "kind": "electrical_freeze", "success": True, "freeze_pass": True,
+                "frozen_board": str(frozen_board), "frozen_board_sha256": digest(frozen_board),
+                "frozen_manifest": str(frozen_manifest), "frozen_manifest_sha256": digest(frozen_manifest),
+            }
+            freeze_path.write_text(json.dumps(freeze), encoding="utf-8")
+            receipts = {
+                "import.json": {
+                    "schema": 1, "kind": "easyeda_import_parity", "success": True, "parity_pass": True,
+                    "source_board_sha256": digest(frozen_board), "source_manifest_sha256": digest(frozen_manifest),
+                },
+                "final.json": {
+                    "schema": 1, "kind": "final_electrical_parity", "success": True, "final_electrical_parity_pass": True,
+                    "electrical_freeze_sha256": digest(freeze_path), "frozen_manifest_sha256": digest(frozen_manifest),
+                    "final_board_sha256": digest(board),
+                },
+                "drc.json": {
+                    "schema": 1, "kind": "physical_drc", "success": True, "drc_pass": True,
+                    "backend": "easyeda_pro", "board_sha256": digest(board),
+                },
+                "dfm.json": {
+                    "schema": 1, "kind": "manufacturing_dfm", "success": True, "dfm_pass": True,
+                    "backend": "jlcpcb", "board_sha256": digest(board),
+                },
+            }
+            for name, value in receipts.items():
+                (root / name).write_text(json.dumps(value), encoding="utf-8")
+            command = [
+                sys.executable, "scripts/check_manufacturing_gates.py", "--board", str(board),
+                "--electrical-freeze", str(freeze_path), "--import-parity", str(root / "import.json"),
+                "--final-electrical-parity", str(root / "final.json"), "--easyeda-drc", str(root / "drc.json"),
+                "--jlc-dfm", str(root / "dfm.json"), "--output", str(root / "gate.json"),
+            ]
+            self.assertEqual(subprocess.run(command, cwd=ROOT, check=False, capture_output=True).returncode, 0)
+            frozen_board.unlink()
+            self.assertNotEqual(subprocess.run(command, cwd=ROOT, check=False, capture_output=True).returncode, 0)
 
     def test_stack_profiles_are_complete_and_distinct(self) -> None:
         stack = json.loads((ROOT / "config/board-stack.json").read_text(encoding="utf-8"))

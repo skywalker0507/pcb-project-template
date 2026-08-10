@@ -56,6 +56,10 @@ def manifest_refs(manifest: dict[str, object]) -> set[str]:
     return refs
 
 
+def input_record(path: Path) -> dict[str, str]:
+    return {"path": str(path.resolve()), "sha256": sha256(path.resolve())}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--receipt", type=Path, required=True)
@@ -68,6 +72,8 @@ def main() -> int:
     receipt_path, manifest_path = args.receipt.resolve(), args.manifest.resolve()
     receipt = load(receipt_path, "Build receipt")
     manifest = load(manifest_path, "Candidate manifest")
+    if manifest.get("schema") != 2:
+        raise SystemExit("Candidate manifest must use backend-neutral parity schema 2")
     requirements = load(args.requirements.resolve(), "Requirements")
     decisions = load(args.product_decisions.resolve(), "Product decisions")
     selected_parts = load(args.selected_parts.resolve(), "Selected parts")
@@ -89,12 +95,22 @@ def main() -> int:
         entry["net"] for entry in requirements.get("critical_nets", [])
         if isinstance(entry, dict) and isinstance(entry.get("net"), str)
     }
-    expected_refs = {
-        reference for part in selected_parts.get("parts", []) if isinstance(part, dict)
+    expected_parts = {
+        reference: str(part["mpn"])
+        for part in selected_parts.get("parts", []) if isinstance(part, dict) and isinstance(part.get("mpn"), str)
         for reference in part.get("refs", []) if isinstance(reference, str)
+    }
+    expected_refs = set(expected_parts)
+    manifest_components = {
+        str(item.get("reference", item.get("ref"))): item
+        for item in manifest.get("components", []) if isinstance(item, dict)
     }
     missing_nets = sorted(critical - nets)
     missing_refs = sorted(expected_refs - refs)
+    part_identity_mismatches = sorted(
+        reference for reference in expected_refs & refs
+        if manifest_components[reference].get("part_identity") != expected_parts[reference]
+    )
     decision_issues: list[str] = []
     if requirements.get("status") != "reviewed":
         decision_issues.append("requirements status is not reviewed")
@@ -102,7 +118,12 @@ def main() -> int:
         decision_issues.append("product decision status is not confirmed")
     if selected_parts.get("status") not in {"reviewed", "release_review"}:
         decision_issues.append("selected-parts status is not reviewed")
-    success = not missing_nets and not missing_refs and not decision_issues
+    success = not missing_nets and not missing_refs and not part_identity_mismatches and not decision_issues
+    inputs = {
+        "requirements": input_record(args.requirements.resolve()),
+        "product_decisions": input_record(args.product_decisions.resolve()),
+        "selected_parts": input_record(args.selected_parts.resolve()),
+    }
     payload = {
         "schema": 1,
         "kind": "electrical_contract_validation",
@@ -112,10 +133,13 @@ def main() -> int:
         "candidate_board": str(board),
         "candidate_board_sha256": board_hash,
         "manifest_sha256": sha256(manifest_path),
+        "manifest": str(manifest_path),
+        "inputs": inputs,
         "critical_nets_checked": sorted(critical),
         "missing_critical_nets": missing_nets,
         "selected_references_checked": len(expected_refs),
         "missing_selected_references": missing_refs,
+        "part_identity_mismatches": part_identity_mismatches,
         "record_issues": decision_issues,
         "limits": "Exact part identities remain bound to the reviewed selected-parts record; this check does not replace ERC, DRC, or candidate review.",
     }
