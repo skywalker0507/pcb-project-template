@@ -1,4 +1,4 @@
-requires-atopile: ">=0.15.7"
+requires-atopile: ">=0.15.8,<0.16.0"
 
 paths:
   src: ./src

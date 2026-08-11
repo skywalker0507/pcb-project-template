@@ -21,7 +21,7 @@
   },
   "kicad_routing_tools": {
     "repository": "https://github.com/skywalker0507/KiCadRoutingTools.git",
-    "ref": "codex/repository-support",
+    "ref": "codex/upstream-main-ai-migration",
     "native_release": "latest"
   },
   "konnect": {

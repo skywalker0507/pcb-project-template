@@ -3,8 +3,8 @@
   "tool": {
     "repository": "tools/KiCadRoutingTools",
     "python": ".venv-routingtools/Scripts/python.exe",
-    "router_script": "route.py",
-    "commit": "a1fe47f02e309cb27902e4027fdf23d75a0e51ff"
+    "router_script": "py_router/route.py",
+    "commit": "8ae15c6dc2ac13581952c6c5cb138c7c4ae0d7e6"
   },
   "kicad_cli": "C:/Program Files/KiCad/10.0/bin/kicad-cli.exe",
   "board_stack": "config/board-stack.json",
