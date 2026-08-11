@@ -46,13 +46,15 @@ def build_receipt() -> dict[str, object]:
             "blockers": navigation.get("blockers", []),
             "open_items": navigation.get("open_items", []),
             "next_actions": navigation.get("stage_next_actions", []),
-            "continue_required": navigation.get("continue_required", False),
+            "stage_in_progress": navigation.get("stage_in_progress", False),
         },
         "gates": {
             "required": navigation.get("required_evidence", []),
             "forbidden": navigation.get("forbidden", []),
         },
         "active_board_stack": stack.get("active"),
+        "next_action": navigation.get("next_action"),
+        "required_inputs": navigation.get("required_inputs", []),
         "next_command": navigation.get("next_command"),
         "command_help": "python scripts/pcbctl.py --help",
         "context": {
@@ -63,6 +65,7 @@ def build_receipt() -> dict[str, object]:
             "never_load_complete": ["*.kicad_pcb", "*.kicad_sch", "*.dsn", "*.ses"],
         },
         "final_gate": navigation.get("final_gate"),
+        "continuous_gate_required": navigation.get("continuous_gate_required", False),
         "instruction": "If next_command is present, run it unless the user named a more specific operation; load on-demand files only when needed.",
     }
 

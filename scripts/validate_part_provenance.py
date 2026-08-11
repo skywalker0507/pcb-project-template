@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from urllib.parse import urlparse
@@ -55,7 +56,12 @@ def main() -> int:
     except (OSError, json.JSONDecodeError) as exc:
         raise SystemExit(f"Cannot read provenance record: {exc}") from exc
     result = issues(data, args.require_electrical_review)
-    print(json.dumps({"success": not result, "parts": str(args.parts.resolve()), "issues": result[:8]}, separators=(",", ":")))
+    print(json.dumps({
+        "schema": 1, "kind": "part_provenance_validation", "success": not result,
+        "parts": str(args.parts.resolve()),
+        "parts_sha256": hashlib.sha256(args.parts.resolve().read_bytes()).hexdigest().upper(),
+        "issues": result[:8],
+    }, separators=(",", ":")))
     return 0 if not result else 1
 
 

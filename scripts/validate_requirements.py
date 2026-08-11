@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -52,7 +53,12 @@ def main() -> int:
     if not isinstance(data, dict):
         raise SystemExit("Requirements file must contain a JSON object")
     issues = problems(data, args.require_reviewed)
-    print(json.dumps({"success": not issues, "requirements": str(args.requirements.resolve()), "status": data.get("status"), "issues": issues[:8]}, separators=(",", ":")))
+    print(json.dumps({
+        "schema": 1, "kind": "requirements_validation", "success": not issues,
+        "requirements": str(args.requirements.resolve()),
+        "requirements_sha256": hashlib.sha256(args.requirements.resolve().read_bytes()).hexdigest().upper(),
+        "status": data.get("status"), "issues": issues[:8],
+    }, separators=(",", ":")))
     return 0 if not issues else 1
 
 

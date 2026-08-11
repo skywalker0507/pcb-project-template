@@ -23,11 +23,9 @@ class StartKonnectTests(unittest.TestCase):
             executable.write_bytes(b"placeholder")
             argv = [str(SCRIPT), str(executable), "--config", "konnect.toml"]
 
-            with (
-                mock.patch.object(Path, "home", return_value=root / "home"),
-                mock.patch.object(sys, "argv", argv),
-                mock.patch.object(MODULE.subprocess, "call", return_value=0) as call,
-            ):
+            with mock.patch.object(Path, "home", return_value=root / "home"), \
+                    mock.patch.object(sys, "argv", argv), \
+                    mock.patch.object(MODULE.subprocess, "call", return_value=0) as call:
                 self.assertEqual(MODULE.main(), 0)
 
             marker = root / "home/.konnect/.installed"

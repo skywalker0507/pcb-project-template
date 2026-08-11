@@ -112,6 +112,34 @@ def receipt_open_items(receipt: dict[str, object], limit: int) -> list[str]:
     return items[:limit] or ["Pipeline receipt has no actionable audit detail; inspect its failed-step log."]
 
 
+def completion_receipt_passes_stage(stage: str, receipt: dict[str, object]) -> bool:
+    if receipt.get("success") is not True:
+        return False
+    kind = receipt.get("kind")
+    allowed = {
+        "requirements": {"requirements_validation": "success"},
+        "parts": {"part_provenance_validation": "success"},
+        "electrical": {"electrical_build": "success", "electrical_contract_validation": "contract_pass"},
+        "electrical_freeze": {"electrical_freeze": "freeze_pass"},
+        "physical": {"easyeda_import_parity": "parity_pass", "physical_review": "review_pass"},
+        "routing": {"routing_candidate": "success"},
+        "release": {"release_snapshot": "release_pass"},
+    }.get(stage, {})
+    return isinstance(kind, str) and kind in allowed and receipt.get(allowed[kind]) is True
+
+
+def completion_receipt_kinds_required(stage: str) -> set[str]:
+    return {
+        "requirements": {"requirements_validation"},
+        "parts": {"part_provenance_validation"},
+        "electrical": {"electrical_build", "electrical_contract_validation"},
+        "electrical_freeze": {"electrical_freeze"},
+        "physical": {"easyeda_import_parity", "physical_review"},
+        "routing": {"routing_candidate"},
+        "release": {"release_snapshot"},
+    }.get(stage, set())
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--stage", required=True)
@@ -134,6 +162,10 @@ def main() -> int:
         default=ROOT / "config/pcb-flow.json",
     )
     parser.add_argument("--skip-pipeline", action="store_true")
+    parser.add_argument(
+        "--completion-receipt", action="append", type=Path, default=[],
+        help="Passing deterministic receipt(s) used when a complete handoff does not run the PCB pipeline.",
+    )
     parser.add_argument(
         "--from-pipeline-receipt", type=Path,
         help="Use an existing run_pcb_pipeline JSON receipt instead of rerunning the pipeline.",
@@ -194,6 +226,49 @@ def main() -> int:
         if receipt.get("kind") != "routing_candidate" or receipt.get("candidate_sha256") != board_sha256:
             raise SystemExit("Candidate receipt does not match the handoff board")
         candidate_receipts.append(portable_path(receipt_path))
+    complete_status = args.status in {"complete", "completed"}
+    if args.completion_receipt and not complete_status:
+        raise SystemExit("--completion-receipt is only valid for a complete handoff")
+    completion_receipts: list[dict[str, str]] = []
+    for receipt_path in args.completion_receipt:
+        resolved = receipt_path.resolve()
+        try:
+            completion = json.loads(resolved.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SystemExit(f"Invalid completion receipt: {receipt_path}: {exc}") from exc
+        if not isinstance(completion, dict) or not completion_receipt_passes_stage(args.stage, completion):
+            raise SystemExit(f"Completion receipt is not valid passing evidence for {args.stage}: {receipt_path}")
+        receipt_board_sha = completion.get(
+            "board_sha256",
+            completion.get(
+                "candidate_board_sha256",
+                completion.get("candidate_sha256", completion.get("frozen_board_sha256")),
+            ),
+        )
+        if receipt_board_sha is not None and receipt_board_sha != board_sha256:
+            raise SystemExit(f"Completion receipt does not match the handoff board: {receipt_path}")
+        completion_receipts.append({
+            "path": portable_path(resolved),
+            "sha256": hashlib.sha256(resolved.read_bytes()).hexdigest().upper(),
+            "kind": str(completion.get("kind", "deterministic_validation")),
+        })
+    required_completion_kinds = completion_receipt_kinds_required(args.stage)
+    recorded_completion_kinds = {item["kind"] for item in completion_receipts}
+    if complete_status and completion_receipts and not required_completion_kinds.issubset(recorded_completion_kinds):
+        missing = sorted(required_completion_kinds - recorded_completion_kinds)
+        raise SystemExit("Complete handoff is missing stage evidence receipt kinds: " + ", ".join(missing))
+    pipeline_completion = bool(
+        isinstance(pipeline, dict)
+        and pipeline.get("success") is True
+        and pipeline.get("board_sha256") == board_sha256
+        and (
+            args.stage in {"physical", "routing"}
+            or (args.stage == "release" and pipeline.get("release_pass") is True)
+        )
+    )
+    completion_verified = bool(complete_status and (pipeline_completion or completion_receipts))
+    if complete_status and not completion_verified:
+        raise SystemExit("A complete handoff requires a passing pipeline or --completion-receipt evidence")
     output = ROOT / config["handoff"]["output"]
     dirty_lines = git("status", "--short").splitlines()
     handoff = {
@@ -222,6 +297,9 @@ def main() -> int:
         "board": portable_path(board_path),
         "board_sha256": board_sha256,
         "candidate_receipts": candidate_receipts,
+        "completion_verified": completion_verified,
+        "completion_basis": "pipeline" if pipeline_completion else "receipts" if completion_receipts else None,
+        "completion_receipts": completion_receipts,
         "git": {
             "commit": git("rev-parse", "HEAD"),
             "dirty": bool(dirty_lines),

@@ -152,13 +152,16 @@ def main() -> int:
             frozen_inputs[name] = {"path": relative(run.release / "provenance" / destination.name), "sha256": sha256(destination)}
         source_copy = provenance / "source"
         shutil.copytree(source_root, source_copy)
+        snapshot_source_hash = source_sha256(source_copy)
+        if snapshot_source_hash != current_source_hash or source_sha256(source_root) != snapshot_source_hash:
+            raise SystemExit("Reviewed atopile source changed while the freeze snapshot was being created")
         source_manifest = {
             "schema": 1,
             "kind": "atopile_source_manifest",
             "source_root": str(source_root.relative_to(ROOT).as_posix()),
             "frozen_source_root": relative(run.release / "provenance/source"),
-            "source_sha256": current_source_hash,
-            "files": source_file_manifest(source_root),
+            "source_sha256": snapshot_source_hash,
+            "files": source_file_manifest(source_copy),
         }
         (bundle_tmp / "source-manifest.json").write_text(
             json.dumps(source_manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
@@ -170,7 +173,7 @@ def main() -> int:
             "freeze_pass": True,
             "freeze_id": run.run_id,
             "backend": backend_name,
-            "source_sha256": current_source_hash,
+            "source_sha256": snapshot_source_hash,
             "frozen_board": relative(run.release / "frozen.kicad_pcb"),
             "frozen_board_sha256": board_hash,
             "frozen_manifest": relative(run.release / "frozen-electrical-manifest.json"),
@@ -191,7 +194,7 @@ def main() -> int:
                 "frozen_board": payload["frozen_board"],
                 "frozen_manifest": payload["frozen_manifest"],
             },
-            metrics={"board_sha256": board_hash, "source_sha256": current_source_hash},
+            metrics={"board_sha256": board_hash, "source_sha256": snapshot_source_hash},
         )
     except BaseException:
         finish_run(run, False)

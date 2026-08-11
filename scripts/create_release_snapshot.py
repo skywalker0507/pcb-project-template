@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -111,37 +112,48 @@ def main() -> int:
         if not source.is_file():
             raise SystemExit(f"Snapshot evidence is missing: {label}: {source}")
     root.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(package, destination / "package")
-    copied: dict[str, str] = {}
-    for label, source in evidence.items():
-        target = destination / "evidence" / source.name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
-        copied[label] = target.relative_to(destination).as_posix()
-    review_assets: list[str] = []
-    for source in review_asset_sources:
-        target = destination / "evidence" / "review-assets" / source.name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
-        review_assets.append(target.relative_to(destination).as_posix())
-    hashes = {
-        path.relative_to(destination).as_posix(): sha256(path)
-        for path in sorted(destination.rglob("*")) if path.is_file()
-    }
-    manifest = {
-        "schema": 1,
-        "kind": "release_snapshot",
-        "board_sha256": board_hash,
-        "release_pass": True,
-        "manufacturer": profile["manufacturer"],
-        "manufacturing_source": profile["source"],
-        "design_policy_sha256": design_policy["policy_sha256"],
-        "evidence": copied,
-        "review_assets": review_assets,
-        "sha256": hashes,
-        "note": "This directory is non-overwriting evidence. Re-verify hashes before relying on a copied snapshot.",
-    }
-    (destination / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    staging = root / f".{name}.staging-{os.getpid()}"
+    if staging.exists():
+        raise SystemExit(f"Snapshot staging path already exists: {staging}")
+    try:
+        shutil.copytree(package, staging / "package")
+        copied: dict[str, str] = {}
+        for label, source in evidence.items():
+            target = staging / "evidence" / source.name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+            copied[label] = target.relative_to(staging).as_posix()
+        review_assets: list[str] = []
+        for source in review_asset_sources:
+            target = staging / "evidence" / "review-assets" / source.name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+            review_assets.append(target.relative_to(staging).as_posix())
+        hashes = {
+            path.relative_to(staging).as_posix(): sha256(path)
+            for path in sorted(staging.rglob("*")) if path.is_file()
+        }
+        manifest = {
+            "schema": 1,
+            "kind": "release_snapshot",
+            "board_sha256": board_hash,
+            "release_pass": True,
+            "manufacturer": profile["manufacturer"],
+            "manufacturing_source": profile["source"],
+            "design_policy_sha256": design_policy["policy_sha256"],
+            "evidence": copied,
+            "review_assets": review_assets,
+            "sha256": hashes,
+            "note": "This directory is non-overwriting evidence. Re-verify hashes before relying on a copied snapshot.",
+        }
+        (staging / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if destination.exists():
+            raise SystemExit(f"Snapshot already exists and is immutable: {destination}")
+        os.replace(staging, destination)
+    except BaseException:
+        if staging.exists():
+            shutil.rmtree(staging)
+        raise
     print(json.dumps({"success": True, "snapshot": str(destination), "manifest": str(destination / "manifest.json")}, separators=(",", ":")))
     return 0
 

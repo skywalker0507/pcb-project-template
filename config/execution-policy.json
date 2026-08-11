@@ -1,13 +1,19 @@
 {
   "schema": 1,
-  "terminal_directive_examples": [
-    "继续",
-    "自行决定",
-    "直到完成",
-    "不要停",
-    "continue",
-    "finish the task"
-  ],
+  "activation": {
+    "default": false,
+    "requires_explicit_whole_stage_scope": true,
+    "examples": [
+      "继续直到完成整个阶段",
+      "自行完成整个 stage",
+      "continue until the whole stage is complete"
+    ],
+    "does_not_activate": [
+      "bounded implementation request",
+      "routine autonomy within the requested task",
+      "stage status is in_progress"
+    ]
+  },
   "continuation": {
     "statuses": [
       "in_progress"
@@ -23,7 +29,8 @@
         "complete",
         "completed"
       ],
-      "requires_empty_next_actions": true
+      "requires_empty_next_actions": true,
+      "requires_verified_handoff": true
     },
     "blocked": {
       "statuses": [
@@ -45,5 +52,5 @@
       "requires_detail": true
     }
   },
-  "gate_command": "python scripts/check_turn_exit.py"
+  "gate_command": "python scripts/check_turn_exit.py --continuous-scope"
 }

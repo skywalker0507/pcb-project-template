@@ -189,8 +189,16 @@ def main() -> int:
     audit = next((item["data"] for item in steps if item["name"] == "kicad-audit"), None)
     context = next((item["data"] for item in steps if item["name"] == "pcb-context"), None)
     electrical = next((item["data"] for item in steps if item["name"] == "electrical-build"), None)
+    gate_result = next((item["data"] for item in steps if item["name"] == "manufacturing-gates"), None)
+    package_result = next((item["data"] for item in steps if item["name"] == "jlcpcb-package-check"), None)
     failed = next((item for item in steps if not item["success"]), None)
     success = len(steps) == len(commands) and all(bool(item["success"]) for item in steps)
+    kicad_audit_pass = audit.get("release_pass") is True if isinstance(audit, dict) else None
+    release_pass = bool(
+        args.export and success and kicad_audit_pass
+        and isinstance(gate_result, dict) and gate_result.get("manufacturing_gate_pass") is True
+        and isinstance(package_result, dict) and package_result.get("success") is True
+    )
     delegation = None
     if failed:
         delegation = create_job(
@@ -212,7 +220,8 @@ def main() -> int:
         "board_sha256": audit.get("board_sha256") if isinstance(audit, dict) else None,
         "in1_track_segments": audit.get("in1_non_ground_segments") if isinstance(audit, dict) else None,
         "drc_categories": audit.get("drc_categories") if isinstance(audit, dict) else None,
-        "release_pass": audit.get("release_pass") if isinstance(audit, dict) else None,
+        "kicad_audit_pass": kicad_audit_pass,
+        "release_pass": release_pass,
         "passed_steps": [str(item["name"]) for item in steps if item["success"]],
         "failed_step": ({
             "name": failed["name"], "exit_code": failed["exit_code"],
@@ -238,7 +247,7 @@ def main() -> int:
     pipeline_summary.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     release_artifacts: dict[str, str] = {}
-    if args.export and success and isinstance(audit, dict) and audit.get("release_pass") is True:
+    if release_pass and isinstance(audit, dict):
         release_artifacts["routing_audit"] = copy_release_evidence(evidence_audit, run.release / evidence_audit.name)
         release_artifacts["drc_report"] = copy_release_evidence(evidence_drc, run.release / evidence_drc.name)
         if package_audit.is_file():
@@ -251,7 +260,7 @@ def main() -> int:
         package_reference.write_text(json.dumps({
             "schema": 1,
             "board_sha256": audit.get("board_sha256"),
-            "release_pass": True,
+            "release_pass": release_pass,
             "package": str((ROOT / manufacturing_config["output"]).resolve()),
             "note": "The immutable manufacturing snapshot remains under manufacturing/releases after create_release_snapshot.py.",
         }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

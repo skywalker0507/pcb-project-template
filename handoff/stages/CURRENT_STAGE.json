@@ -1,50 +1,37 @@
 {
   "schema": 1,
-  "generated_at": "2026-08-09T15:17:22.502185+00:00",
-  "project": "esp32-s3-remote-flashing-probe",
-  "stage": "release",
-  "stage_number": 7,
-  "stage_label": "07-release",
-  "status": "complete",
-  "objective": "Rev A v346 remains released with unchanged board SHA, zero DRC/unconnected items, a SHA-bound physical review, verified immutable manufacturing snapshot, and the stage-scoped artifact workflow migration completed.",
+  "generated_at": null,
+  "project": "pcb-project-template",
+  "stage": "requirements",
+  "stage_number": 1,
+  "stage_label": "01-requirements",
+  "status": "not_started",
+  "objective": "Capture requirements, interfaces, rails, mechanics, and manufacturer choice.",
   "stage_rules": {
     "required_evidence": [
-      "release_pass=true",
-      "matching board SHA",
-      "selected manufacturing profile"
+      "requirements recorded with explicit unknowns"
     ],
     "forbidden": [
-      "baseline regeneration to pass",
-      "export without release_pass"
+      "routing",
+      "manufacturing_export",
+      "inventing electrical or fabrication values"
     ]
   },
-  "stage_files": [
-    "config/pcb-acceptance.json",
-    "build/07-release/evidence/",
-    "build/07-release/release/",
-    "manufacturing/"
+  "open_items": [
+    "Record requirements and explicit unknowns."
   ],
-  "electrical_backend": "tscircuit",
-  "source_sha256": "C1CF3F3719A5C04E14D989F356B5FC8D4842B02F059308EC49B3A532E22D089E",
-  "board": "elec/layout/rev-a-clearance-fixes-v346/rev-a-clearance-fixes.kicad_pcb",
-  "board_sha256": "18BFAE81B86F66D2EF3A8344A98F4D8EF2E9CC534BAB3B8A098977AD39926CE1",
-  "candidate_receipts": [],
-  "git": {
-    "commit": "ef69af358f8fbc6bfe34108b2f01afbf51c3f4a5",
-    "dirty": true,
-    "dirty_path_count": 510
-  },
-  "pipeline": null,
-  "open_items": [],
-  "next_actions": [],
+  "next_actions": [
+    "Validate requirements before selecting parts or editing electrical source."
+  ],
   "read_first": [
     "handoff/stages/CURRENT_STAGE.json"
   ],
   "authoritative_docs": [
     "AGENTS.md",
-    "README.md",
     "config/stage-checklist.json",
     "config/pcb-acceptance.json",
     "config/board-stack.json"
-  ]
+  ],
+  "completion_verified": false,
+  "completion_receipts": []
 }

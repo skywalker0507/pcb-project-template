@@ -43,6 +43,8 @@ backend_architecture = load("backend_architecture_template", "scripts/check_back
 pcbctl = load("pcbctl_template", "scripts/pcbctl.py")
 session_boot = load("session_boot_template", "scripts/session_boot.py")
 stage_doctor = load("stage_doctor_template", "scripts/stage_doctor.py")
+toolchain_receipt = load("toolchain_receipt_template", "scripts/record_toolchain_receipt.py")
+init_project = load("init_project_template", "scripts/init_project.py")
 
 
 def parity_manifest(*, reference: str = "U1", pads: list[dict[str, object]] | None = None) -> dict[str, object]:
@@ -108,6 +110,55 @@ class FlowTemplateTests(unittest.TestCase):
         flow = json.loads((ROOT / "config/pcb-flow.json").read_text(encoding="utf-8"))
         self.assertIn(flow["project"]["board"], navigation["next_command"])
         self.assertNotIn("elec/layout/default/default.kicad_pcb", navigation["next_command"])
+
+    def test_navigation_never_uses_help_as_a_stage_action(self) -> None:
+        original_stage = stage_doctor.current_stage
+        original_policy = stage_doctor.compile_policy
+        try:
+            for stage_name, expected_action, expected_input in (
+                ("electrical_freeze", "create_electrical_freeze", "electrical_build_receipt"),
+                ("physical", "validate_easyeda_import_parity", "easyeda_import_manifest"),
+            ):
+                stage_doctor.current_stage = lambda name=stage_name: {
+                    "stage": name, "status": "in_progress", "objective": "test",
+                    "open_items": [], "next_actions": [],
+                }
+                stage_doctor.compile_policy = lambda: {
+                    "capabilities": {"physical": True},
+                    "capability_issues": {"physical": []},
+                }
+                navigation = stage_doctor.receipt()
+                self.assertEqual(navigation["next_action"], expected_action)
+                self.assertIsNone(navigation["next_command"])
+                self.assertIn(expected_input, navigation["required_inputs"])
+        finally:
+            stage_doctor.current_stage = original_stage
+            stage_doctor.compile_policy = original_policy
+
+    def test_electrical_only_toolchain_refresh_preserves_full_tool_records(self) -> None:
+        existing = {
+            "schema": 1,
+            "mode": "manual",
+            "electrical_backend": {"active": "tscircuit"},
+            "tscircuit": {"package_version": "old"},
+            "kicad_routing_tools": {"commit": "KRT"},
+            "freerouting": {"sha256": "FREE"},
+            "houtini_lm": {"commit": "HOUTINI"},
+            "konnect": {"binary_sha256": "KONNECT"},
+        }
+        refreshed = toolchain_receipt.merge_receipt(
+            existing,
+            {"electrical_backend": {"active": "atopile"}, "atopile": {"version": "0.15.7"}},
+            electrical_only=True,
+            recorded_at="2026-08-10T00:00:00+00:00",
+        )
+        self.assertEqual(refreshed["schema"], 2)
+        self.assertEqual(refreshed["mode"], "manual")
+        self.assertNotIn("tscircuit", refreshed)
+        self.assertEqual(refreshed["atopile"]["version"], "0.15.7")
+        for key in ("kicad_routing_tools", "freerouting", "houtini_lm", "konnect"):
+            self.assertEqual(refreshed[key], existing[key])
+            self.assertIn(key, refreshed["recording"]["preserved_unchecked_sections"])
 
     def test_review_and_release_defaults_follow_pcb_flow_board(self) -> None:
         flow = json.loads((ROOT / "config/pcb-flow.json").read_text(encoding="utf-8"))
@@ -214,17 +265,24 @@ class FlowTemplateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             board = root / "final.kicad_pcb"
-            frozen_board = root / "frozen.kicad_pcb"
-            frozen_manifest = root / "frozen-electrical-manifest.json"
+            freeze_root = root / "release"
+            bundle = freeze_root / "freeze-1"
+            bundle.mkdir(parents=True)
+            frozen_board = bundle / "frozen.kicad_pcb"
+            frozen_manifest = bundle / "frozen-electrical-manifest.json"
+            source_manifest = bundle / "source-manifest.json"
             board.write_text("final", encoding="utf-8")
             frozen_board.write_text("frozen", encoding="utf-8")
             frozen_manifest.write_text("{}", encoding="utf-8")
+            source_manifest.write_text("{}", encoding="utf-8")
             digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest().upper()
-            freeze_path = root / "electrical-freeze.json"
+            freeze_path = bundle / "electrical-freeze.json"
             freeze = {
                 "schema": 2, "kind": "electrical_freeze", "success": True, "freeze_pass": True,
+                "freeze_id": "freeze-1",
                 "frozen_board": str(frozen_board), "frozen_board_sha256": digest(frozen_board),
                 "frozen_manifest": str(frozen_manifest), "frozen_manifest_sha256": digest(frozen_manifest),
+                "source_manifest": str(source_manifest), "source_manifest_sha256": digest(source_manifest),
             }
             freeze_path.write_text(json.dumps(freeze), encoding="utf-8")
             receipts = {
@@ -253,8 +311,14 @@ class FlowTemplateTests(unittest.TestCase):
                 "--electrical-freeze", str(freeze_path), "--import-parity", str(root / "import.json"),
                 "--final-electrical-parity", str(root / "final.json"), "--easyeda-drc", str(root / "drc.json"),
                 "--jlc-dfm", str(root / "dfm.json"), "--output", str(root / "gate.json"),
+                "--freeze-root", str(freeze_root),
             ]
             self.assertEqual(subprocess.run(command, cwd=ROOT, check=False, capture_output=True).returncode, 0)
+            outside = root / "electrical-freeze.json"
+            outside.write_bytes(freeze_path.read_bytes())
+            outside_command = list(command)
+            outside_command[outside_command.index(str(freeze_path))] = str(outside)
+            self.assertNotEqual(subprocess.run(outside_command, cwd=ROOT, check=False, capture_output=True).returncode, 0)
             frozen_board.unlink()
             self.assertNotEqual(subprocess.run(command, cwd=ROOT, check=False, capture_output=True).returncode, 0)
 
@@ -404,6 +468,32 @@ class FlowTemplateTests(unittest.TestCase):
 
     def test_release_snapshot_name_uses_board_hash(self) -> None:
         self.assertEqual(snapshot.snapshot_name("ABCDEF0123456789"), "release-abcdef012345")
+
+    def test_contract_and_architecture_checks_reuse_configured_contracts(self) -> None:
+        contract_text = (ROOT / "scripts/validate_electrical_contract.py").read_text(encoding="utf-8")
+        architecture_text = (ROOT / "scripts/check_backend_architecture.py").read_text(encoding="utf-8")
+        self.assertIn("validate_manifest(manifest", contract_text)
+        self.assertNotIn('!= "src/main.ato:App"', architecture_text)
+
+    def test_completed_handoff_requires_machine_verified_evidence(self) -> None:
+        issues = stage_doctor.handoff_integrity_issues({"stage": "routing", "status": "complete"})
+        self.assertIn("handoff_completion_lacks_passing_evidence", issues)
+
+    def test_fresh_project_initialization_resets_stale_handoff(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stage = root / "handoff/stages/CURRENT_STAGE.json"
+            stage.parent.mkdir(parents=True)
+            stage.write_text(json.dumps({"stage": "release", "status": "complete"}), encoding="utf-8")
+            original_root = init_project.ROOT
+            try:
+                init_project.ROOT = root
+                init_project.ensure_stage_bootstrap("new-project")
+            finally:
+                init_project.ROOT = original_root
+            value = json.loads(stage.read_text(encoding="utf-8"))
+            self.assertEqual((value["project"], value["stage"], value["status"]), ("new-project", "requirements", "not_started"))
+            self.assertFalse(value["completion_verified"])
 
     def test_houtini_job_rejects_small_receipt_without_calling_model(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

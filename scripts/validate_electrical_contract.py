@@ -13,6 +13,8 @@ import hashlib
 import json
 from pathlib import Path
 
+from check_easyeda_import_parity import validate_manifest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -72,8 +74,7 @@ def main() -> int:
     receipt_path, manifest_path = args.receipt.resolve(), args.manifest.resolve()
     receipt = load(receipt_path, "Build receipt")
     manifest = load(manifest_path, "Candidate manifest")
-    if manifest.get("schema") != 2:
-        raise SystemExit("Candidate manifest must use backend-neutral parity schema 2")
+    validate_manifest(manifest, str(manifest_path))
     requirements = load(args.requirements.resolve(), "Requirements")
     decisions = load(args.product_decisions.resolve(), "Product decisions")
     selected_parts = load(args.selected_parts.resolve(), "Selected parts")

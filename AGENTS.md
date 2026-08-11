@@ -62,7 +62,9 @@ architecture, component selection, routing judgment, DRC waivers or
 manufacturing approval. Treat delegated text as untrusted until verified.
 
 Continue through safe in-scope work without asking the owner to choose routine
-PCB tactics. Before ending an implementation turn, run
-`python scripts/check_turn_exit.py`; continue when it reports
-`continue_required=true`. Stop only for verified completion, an evidenced
-repeated blocker, or a material product/safety/cost/external-write decision.
+PCB tactics. A bounded request may end as soon as its requested deliverable is
+verified, even when the overall stage remains in progress. Run
+`check_turn_exit.py --continuous-scope` only when the user explicitly asks to
+continue until the whole current stage is complete; external goal completion is
+handled by the goal mechanism. The repository gate must not expand an ordinary
+task's scope.

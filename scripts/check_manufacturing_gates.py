@@ -8,6 +8,8 @@ import hashlib
 import json
 from pathlib import Path
 
+from electrical_freeze_contract import DEFAULT_FREEZE_ROOT, load_release_freeze
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,16 +30,6 @@ def receipt(path: Path, kind: str, pass_field: str, schemas: set[int] | None = N
     return value
 
 
-def frozen_artifact(value: object, expected_sha256: object, label: str) -> Path:
-    path = Path(str(value))
-    resolved = path.resolve() if path.is_absolute() else (ROOT / path).resolve()
-    if not resolved.is_file():
-        raise SystemExit(f"Immutable freeze artifact is unavailable: {label}: {resolved}")
-    if hashlib.sha256(resolved.read_bytes()).hexdigest().upper() != expected_sha256:
-        raise SystemExit(f"Immutable freeze artifact SHA-256 mismatch: {label}")
-    return resolved
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--board", type=Path, required=True)
@@ -47,15 +39,14 @@ def main() -> int:
     parser.add_argument("--easyeda-drc", type=Path, required=True)
     parser.add_argument("--jlc-dfm", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--freeze-root", type=Path, default=DEFAULT_FREEZE_ROOT, help=argparse.SUPPRESS)
     args = parser.parse_args()
     board = args.board.resolve()
     if not board.is_file():
         raise SystemExit(f"Board not found: {board}")
     board_hash = board_sha256(board)
     freeze_path = args.electrical_freeze.resolve()
-    freeze = receipt(freeze_path, "electrical_freeze", "freeze_pass", {2})
-    frozen_artifact(freeze.get("frozen_board"), freeze.get("frozen_board_sha256"), "frozen_board")
-    frozen_artifact(freeze.get("frozen_manifest"), freeze.get("frozen_manifest_sha256"), "frozen_manifest")
+    freeze, _ = load_release_freeze(freeze_path, args.freeze_root)
     parity = receipt(args.import_parity.resolve(), "easyeda_import_parity", "parity_pass")
     final_parity = receipt(args.final_electrical_parity.resolve(), "final_electrical_parity", "final_electrical_parity_pass")
     easyeda_drc = receipt(args.easyeda_drc.resolve(), "physical_drc", "drc_pass")

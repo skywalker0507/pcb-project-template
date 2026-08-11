@@ -55,30 +55,44 @@ def ensure_kicad_project() -> Path:
     return project
 
 
-def ensure_stage_bootstrap(project_name: str) -> Path:
+def ensure_stage_bootstrap(project_name: str, preserve: bool = False) -> Path:
     path = ROOT / "handoff/stages/CURRENT_STAGE.json"
-    if not path.exists():
+    if not preserve or not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({
             "schema": 1, "generated_at": datetime.now(timezone.utc).isoformat(), "project": project_name,
-            "stage": "requirements", "status": "not_started",
+            "stage": "requirements", "stage_number": 1, "stage_label": "01-requirements", "status": "not_started",
             "objective": "Capture requirements, interfaces, rails, mechanics, and manufacturer choice.",
             "stage_rules": {"required_evidence": ["requirements recorded with explicit unknowns"], "forbidden": ["routing", "manufacturing_export", "inventing electrical or fabrication values"]},
             "open_items": ["Record requirements and explicit unknowns."],
             "next_actions": ["Read config/stage-checklist.json and begin requirements capture."],
             "read_first": ["handoff/stages/CURRENT_STAGE.json"],
             "authoritative_docs": ["AGENTS.md", "config/stage-checklist.json", "config/pcb-acceptance.json", "config/board-stack.json"],
+            "completion_verified": False,
+            "completion_basis": None,
+            "completion_receipts": [],
         }, indent=2) + "\n", encoding="utf-8")
+        markdown = path.with_suffix(".md")
+        markdown.write_text(
+            f"# {project_name} — Stage 01-requirements\n\n"
+            "- Status: not_started\n"
+            "- Objective: Capture requirements, interfaces, rails, mechanics, and manufacturer choice.\n\n"
+            "Machine-readable handoff: `handoff/stages/CURRENT_STAGE.json`\n",
+            encoding="utf-8",
+        )
     return path
 
 
-def configure_project(project_name: str, distro: str, force: bool, with_konnect: bool, layers: int, electrical_backend: str) -> str:
+def configure_project(project_name: str, distro: str, force: bool, with_konnect: bool, layers: int, electrical_backend: str, preserve_existing: bool = False) -> str:
     flow_path = ROOT / "config/pcb-flow.json"
     flow = json.loads(flow_path.read_text(encoding="utf-8"))
     flow["project"]["name"] = project_name
+    if not preserve_existing:
+        flow["project"]["board"] = "elec/layout/default/default.kicad_pcb"
     flow["manufacturing"]["output"] = f"manufacturing/jlcpcb/{project_name}-rev-a"
     flow_path.write_text(json.dumps(flow, indent=2) + "\n", encoding="utf-8")
-    configure_board_stack(layers)
+    if not preserve_existing:
+        configure_board_stack(layers)
     backend_path = ROOT / "config/electrical-backend.json"
     backend_config = json.loads(backend_path.read_text(encoding="utf-8"))
     if electrical_backend not in backend_config.get("backends", {}):
@@ -86,7 +100,7 @@ def configure_project(project_name: str, distro: str, force: bool, with_konnect:
     backend_config["active"] = electrical_backend
     backend_path.write_text(json.dumps(backend_config, indent=2) + "\n", encoding="utf-8")
     project_file = ensure_kicad_project()
-    stage_file = ensure_stage_bootstrap(project_name)
+    stage_file = ensure_stage_bootstrap(project_name, preserve_existing)
 
     root_windows = str(ROOT)
     root_wsl = windows_to_wsl(ROOT)
@@ -173,6 +187,7 @@ def main() -> int:
     parser.add_argument("--distro", default="Ubuntu-24.04")
     parser.add_argument("--electrical-backend", default="atopile", help="Backend from config/electrical-backend.json; atopile is the production default and tscircuit is experimental.")
     parser.add_argument("--force-config", action="store_true")
+    parser.add_argument("--preserve-existing", action="store_true", help="Keep the existing handoff, active board path, and board stack when reconfiguring a live project.")
     parser.add_argument("--check", action="store_true", help="Run the local readiness check after configuration.")
     parser.add_argument("--layers", type=int, choices=(2, 4), default=2, help="New-project copper layer preset; no fabrication values are implied.")
     konnect_group = parser.add_mutually_exclusive_group()
@@ -182,7 +197,7 @@ def main() -> int:
     args = parser.parse_args()
     policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
     with_konnect = bool(policy["konnect"].get("enabled_by_default", True)) if args.konnect is None else args.konnect
-    message = configure_project(args.project_name, args.distro, args.force_config, with_konnect, args.layers, args.electrical_backend)
+    message = configure_project(args.project_name, args.distro, args.force_config, with_konnect, args.layers, args.electrical_backend, args.preserve_existing)
 
     check_exit = None
     if args.check:

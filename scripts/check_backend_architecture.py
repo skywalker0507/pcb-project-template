@@ -43,8 +43,8 @@ def audit() -> dict[str, object]:
         problems.append("production_electrical_backend_must_be_primary_atopile")
     if "circuit_json" in electrical_config.get("contract", {}).get("required_artifacts", []):
         problems.append("common_electrical_contract_contains_backend_private_circuit_json")
-    if electrical_status.get("entry") != "src/main.ato:App":
-        problems.append("atopile_backend_entry_does_not_match_ato_project")
+    if not electrical_status.get("entry"):
+        problems.append("atopile_backend_entry_is_missing")
     if electrical_config.get("contract", {}).get("freeze_bundle_root") != "build/04-electrical-freeze/release":
         problems.append("electrical_freeze_bundle_must_use_release_lane")
     if physical_name != "easyeda_pro" or physical.get("role") != "primary":

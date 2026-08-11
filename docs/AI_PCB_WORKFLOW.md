@@ -9,12 +9,16 @@ than a default reading list. `stage_doctor.py` remains an on-demand diagnostic,
 while routing and export scripts enforce their own stage guards.
 
 Run `python scripts/init_project.py --project-name <name>` on each fresh clone.
-The command only writes MCP configuration. Install or update tools manually,
-then run `python scripts/record_toolchain_receipt.py`. Restart Codex after
+The command configures project/MCP defaults, points the active board at the
+atopile default build output, and resets the tracked handoff to requirements.
+Use `--preserve-existing` only when reconfiguring a live project. Install or update
+tools manually, then run `python scripts/record_toolchain_receipt.py`. Restart Codex after
 `.codex/config.toml` is generated, then run the deep environment check.
 An electrical-only receipt may be created first with
 `record_toolchain_receipt.py --electrical-only`; production atopile builds and
-freezes bind this exact receipt and compiler version.
+freezes bind this exact receipt and compiler version. Running the partial
+refresh later preserves existing non-electrical tool records and marks them as
+unchecked rather than deleting or pretending to refresh them.
 
 Keep API keys in Windows user environment variables such as
 `DEEPSEEK_API_KEY`; never commit them.
@@ -46,7 +50,8 @@ capability. Release additionally requires `review_pass=true` from
 `record_physical_review.py`, bound to both the board SHA and policy SHA.
 
 At a stage boundary, generate `handoff/stages/CURRENT_STAGE.json` and begin the
-next meaningful stage in a fresh Codex session.
+next meaningful stage in a fresh Codex session. A handoff marked complete must
+carry a passing pipeline or SHA-recorded `--completion-receipt` evidence.
 
 ## Tool roles
 

@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pcb_policy import configured_board, load_acceptance, require_no_prohibited_evidence, selected_manufacturing_profile
 from design_policy import DEFAULT_OUTPUT as DEFAULT_POLICY, require_policy
 from stage_policy import require_operation
+from check_jlcpcb_release import package_report
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -231,6 +232,10 @@ def main() -> int:
             for file in sorted(gerber.iterdir()):
                 if file.is_file():
                     bundle.write(file, file.name)
+
+        preflight = package_report(staging, args.board_stack.resolve())
+        if preflight.get("success") is not True:
+            raise RuntimeError("Staged JLCPCB package failed deterministic preflight: " + ", ".join(preflight.get("failures", [])))
 
         targets = [
             (gerber, output / "gerber"),

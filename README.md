@@ -32,6 +32,11 @@ Create a new repository from this GitHub template, clone it, then run:
 python scripts/init_project.py --project-name my-board --layers 2
 ```
 
+Initialization resets the template handoff to `01-requirements` and points the
+configured board at atopile's `elec/layout/default/default.kicad_pcb` output.
+Use `--preserve-existing` only when intentionally reconfiguring an already-active
+project.
+
 Konnect is configured by default. To omit it, for example while reviewing its
 AGPL/commercial license terms:
 
@@ -51,6 +56,10 @@ compiler identity without requiring the routing toolchain to be installed:
 ```text
 python scripts/record_toolchain_receipt.py --electrical-only
 ```
+
+If a full toolchain receipt already exists, `--electrical-only` refreshes only
+the active electrical backend/compiler fields and preserves the existing KRT,
+FreeRouting, Houtini and Konnect records as explicitly unchecked sections.
 
 System prerequisites for the production path are Git, Python 3.10+, Java 25,
 KiCad 10, WSL Ubuntu and atopile. Node.js and Bun are required only when running
@@ -201,6 +210,9 @@ Use that same board and receipt when creating the routing-stage handoff:
 ```text
 python scripts/create_stage_handoff.py --stage routing --status in_progress --objective "..." --board <candidate.kicad_pcb> --candidate-receipt <candidate-receipt.json> --skip-pipeline
 ```
+
+A `complete` handoff must be backed by a passing pipeline or one or more
+`--completion-receipt` files; `--skip-pipeline` alone cannot claim completion.
 
 The receipt verifies the candidate path and SHA against a zero-new-DRC audit.
 It deliberately cannot promote copper, satisfy physical review, authorize an
