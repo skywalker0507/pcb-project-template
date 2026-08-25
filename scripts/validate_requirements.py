@@ -8,6 +8,8 @@ import hashlib
 import json
 from pathlib import Path
 
+from validate_spec_consistency import consistency_problems
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -45,6 +47,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--requirements", type=Path, default=ROOT / "config/requirements.json")
     parser.add_argument("--require-reviewed", action="store_true")
+    parser.add_argument("--output", type=Path, help="Write the deterministic JSON receipt to this path.")
     args = parser.parse_args()
     try:
         data = json.loads(args.requirements.read_text(encoding="utf-8"))
@@ -53,12 +56,18 @@ def main() -> int:
     if not isinstance(data, dict):
         raise SystemExit("Requirements file must contain a JSON object")
     issues = problems(data, args.require_reviewed)
-    print(json.dumps({
+    if args.require_reviewed and args.requirements.resolve() == (ROOT / "config/requirements.json").resolve():
+        issues.extend(consistency_problems(ROOT))
+    receipt = {
         "schema": 1, "kind": "requirements_validation", "success": not issues,
         "requirements": str(args.requirements.resolve()),
         "requirements_sha256": hashlib.sha256(args.requirements.resolve().read_bytes()).hexdigest().upper(),
         "status": data.get("status"), "issues": issues[:8],
-    }, separators=(",", ":")))
+    }
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(receipt, separators=(",", ":")))
     return 0 if not issues else 1
 
 

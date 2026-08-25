@@ -32,7 +32,8 @@
     "keep_failed_evidence_runs_per_stage": 3,
     "tmp_max_age_hours": 24,
     "release_is_immutable": true,
-    "archive_instead_of_delete": true
+    "archive_instead_of_delete": true,
+    "auto_checkpoint_prune_after_stage_publish": true
   },
   "legacy": {
     "archive_root": "build/00-legacy",

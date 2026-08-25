@@ -1,5 +1,10 @@
 {
   "schema": 1,
+  "template_engine": {
+    "contract": "config/template-engine.json",
+    "project_independent_package": "template-engine",
+    "project_adapters": "scripts"
+  },
   "electrical_backend": {
     "config": "config/electrical-backend.json",
     "authority": "reviewed_atopile_source"
@@ -15,7 +20,8 @@
     "independent_of_gui_backend": true
   },
   "validation_backend": {
-    "required": ["easyeda_pro_drc", "kicad_cli"],
+    "required": ["kicad_cli"],
+    "optional": ["easyeda_pro_drc"],
     "independent_validation_required": true,
     "acceptance": "config/pcb-acceptance.json"
   },

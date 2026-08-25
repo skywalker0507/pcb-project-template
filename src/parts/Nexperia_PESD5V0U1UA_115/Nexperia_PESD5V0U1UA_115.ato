@@ -1,0 +1,17 @@
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component Nexperia_PESD5V0U1UA_115_package:
+    # This trait marks this file as auto-generated
+    # If you want to manually change it, remove the trait
+    trait is_auto_generated<system="ato_part", source="easyeda:C139614", date="2026-08-11T06:26:55.120459+00:00", checksum="c207d6953a14e664b78346a1a14f2d01186f0461b55c15c68263ae7035ae8d3c">
+
+    trait is_atomic_part<manufacturer="Nexperia", partnumber="PESD5V0U1UA,115", footprint="SOD-323_L1.8-W1.3-LS2.5-RD.kicad_mod", symbol="PESD5V0U1UA,115.kicad_sym">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C139614", manufacturer="Nexperia", partno="PESD5V0U1UA,115">
+    trait has_designator_prefix<prefix="D">
+
+    # pins
+    signal A ~ pin 2
+    signal C ~ pin 1

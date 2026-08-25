@@ -1,0 +1,25 @@
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component STMicroelectronics_USBLC6_2P6_package:
+    """USBLC6-2P6"""
+
+    # Reviewed local pin-interface correction of the EasyEDA-derived atomic
+    # part.  The original generator collapsed each flow-through I/O pair into
+    # one logical signal.  That makes KiCad demand an external copper short
+    # around the protection device.  Keep the physical pin mapping, but expose
+    # the connector and protected sides separately so the PCB netlist models
+    # the intended through-device signal path.
+
+    trait is_atomic_part<manufacturer="STMicroelectronics", partnumber="USBLC6-2P6", footprint="SOT-666-6_L1.6-W1.2-P0.50-LS1.6-BR.kicad_mod", symbol="USBLC6-2P6.kicad_sym">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C15999", manufacturer="STMicroelectronics", partno="USBLC6-2P6">
+    trait has_designator_prefix<prefix="D">
+
+    # pins
+    signal GND ~ pin 2
+    signal I_O1_PROTECTED ~ pin 1
+    signal I_O1_CONNECTOR ~ pin 6
+    signal I_O2_PROTECTED ~ pin 3
+    signal I_O2_CONNECTOR ~ pin 4
+    signal VBUS ~ pin 5

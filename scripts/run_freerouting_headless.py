@@ -120,7 +120,7 @@ def main() -> int:
         raise SystemExit("Routing requires DSN and --source-board; use --check for a non-launching diagnostic")
     require_operation("candidate_route")
     require_policy("candidate_routing")
-    tool_policy = require_tool("freerouting")
+    tool_policy = require_tool("freerouting", allow_optional=True)
     candidate_rules = load_acceptance(args.acceptance.resolve(), "routing_candidate", {
         "separate_candidate", "input_sha256_preserved", "project_rules_preserved",
         "no_forbidden_signal_layers", "candidate_audit_pass",

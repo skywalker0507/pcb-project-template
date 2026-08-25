@@ -11,10 +11,12 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from artifact_store import config as artifact_config, create_run, finish_run, relative
+from artifact_store import config as artifact_config, create_run, finish_run, publish_stage_artifact, relative
+from ai_tool_policy import allowed_tools
 from create_houtini_job import create_job
 from electrical_backend import read_config as read_electrical_config, selected_backend as selected_electrical_backend
 from pcb_policy import load_acceptance, require_no_prohibited_evidence
+from release_inputs import adopted_routing_board as resolve_adopted_routing_board, fresh_release_readiness, resolve_release_input
 from stage_policy import ROOT, current_stage
 
 
@@ -61,19 +63,59 @@ def copy_release_evidence(source: Path, destination: Path) -> str:
     return relative(destination)
 
 
+def adopted_routing_board() -> Path:
+    return resolve_adopted_routing_board(ROOT)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=ROOT / "config/pcb-flow.json")
     parser.add_argument("--build", action="store_true", help="Run the selected isolated electrical backend first.")
     parser.add_argument("--export", action="store_true", help="Regenerate JLCPCB core outputs after checks pass.")
+    parser.add_argument("--tier", choices=("checkpoint", "release"), default="checkpoint", help="Checkpoint runs board DRC/connectivity only; release also refreshes policy and project gates.")
+    parser.add_argument(
+        "--board",
+        type=Path,
+        help="Exact KiCad board to verify; defaults to project.board. Use this for isolated routing checkpoints.",
+    )
+    parser.add_argument(
+        "--baseline-board",
+        type=Path,
+        help="Passing predecessor for checkpoint DRC/connectivity delta; not valid for release/export.",
+    )
     parser.add_argument("--run-id", help="Optional stable artifact run id; defaults to a UTC timestamp and operation.")
     parser.add_argument("--log-dir", type=Path, help="Compatibility override; defaults inside the run tmp lane.")
     args = parser.parse_args()
     if args.build and args.export:
         raise SystemExit("A source build creates an unreviewed candidate; review it before a separate export attempt")
+    if args.export:
+        args.tier = "release"
+    if args.baseline_board and (args.build or args.export or args.tier != "checkpoint"):
+        raise SystemExit("--baseline-board is only valid for checkpoint verification")
 
     config = json.loads(args.config.read_text(encoding="utf-8"))
     project = config["project"]
+    selected_board = (
+        args.board.resolve() if args.board
+        else adopted_routing_board() if args.export
+        else (ROOT / project["board"]).resolve()
+    )
+    preflight_board = selected_board
+    if args.export:
+        readiness = fresh_release_readiness(preflight_board)
+        if readiness is None:
+            print(json.dumps({
+                "success": False, "error": "release_readiness_missing_or_stale",
+                "next": f'py -3.14 scripts/pcbctl.py verify readiness --board "{preflight_board}"',
+            }, separators=(",", ":")))
+            return 2
+        if readiness.get("release_ready") is not True:
+            print(json.dumps({
+                "success": False, "error": "release_readiness_blocked",
+                "blockers": [item.get("code") for item in readiness.get("blockers", []) if isinstance(item, dict)],
+                "next_action": readiness.get("next_action"), "next_command": readiness.get("next_command"),
+            }, separators=(",", ":")))
+            return 2
     audit_config = config["audit"]
     context_config = config["context"]
     manufacturing_config = config["manufacturing"]
@@ -87,19 +129,39 @@ def main() -> int:
     pipeline_summary = run.evidence / "pipeline-summary.json"
     package_audit = run.evidence / "jlcpcb-package-audit.json"
     manufacturing_gate = run.evidence / "manufacturing-gate.json"
+    manufacturing_registry_validation = run.evidence / "manufacturing-registry-validation.json"
+    gerber_rules_gate = run.evidence / "manufacturing-registry-gerber.json"
+    footprint_equivalence = run.evidence / "footprint-equivalence.json"
+    physical_integrity = run.evidence / "physical-integrity.json"
+    special_process_gate = run.evidence / "manufacturing-registry-pre-export.json"
 
     acceptance_path = ROOT / config.get("acceptance", "config/pcb-acceptance.json")
     release_rules = load_acceptance(acceptance_path, "release", {
         "release_pass", "board_sha256_match", "drc_zero_unconnected", "manufacturing_profile_selected",
-        "electrical_freeze_pass", "easyeda_import_parity_pass", "easyeda_drc_pass", "jlc_dfm_pass",
-        "final_electrical_parity_pass",
+        "electrical_freeze_pass", "jlc_dfm_pass", "dfm_order_profile_match",
+        "final_electrical_parity_pass", "physical_integrity_pass", "critical_footprint_rule_areas_pass", "manufacturing_registry_pass", "gerber_rules_pass",
+        "special_manufacturing_processes_confirmed",
     })
     require_no_prohibited_evidence(release_rules, {"matching_release_audit"})
-    board = str(ROOT / project["board"])
+    board_path = selected_board
+    if not args.build and not board_path.is_file():
+        raise SystemExit(f"Board not found: {board_path}")
+    board = str(board_path)
+    baseline_board_path = args.baseline_board.resolve() if args.baseline_board else None
+    if baseline_board_path and not baseline_board_path.is_file():
+        raise SystemExit(f"Baseline board not found: {baseline_board_path}")
 
-    commands: list[tuple[str, list[str]]] = [("compile-design-policy", [sys.executable, "scripts/compile_design_policy.py"])]
-    for script in config.get("checks", []):
-        commands.append((Path(script).stem, [sys.executable, script]))
+    commands: list[tuple[str, list[str]]] = []
+    resolved_release_inputs: dict[str, dict[str, str | None]] = {}
+    if args.build or args.tier == "release":
+        commands.append(("compile-design-policy", [sys.executable, "scripts/compile_design_policy.py"]))
+        commands.append(("manufacturing-registry", [
+            sys.executable, "scripts/check_manufacturing_registry.py",
+            "--phase", "validate",
+            "--output", str(manufacturing_registry_validation),
+        ]))
+        for script in config.get("checks", []):
+            commands.append((Path(script).stem, [sys.executable, script]))
     if args.build:
         electrical_name, _ = selected_electrical_backend(read_electrical_config())
         electrical_output = run.tmp / "generated" / electrical_name
@@ -114,19 +176,35 @@ def main() -> int:
             ],
         ))
     else:
-        audit_command = [
-            sys.executable, "scripts/audit_kicad_release.py",
-            "--board", board,
-            "--baseline", str(ROOT / audit_config["baseline"]),
-            "--routing-paths", str(ROOT / audit_config["routing_paths"]),
-            "--audit-json", str(evidence_audit),
-            "--drc-report", str(evidence_drc),
-        ]
-        if audit_config.get("require_in1_ground", False):
-            audit_command.append("--require-in1-ground")
-        commands.extend([
-            ("kicad-audit", audit_command),
-            (
+        if args.tier == "checkpoint" and baseline_board_path:
+            audit_command = [
+                sys.executable, "scripts/krt_candidate_audit.py",
+                "--input", str(baseline_board_path),
+                "--candidate", board,
+                "--work-dir", str(run.tmp / "checkpoint-drc"),
+                "--cache-dir", str(run.tmp / "drc-cache"),
+                "--report", str(evidence_audit),
+            ]
+        else:
+            audit_command = [
+                sys.executable, "scripts/audit_kicad_release.py",
+                "--board", board,
+                "--baseline", str(ROOT / audit_config["baseline"]),
+                "--routing-paths", str(ROOT / audit_config["routing_paths"]),
+                "--audit-json", str(evidence_audit),
+                "--drc-report", str(evidence_drc),
+            ]
+            if audit_config.get("require_in1_ground", False):
+                audit_command.append("--require-in1-ground")
+        commands.append(("kicad-audit", audit_command))
+        if args.tier == "release":
+            commands.append(("physical-integrity", [
+                sys.executable, "scripts/check_kicad_physical_integrity.py",
+                "--board", board, "--phase", "release",
+                "--output", str(physical_integrity),
+                "--footprint-output", str(footprint_equivalence),
+            ]))
+            commands.append((
                 "pcb-context",
                 [
                     sys.executable, "scripts/extract_pcb_context.py",
@@ -134,25 +212,49 @@ def main() -> int:
                     "--policy", str(ROOT / context_config["policy"]),
                     "--output", str(context_output),
                 ],
-            ),
-        ])
+            ))
         if args.export:
-            physical_review = ROOT / audit_config.get("physical_review", "build/07-release/evidence/manual/physical-review.json")
+            physical_review, _, physical_review_source = resolve_release_input(config, "physical_review")
             export_log = run.tmp / "logs" / "jlcpcb-export.log"
             gate_receipts = manufacturing_config["gate_receipts"]
+            final_parity, _, final_parity_source = resolve_release_input(config, "final_electrical_parity")
+            jlc_dfm, _, jlc_dfm_source = resolve_release_input(config, "jlc_dfm")
+            selected = {
+                "physical_review": (physical_review, physical_review_source),
+                "final_electrical_parity": (final_parity, final_parity_source),
+                "jlc_dfm": (jlc_dfm, jlc_dfm_source),
+            }
+            missing_inputs = [name for name, (path, _) in selected.items() if path is None]
+            if missing_inputs:
+                raise SystemExit("Release inputs are not configured: " + ", ".join(missing_inputs))
+            resolved_release_inputs = {
+                name: {"path": relative(path), "source": source}
+                for name, (path, source) in selected.items() if path is not None
+            }
+            manufacturing_gate_command = [
+                sys.executable, "scripts/check_manufacturing_gates.py",
+                "--board", board,
+                "--electrical-freeze", str(ROOT / gate_receipts["electrical_freeze"]),
+                "--final-electrical-parity", str(final_parity),
+                "--jlc-dfm", str(jlc_dfm),
+                "--output", str(manufacturing_gate),
+            ]
+            if gate_receipts.get("easyeda_import_parity"):
+                manufacturing_gate_command.extend(["--import-parity", str(ROOT / gate_receipts["easyeda_import_parity"])])
+            if gate_receipts.get("easyeda_drc"):
+                manufacturing_gate_command.extend(["--easyeda-drc", str(ROOT / gate_receipts["easyeda_drc"])])
             commands.extend([
                 (
-                    "manufacturing-gates",
+                    "manufacturing-registry-pre-export",
                     [
-                        sys.executable, "scripts/check_manufacturing_gates.py",
-                        "--board", board,
-                        "--electrical-freeze", str(ROOT / gate_receipts["electrical_freeze"]),
-                        "--import-parity", str(ROOT / gate_receipts["easyeda_import_parity"]),
-                        "--final-electrical-parity", str(ROOT / gate_receipts["final_electrical_parity"]),
-                        "--easyeda-drc", str(ROOT / gate_receipts["easyeda_drc"]),
-                        "--jlc-dfm", str(ROOT / gate_receipts["jlc_dfm"]),
-                        "--output", str(manufacturing_gate),
+                        sys.executable, "scripts/check_manufacturing_registry.py",
+                        "--phase", "pre_export",
+                        "--output", str(special_process_gate),
                     ],
+                ),
+                (
+                    "manufacturing-gates",
+                    manufacturing_gate_command,
                 ),
                 (
                     "jlcpcb-export",
@@ -166,6 +268,10 @@ def main() -> int:
                         "--log", str(export_log),
                         "--assembly-parts", str(ROOT / manufacturing_config["assembly_parts"]),
                         "--acceptance", str(acceptance_path),
+                        "--registry-pre-export", str(special_process_gate),
+                        "--gerber-rules-output", str(gerber_rules_gate),
+                        "--footprint-equivalence", str(footprint_equivalence),
+                        "--physical-integrity", str(physical_integrity),
                     ],
                 ),
                 (
@@ -174,6 +280,7 @@ def main() -> int:
                         sys.executable, "scripts/check_jlcpcb_release.py",
                         "--package", str(ROOT / manufacturing_config["output"]),
                         "--board-stack", str(ROOT / config["board_stack"]),
+                        "--gerber-rules", str(gerber_rules_gate),
                         "--output", str(package_audit),
                     ],
                 ),
@@ -193,14 +300,20 @@ def main() -> int:
     package_result = next((item["data"] for item in steps if item["name"] == "jlcpcb-package-check"), None)
     failed = next((item for item in steps if not item["success"]), None)
     success = len(steps) == len(commands) and all(bool(item["success"]) for item in steps)
-    kicad_audit_pass = audit.get("release_pass") is True if isinstance(audit, dict) else None
+    checkpoint_delta = args.tier == "checkpoint" and baseline_board_path is not None
+    kicad_audit_pass = (
+        audit.get("success") is True and audit.get("baseline_pass") is True
+        if checkpoint_delta and isinstance(audit, dict)
+        else audit.get("release_pass") is True if isinstance(audit, dict)
+        else None
+    )
     release_pass = bool(
         args.export and success and kicad_audit_pass
         and isinstance(gate_result, dict) and gate_result.get("manufacturing_gate_pass") is True
         and isinstance(package_result, dict) and package_result.get("success") is True
     )
     delegation = None
-    if failed:
+    if failed and "houtini" in allowed_tools():
         delegation = create_job(
             [Path(str(failed["log"]))],
             "pipeline_failure",
@@ -213,13 +326,23 @@ def main() -> int:
         "schema": 2,
         "success": success,
         "run": {key: relative(Path(value)) if key in {"tmp", "evidence", "release", "manifest"} else value for key, value in run.as_dict().items()},
-        "requested": {"build": args.build, "export": args.export},
+        "requested": {
+            "build": args.build,
+            "export": args.export,
+            "tier": args.tier,
+            "board": relative(board_path) if not args.build else None,
+            "baseline_board": relative(baseline_board_path) if baseline_board_path else None,
+        },
         "electrical_candidate": electrical,
         "candidate_pending_review": args.build and not failed,
         "acceptance": {"path": relative(acceptance_path), "release_requires": release_rules.get("requires", [])},
+        "resolved_release_inputs": resolved_release_inputs,
         "board_sha256": audit.get("board_sha256") if isinstance(audit, dict) else None,
         "in1_track_segments": audit.get("in1_non_ground_segments") if isinstance(audit, dict) else None,
-        "drc_categories": audit.get("drc_categories") if isinstance(audit, dict) else None,
+        "drc_categories": (
+            audit.get("new_violation_types", {}) if checkpoint_delta
+            else audit.get("drc_categories")
+        ) if isinstance(audit, dict) else None,
         "kicad_audit_pass": kicad_audit_pass,
         "release_pass": release_pass,
         "passed_steps": [str(item["name"]) for item in steps if item["success"]],
@@ -234,6 +357,11 @@ def main() -> int:
             "pcb_context_index": relative(context_output) if context_output.is_file() else None,
             "package_audit": relative(package_audit) if package_audit.is_file() else None,
             "manufacturing_gate": relative(manufacturing_gate) if manufacturing_gate.is_file() else None,
+            "manufacturing_registry_validation": relative(manufacturing_registry_validation) if manufacturing_registry_validation.is_file() else None,
+            "gerber_rules_gate": relative(gerber_rules_gate) if gerber_rules_gate.is_file() else None,
+            "footprint_equivalence": relative(footprint_equivalence) if footprint_equivalence.is_file() else None,
+            "physical_integrity": relative(physical_integrity) if physical_integrity.is_file() else None,
+            "manufacturing_registry_pre_export": relative(special_process_gate) if special_process_gate.is_file() else None,
             "logs": relative(log_dir),
         },
         "context_metrics": {
@@ -254,7 +382,18 @@ def main() -> int:
             release_artifacts["package_audit"] = copy_release_evidence(package_audit, run.release / package_audit.name)
         if manufacturing_gate.is_file():
             release_artifacts["manufacturing_gate"] = copy_release_evidence(manufacturing_gate, run.release / manufacturing_gate.name)
-        physical_review = ROOT / audit_config.get("physical_review", "build/07-release/evidence/manual/physical-review.json")
+        if manufacturing_registry_validation.is_file():
+            release_artifacts["manufacturing_registry_validation"] = copy_release_evidence(manufacturing_registry_validation, run.release / manufacturing_registry_validation.name)
+        if gerber_rules_gate.is_file():
+            release_artifacts["gerber_rules_gate"] = copy_release_evidence(gerber_rules_gate, run.release / gerber_rules_gate.name)
+        if footprint_equivalence.is_file():
+            release_artifacts["footprint_equivalence"] = copy_release_evidence(footprint_equivalence, run.release / footprint_equivalence.name)
+        if physical_integrity.is_file():
+            release_artifacts["physical_integrity"] = copy_release_evidence(physical_integrity, run.release / physical_integrity.name)
+        if special_process_gate.is_file():
+            release_artifacts["manufacturing_registry_pre_export"] = copy_release_evidence(special_process_gate, run.release / special_process_gate.name)
+        if physical_review is None:
+            raise SystemExit("Passing physical review input disappeared during release publication")
         release_artifacts["physical_review"] = copy_release_evidence(physical_review, run.release / physical_review.name)
         package_reference = run.release / "package-reference.json"
         package_reference.write_text(json.dumps({
@@ -265,6 +404,21 @@ def main() -> int:
             "note": "The immutable manufacturing snapshot remains under manufacturing/releases after create_release_snapshot.py.",
         }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         release_artifacts["package_reference"] = relative(package_reference)
+        published = publish_stage_artifact(
+            run, board_path, "released.kicad_pcb",
+            evidence={
+                "routing_audit": release_artifacts["routing_audit"],
+                "physical_review": release_artifacts["physical_review"],
+                **({"manufacturing_gate": release_artifacts["manufacturing_gate"]} if "manufacturing_gate" in release_artifacts else {}),
+                **({"manufacturing_registry_validation": release_artifacts["manufacturing_registry_validation"]} if "manufacturing_registry_validation" in release_artifacts else {}),
+                **({"gerber_rules_gate": release_artifacts["gerber_rules_gate"]} if "gerber_rules_gate" in release_artifacts else {}),
+                **({"footprint_equivalence": release_artifacts["footprint_equivalence"]} if "footprint_equivalence" in release_artifacts else {}),
+                **({"physical_integrity": release_artifacts["physical_integrity"]} if "physical_integrity" in release_artifacts else {}),
+                **({"manufacturing_registry_pre_export": release_artifacts["manufacturing_registry_pre_export"]} if "manufacturing_registry_pre_export" in release_artifacts else {}),
+            },
+        )
+        release_artifacts["board"] = str(published["artifact"])
+        release_artifacts["stage_result"] = relative(run.release / "stage-result.json")
 
     summary["release_artifacts"] = release_artifacts
     pipeline_summary.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

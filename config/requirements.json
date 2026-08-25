@@ -1,11 +1,12 @@
 {
   "schema": 2,
+  "revision": "Rev A.1",
   "status": "reviewed",
   "interfaces": [
     {"name": "USB-C host interface", "description": "USB 2.0 device/sink interface for probe power, native ESP32-S3 USB data, ESD protection, resettable VBUS protection, and a replaceable shield-to-ground strategy."},
     {"name": "Target debug interface J2", "description": "Tag-Connect TC2050-IDC-NL 10-pin Plug-of-Nails target interface carrying VTREF, GND, SWDIO, SWCLK, NRST, BOOT0, target UART TX and target UART RX."},
-    {"name": "Target debug interface J3", "description": "2.54 mm single-row field connector carrying the same eight nets as J2; J2 and J3 are alternatives and only one target may be connected."},
-    {"name": "Expansion interface J4", "description": "Seven-pin 3V3/GND/GPIO10/GPIO11/GPIO12/GPIO13/GPIO14 expansion header."}
+    {"name": "Target debug interface J3", "description": "Keyed JST-XH B8B-XH-A (LF)(SN) field connector carrying the same eight nets as J2; J2 and J3 are alternatives and only one target may be connected."},
+    {"name": "Expansion interface J4", "description": "Trusted internal seven-pin 3V3/GND/GPIO10/GPIO11/GPIO12/GPIO13/GPIO14 development header; not hot-pluggable and limited to 25 mA total 3V3 load."}
   ],
   "rails": [
     {"name": "USB_VBUS_RAW", "description": "USB-C VBUS before resettable protection."},
@@ -15,30 +16,37 @@
   ],
   "connectors": [
     {"ref": "J1", "mpn": "USB4105-GF-A", "purpose": "USB-C USB 2.0 device/sink receptacle; exact footprint including locating holes and shield slots is required."},
-    {"ref": "J2", "mpn": "TC2050-IDC-NL", "purpose": "10-pin Tag-Connect Plug-of-Nails target interface; pin order is authoritative in config/design-data.json."},
-    {"ref": "J3", "purpose": "2.54 mm 1x8 target debug connector; pin order is authoritative in config/design-data.json."},
+    {"ref": "J2", "mpn": "TC2050-IDC-NL", "purpose": "DNL PCB contact footprint for the 10-pin Tag-Connect Plug-of-Nails cable; pin order is authoritative in config/design-data.json."},
+    {"ref": "J3", "mpn": "B8B-XH-A (LF)(SN)", "purpose": "Keyed JST-XH 2.5 mm vertical 1x8 target connector; pin order is authoritative in config/design-data.json."},
     {"ref": "J4", "mpn": "TSW-107-07-L-S", "purpose": "Expansion header."}
   ],
   "mechanical": {
-    "board_outline": "44 mm × 80 mm four-layer rectangular board. The reviewed Rev A width expansion preserves the long narrow form, keeps all existing interfaces fixed, and adds a dedicated 1.27 mm V3V3 edge corridor with continuous inner-plane reference without shrinking reviewed routing rules.",
+    "board_outline": "44 mm × 70 mm four-layer rectangular board with no mounting holes. U1 is centered at the top short edge with its antenna section beyond the board outline; J1 occupies the left portion of the bottom short edge with its documented footprint PCB-edge datum aligned to the outline; J2 and J3 face outward from the long edges.",
     "mounting": [],
-    "placement_intent": "ESP32-S3 module is at the top short edge with antenna facing outward. USB-C is at the opposite short edge. Target connectors run along the long edges; do not place components, copper, fasteners, or enclosure metal in the module antenna keepout."
+    "placement_intent": "ESP32-S3 module is at the top short edge with antenna facing outward. USB-C is at the bottom-left short edge so its protected data pair can use the reviewed left-side corridor; controls remain accessible along the lower area and the buck converter stays in the lower-right power island. Target connectors run along the long edges; do not place components, copper, fasteners, or enclosure metal in the module antenna keepout."
   },
   "constraints": [
-    {"name": "controller", "description": "Use ESP32-S3-WROOM-1-N16R8. GPIO3, GPIO45, and GPIO46 are unavailable for product functions."},
+    {"name": "controller", "description": "Use ESP32-S3-WROOM-1-N16R8. GPIO3, GPIO35, GPIO36, GPIO37, GPIO45, and GPIO46 are unavailable for product functions."},
     {"name": "operating-mode", "description": "The ESP32-S3 operates as a Wi-Fi-connected, standalone remote programmer. A PC is not required during target programming; firmware behavior is outside the PCB authority but its assigned pins and the target interface contract are hardware constraints."},
-    {"name": "target-scope", "description": "Rev A is initially intended for STM32 targets using SWD, NRST, BOOT0, and target UART. Future target-family expansion must preserve the documented J2/J3 pin contract or be introduced as a separately reviewed revision."},
+    {"name": "target-scope", "description": "Rev A.1 is initially intended for STM32 targets using SWD, NRST, BOOT0, and target UART. Future target-family expansion must preserve the documented J2/J3 pin contract or be introduced as a separately reviewed revision."},
     {"name": "power-boundary", "description": "The probe is USB powered only. It has no target-power output and must not connect VTREF directly to probe 3V3 or USB_5V."},
-    {"name": "target-voltage-policy", "description": "The target signal path is enabled only for VTREF in the 3.0–3.6 V range, with hardware supervisor interlock plus firmware ADC validation, hysteresis, debounce, and immediate disable on invalid voltage."},
+    {"name": "target-voltage-policy", "description": "TMUX-carried SWD/UART paths are enabled only for validated VTREF in the 3.0–3.6 V range, with hardware supervisor interlock plus firmware ADC validation, hysteresis, debounce, and immediate disable on invalid voltage. NRST and BOOT0 have safe passive defaults but are firmware-gated rather than U5 hardware-gated."},
     {"name": "signal-isolation", "description": "Use TMUX1574PWR as a four-channel switch, not a level translator. SWDIO is bidirectional. The target interface must remain safe when either target or probe is unpowered."},
     {"name": "usb-routing", "description": "USB D+/D− requires a 90-ohm differential controlled-impedance design on F.Cu over continuous In1.Cu ground, no layer change after ESD, matched topology, and minimal skew. Final geometry must come from reviewed JLCPCB evidence, not this requirement record."},
     {"name": "switching-layout", "description": "Keep the AP63203 VIN-SW-L1-COUT-GND loop compact, SW copper small, and USB, antenna, VTREF, SWD, and UART outside the switch region."},
+    {"name": "usb-power-budget", "description": "No USB PD or Type-C current-advertisement detection is fitted. Worst-case 5 V input current, including startup and conversion loss, must remain at or below 500 mA; J4 may consume at most 25 mA from 3V3."},
+    {"name": "target-interface-performance", "description": "Validate target cables through 300 mm, SWD through 4 MHz, UART through 3 Mbit/s, and system-level IEC 61000-4-2 ±8 kV contact and ±15 kV air discharge at exposed target connectors."},
+    {"name": "operating-environment", "description": "Product operating ambient is -20 °C through +60 °C."},
     {"name": "manufacturing", "description": "First prototype target is JLCPCB four-layer PCB plus SMT assembly, initially in a 5-10 board prototype quantity. Routing and release require separately reviewed process values."},
-    {"name": "feature-retention", "description": "Both J2 and J3 target interfaces, the expansion header, LEDs, and buttons are required in Rev A; do not simplify them away to ease routing without an explicit product revision."}
+    {"name": "feature-retention", "description": "Both J2 and J3 target interfaces, the expansion header, LEDs, and buttons are required in Rev A.1; do not simplify them away to ease routing without an explicit product revision."}
   ],
   "critical_nets": [
-    {"net": "USB_DP", "purpose": "USB 2.0 D+ differential member"},
-    {"net": "USB_DM", "purpose": "USB 2.0 D− differential member"},
+    {"net": "USB_DP_RAW", "purpose": "USB 2.0 D+ connector-side path into U2 I/O1", "required_pads": ["J1:A6", "J1:B6", "U2:6"]},
+    {"net": "USB_DM_RAW", "purpose": "USB 2.0 D− connector-side path into U2 I/O2", "required_pads": ["J1:A7", "J1:B7", "U2:4"]},
+    {"net": "USB_DP_ESD", "purpose": "USB 2.0 D+ protected differential path from U2 I/O1 to R4", "required_pads": ["U2:1", "R4:1"]},
+    {"net": "USB_DM_ESD", "purpose": "USB 2.0 D− protected differential path from U2 I/O2 to R5", "required_pads": ["U2:3", "R5:1"]},
+    {"net": "USB_DP", "purpose": "USB 2.0 D+ differential member", "required_pads": ["R4:2", "U1:14"]},
+    {"net": "USB_DM", "purpose": "USB 2.0 D− differential member", "required_pads": ["R5:2", "U1:13"]},
     {"net": "SWDIO", "purpose": "Bidirectional target debug data"},
     {"net": "SWCLK", "purpose": "Target debug clock"},
     {"net": "VTREF", "purpose": "Target reference sensing and hardware interlock"},
@@ -52,6 +60,18 @@
     {"name": "target-interfaces", "description": "Long edges: J2/J3 with dedicated, connector-adjacent ESD banks."},
     {"name": "signal-control", "description": "Center/lower board: TMUX, supervisor, reset/BOOT0 controls, LEDs, buttons, and expansion header."}
   ],
+  "controller": {
+    "mpn": "ESP32-S3-WROOM-1-N16R8",
+    "reserved_gpios": ["GPIO3", "GPIO35", "GPIO36", "GPIO37", "GPIO45", "GPIO46"]
+  },
+  "controlled_impedance": {
+    "usb2": {
+      "target_ohm": 90,
+      "evidence": "config/jlcpcb-impedance-evidence.json",
+      "stack_template": "JLC04161H-3313A"
+    }
+  },
+  "assembly_exempt_refs": ["J2", "J3", "J4"],
   "unknowns": [],
   "notes": [
     "Product definition is derived from HARDWARE_SPEC.md and user-approved defaults on 2026-08-07.",

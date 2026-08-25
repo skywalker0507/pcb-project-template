@@ -33,9 +33,49 @@ def windows_to_wsl(path: Path) -> str:
     return f"/mnt/{drive.lower()}/{tail.replace(os.sep, '/')}"
 
 
+def source_requires_part_picker(source_root: Path) -> bool:
+    """Return true when reviewed source contains explicit part-picking constraints."""
+    for path in source_root.rglob("*.ato"):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if re.search(r"\b(?:lcsc_id|manufacturer|mpn|package)\s*=", text):
+            return True
+    return False
+
+
+def wsl_process_environment(network_mode: str = "inherit") -> dict[str, str]:
+    """Apply the reviewed direct/inherited network policy to WSL processes."""
+    env = os.environ.copy()
+    proxy_names = (
+        "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
+        "http_proxy", "https_proxy", "no_proxy", "all_proxy",
+    )
+    if network_mode == "direct":
+        for name in proxy_names:
+            env.pop(name, None)
+        retained = [
+            item for item in env.get("WSLENV", "").split(":") if item
+            and item.split("/", 1)[0] not in proxy_names
+        ]
+        if retained:
+            env["WSLENV"] = ":".join(retained)
+        else:
+            env.pop("WSLENV", None)
+        return env
+    existing = [item for item in env.get("WSLENV", "").split(":") if item]
+    existing_names = {item.split("/", 1)[0] for item in existing}
+    for name in proxy_names:
+        if env.get(name) and name not in existing_names:
+            existing.append(name)
+    if existing:
+        env["WSLENV"] = ":".join(existing)
+    return env
+
+
 def classify_failure(log: str) -> dict[str, object] | None:
     rules = [
-        ("component_data_unreachable", r"Fetching component data failed|Name or service not known", "Restore component-data access or provide a reviewed offline component cache; do not change electrical sources merely to bypass picking."),
+        ("atopile_auth_required", r"Part picking on atopile 0\.15\.8 requires sign-in|Sign-in required", "Run `ato auth login` interactively in the configured WSL distro, then rerun the isolated electrical build. Never add credentials to the repository."),
+        ("component_data_unreachable", r"Fetching component data failed|Name or service not known|EasyEDA API is unavailable|Failed to fetch footprint data.*handshake operation timed out", "Restore component-data access or provide a reviewed offline component cache; do not change electrical sources merely to bypass picking."),
+        ("footprint_resource_mismatch", r"Footprint `[^`]+` doesn't exist in library `[^`]+`", "Align the reviewed footprint filename, internal footprint name, and atomic-part resource reference; do not substitute a similar package."),
         ("package_compiler_incompatible", r"trait not found|Incompatible interface types", "Review the exact upstream package/compiler compatibility issue; keep any local migration patch separately reviewed."),
         ("dependency_resolution", r"Failed to resolve.*dependency|ConnectError", "Check the local dependency cache and immutable package revision before retrying."),
         ("source_validation", r"SyntaxError|TypeError|Ercfault", "Inspect the cited .ato source location and resolve the electrical validation error."),
@@ -52,6 +92,9 @@ def classify_failure(log: str) -> dict[str, object] | None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--build", default="default")
+    parser.add_argument("--distro", default="Ubuntu-24.04")
+    parser.add_argument("--entry", default="main.ato:App")
+    parser.add_argument("--network-mode", choices=("direct", "inherit"), default="inherit")
     parser.add_argument("--board", type=Path)
     parser.add_argument(
         "--output", type=Path,
@@ -101,6 +144,117 @@ def main() -> int:
         else ROOT / "build/03-electrical/tmp/atopile/ato-build-isolated.log"
     )
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    source_validation_process = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/validate_atopile_source.py"),
+            "--distro",
+            args.distro,
+            "--entry",
+            args.entry,
+        ],
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    source_validation_lines = [
+        line for line in source_validation_process.stdout.splitlines() if line.strip()
+    ]
+    try:
+        source_validation = json.loads(source_validation_lines[-1])
+    except (IndexError, json.JSONDecodeError):
+        source_validation = {
+            "kind": "atopile_source_validation",
+            "success": False,
+            "failure": "validator_runtime_failure",
+            "evidence": source_validation_lines[-8:],
+        }
+    if source_validation_process.returncode or source_validation.get("success") is not True:
+        log_path.write_text(source_validation_process.stdout, encoding="utf-8")
+        payload = {
+            "schema": 1,
+            "kind": "electrical_build",
+            "backend": "atopile",
+            "success": False,
+            "exit_code": 1,
+            "build": args.build,
+            "build_id": None,
+            "compiler_version": source_validation.get("compiler_version"),
+            "log": str(log_path),
+            "candidate_board": None,
+            "protected_board_existed": board.is_file(),
+            "restored_board_sha256": sha256(board).upper() if board.is_file() else None,
+            "failure": {
+                "class": "source_validation",
+                "evidence": source_validation.get("evidence", [])[:8],
+                "next": "Fix the cited reviewed atopile source; authentication and part picking were not attempted.",
+            },
+            "source_validation": source_validation,
+            "preflight": "atopile_source_validation",
+            "isolation": "Source compilation failed before any board or source-tree artifact was changed.",
+        }
+        if args.receipt:
+            args.receipt.resolve().parent.mkdir(parents=True, exist_ok=True)
+            args.receipt.resolve().write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+            )
+        print(json.dumps(payload, separators=(",", ":")))
+        return 1
+    preflight_log = ""
+    if source_requires_part_picker(ROOT / "src"):
+        preflight_command = (
+            "printf 'CODEX_ATO_VERSION=' && ato --version | tail -n 1 && "
+            "ato auth status"
+        )
+        preflight = subprocess.run(
+            ["wsl.exe", "-d", args.distro, "--", "bash", "-lc", preflight_command],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            env=wsl_process_environment(args.network_mode),
+        )
+        preflight_log = preflight.stdout
+        if re.search(r"^Signed out\.$", preflight_log, re.MULTILINE):
+            log_path.write_text(
+                preflight_log
+                + "\nBuild failed: Part picking on atopile 0.15.8 requires sign-in. "
+                + "Run `ato auth login`.\n",
+                encoding="utf-8",
+            )
+            log_text = log_path.read_text(encoding="utf-8", errors="replace")
+            version_match = re.search(r"^CODEX_ATO_VERSION=(.+)$", log_text, re.MULTILINE)
+            payload = {
+                "schema": 1,
+                "kind": "electrical_build",
+                "backend": "atopile",
+                "success": False,
+                "exit_code": 1,
+                "build": args.build,
+                "build_id": None,
+                "compiler_version": version_match.group(1).strip() if version_match else None,
+                "log": str(log_path),
+                "candidate_board": None,
+                "protected_board_existed": board.is_file(),
+                "restored_board_sha256": sha256(board).upper() if board.is_file() else None,
+                "failure": classify_failure(log_text),
+                "source_validation": source_validation,
+                "preflight": "atopile_auth_status",
+                "isolation": "Authentication was checked before any board or source-tree artifact was changed.",
+            }
+            if args.receipt:
+                args.receipt.resolve().parent.mkdir(parents=True, exist_ok=True)
+                args.receipt.resolve().write_text(
+                    json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+                )
+            print(json.dumps(payload, separators=(",", ":")))
+            return 1
     if protected_board_existed:
         os.replace(board, guard)
     exit_code = 1
@@ -112,12 +266,13 @@ def main() -> int:
             f"ato build --build {args.build}"
         )
         process = subprocess.Popen(
-            ["wsl.exe", "bash", "-lc", command],
+            ["wsl.exe", "-d", args.distro, "--", "bash", "-lc", command],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             encoding="utf-8",
             errors="replace",
+            env=wsl_process_environment(args.network_mode),
         )
         assert process.stdout is not None
         with log_path.open("w", encoding="utf-8", newline="\n") as log:
@@ -170,6 +325,7 @@ def main() -> int:
         "protected_board_existed": protected_board_existed,
         "restored_board_sha256": after.upper() if after else None,
         "failure": classify_failure(log_text) if exit_code else None,
+        "source_validation": source_validation,
         "isolation": "Generated candidate copied to build/; any pre-existing KiCad board is restored byte-for-byte and a newly generated source-tree board is removed.",
     }
     if args.receipt:

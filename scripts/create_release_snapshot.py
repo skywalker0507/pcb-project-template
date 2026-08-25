@@ -14,7 +14,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pcb_policy import configured_board, selected_manufacturing_profile
-from design_policy import DEFAULT_OUTPUT as DEFAULT_POLICY, require_policy
+from design_policy import DEFAULT_OUTPUT as DEFAULT_POLICY, MANUFACTURING_REGISTRY_ARTIFACT, require_policy
 from export_jlcpcb_release import require_passing_physical_review
 from stage_policy import require_operation
 
@@ -50,6 +50,9 @@ def main() -> int:
     parser.add_argument("--acceptance", type=Path, default=ROOT / "config/pcb-acceptance.json")
     parser.add_argument("--board-stack", type=Path, default=ROOT / "config/board-stack.json")
     parser.add_argument("--design-policy", type=Path, default=DEFAULT_POLICY)
+    parser.add_argument("--manufacturing-registry", type=Path, default=MANUFACTURING_REGISTRY_ARTIFACT)
+    parser.add_argument("--registry-pre-export", type=Path, required=True)
+    parser.add_argument("--gerber-rules", type=Path, required=True)
     parser.add_argument("--physical-review", type=Path, default=ROOT / "build/07-release/evidence/manual/physical-review.json")
     parser.add_argument("--assembly-parts", type=Path, default=ROOT / "config/jlcpcb-parts.json")
     parser.add_argument(
@@ -78,6 +81,25 @@ def main() -> int:
     if audit.get("release_pass") is not True or audit.get("board_sha256") != board_hash:
         raise SystemExit("Snapshot requires release_pass=true from an audit matching this exact board")
     design_policy = require_policy("release", args.design_policy.resolve())
+    manufacturing_registry = read_json(args.manufacturing_registry.resolve(), "Manufacturing registry")
+    registry_pre_export = read_json(args.registry_pre_export.resolve(), "Manufacturing registry pre-export receipt")
+    gerber_rules = read_json(args.gerber_rules.resolve(), "Manufacturing registry Gerber receipt")
+    registry_hash = manufacturing_registry.get("registry_sha256")
+    if manufacturing_registry.get("policy_sha256") != design_policy.get("policy_sha256"):
+        raise SystemExit("Manufacturing registry does not match the released design policy")
+    if (
+        registry_pre_export.get("success") is not True
+        or registry_pre_export.get("registry_sha256") != registry_hash
+        or registry_pre_export.get("policy_sha256") != design_policy.get("policy_sha256")
+    ):
+        raise SystemExit("Snapshot requires a passing pre-export receipt for the current manufacturing registry")
+    if (
+        gerber_rules.get("success") is not True
+        or gerber_rules.get("gerber_rules_pass") is not True
+        or gerber_rules.get("registry_sha256") != registry_hash
+        or gerber_rules.get("board_sha256") != board_hash
+    ):
+        raise SystemExit("Snapshot requires passing Gerber rules for the exact board and registry")
     require_passing_physical_review(board, args.physical_review.resolve(), design_policy)
     assembly_parts = read_json(args.assembly_parts.resolve(), "Assembly parts")
     if assembly_parts.get("board_sha256") != board_hash:
@@ -105,6 +127,9 @@ def main() -> int:
         "acceptance": args.acceptance.resolve(),
         "board_stack": args.board_stack.resolve(),
         "design_policy": args.design_policy.resolve(),
+        "manufacturing_registry": args.manufacturing_registry.resolve(),
+        "registry_pre_export": args.registry_pre_export.resolve(),
+        "gerber_rules": args.gerber_rules.resolve(),
         "physical_review": args.physical_review.resolve(),
         "assembly_parts": args.assembly_parts.resolve(),
     }
@@ -141,6 +166,7 @@ def main() -> int:
             "manufacturer": profile["manufacturer"],
             "manufacturing_source": profile["source"],
             "design_policy_sha256": design_policy["policy_sha256"],
+            "manufacturing_registry_sha256": registry_hash,
             "evidence": copied,
             "review_assets": review_assets,
             "sha256": hashes,

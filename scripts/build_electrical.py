@@ -74,6 +74,10 @@ def main() -> int:
         sys.executable, str(driver), "--build", args.build,
         "--output", str(output), "--receipt", str(receipt),
     ]
+    if backend.get("platform") == "wsl-native" and isinstance(backend.get("distro"), str):
+        command.extend(["--distro", str(backend["distro"]), "--entry", str(backend["entry"])])
+        if backend.get("network_mode") in {"direct", "inherit"}:
+            command.extend(["--network-mode", str(backend["network_mode"])])
     process = subprocess.run(command, cwd=ROOT, text=True, encoding="utf-8", errors="replace", stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text(process.stdout, encoding="utf-8")
@@ -88,6 +92,41 @@ def main() -> int:
         raise SystemExit(f"Backend completed without a valid receipt: {receipt}: {exc}") from exc
     if payload.get("success") is not True or payload.get("backend") != name:
         raise SystemExit("Backend receipt does not prove a successful build for the selected backend")
+    post_status = validate_backend(config, name, backend)
+    source_mutated = post_status["source_sha256"] != status["source_sha256"]
+    config_mutated = post_status["config_sha256"] != status["config_sha256"]
+    if source_mutated or config_mutated:
+        payload["success"] = False
+        payload["failure"] = {
+            "class": "reviewed_inputs_mutated_during_build",
+            "source_sha256_before": status["source_sha256"],
+            "source_sha256_after": post_status["source_sha256"],
+            "config_sha256_before": status["config_sha256"],
+            "config_sha256_after": post_status["config_sha256"],
+            "next": (
+                "Review the tool-generated source/config changes, then rerun. A passing "
+                "build must start and finish with identical reviewed inputs."
+            ),
+        }
+        receipt.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if run:
+            finish_run(
+                run,
+                False,
+                artifacts={"receipt": relative(receipt), "log": relative(log)},
+                metrics={
+                    "source_sha256_before": status["source_sha256"],
+                    "source_sha256_after": post_status["source_sha256"],
+                },
+            )
+        print(json.dumps({
+            "success": False,
+            "backend": name,
+            "failure": payload["failure"],
+            "receipt": relative(receipt),
+            "log": relative(log),
+        }, separators=(",", ":")))
+        return 1
     if toolchain:
         toolchain_payload, toolchain_hash = toolchain
         expected_version = toolchain_payload[name]["version"]
@@ -103,7 +142,7 @@ def main() -> int:
             "backend": name,
             "compiler_version": expected_version,
         }
-    payload["contract"] = status
+    payload["contract"] = post_status
     receipt.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if run:
         finish_run(

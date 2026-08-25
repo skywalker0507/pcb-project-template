@@ -1,0 +1,18 @@
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component Texas_Instruments_TLV803EA26RDBZR_package:
+    # This trait marks this file as auto-generated
+    # If you want to manually change it, remove the trait
+    trait is_auto_generated<system="ato_part", source="easyeda:C2869926", date="2026-08-11T06:26:40.247230+00:00", checksum="b15af9b4abe9dc31b2a72703944637e6e80a27fe0564fc7a001731231fd3e288">
+
+    trait is_atomic_part<manufacturer="Texas Instruments", partnumber="TLV803EA26RDBZR", footprint="SOT-23-3_L2.9-W1.3-P1.90-LS2.4-BR.kicad_mod", symbol="TLV803EA26RDBZR.kicad_sym">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C2869926", manufacturer="Texas Instruments", partno="TLV803EA26RDBZR">
+    trait has_designator_prefix<prefix="U">
+
+    # pins
+    signal GND ~ pin 2
+    signal VDD ~ pin 3
+    signal nRESET ~ pin 1

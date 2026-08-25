@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "categories": {
+    "lib_footprint_mismatch": {
+      "disposition": "fix_before_release",
+      "reason": "Prove pad equivalence and review non-pad differences before an exact exception or library reconciliation."
+    },
+    "silk_edge_clearance": {
+      "disposition": "fix_before_release",
+      "reason": "Presentation debt does not block copper work but must be resolved or exactly reviewed before release."
+    },
+    "silk_over_copper": {
+      "disposition": "fix_before_release",
+      "reason": "Presentation debt does not block copper work but must be resolved or exactly reviewed before release."
+    },
+    "silk_overlap": {
+      "disposition": "fix_before_release",
+      "reason": "Presentation debt does not block copper work but must be resolved or exactly reviewed before release."
+    }
+  },
+  "rules": [
+    "This file assigns ownership only; it cannot waive a DRC object.",
+    "An unknown category remains unowned and blocks broad routing.",
+    "Release exceptions still require exact independently reviewed objects in pcb-release-baseline.json."
+  ]
+}

@@ -2,10 +2,26 @@
   "schema": 1,
   "selected": true,
   "manufacturer": "JLCPCB",
-  "source": "https://jlcpcb.com/pcb-impedance-calculator/",
+  "source": "https://tools.jlc.com/jlcTools/index.html#/impedanceCalculatenew",
+  "order_profile": {
+    "status": "reviewed",
+    "fabrication": {
+      "surface_finish": "ENIG",
+      "solder_mask_color": "black"
+    },
+    "assembly": {
+      "service": "smt",
+      "required_dfm_modules": ["pcb", "smt"]
+    },
+    "evidence": [
+      "The current KiCad physical authority and generated Gerber Job declare ENIG and black top/bottom solder mask.",
+      "config/requirements.json and config/product-decisions.json require JLCPCB SMT assembly for the first prototype.",
+      "https://jlcpcb.com/capabilities/pcb-capabilities/: fabrication capability depends on the selected solder-mask color and process."
+    ]
+  },
   "routing_rules": {
     "reviewed": true,
-    "source": "https://jlcpcb.com/pcb-impedance-calculator/",
+    "source": "https://tools.jlc.com/jlcTools/index.html#/impedanceCalculatenew",
     "values": {
       "track_width": 0.2,
       "clearance": 0.2,
@@ -15,8 +31,48 @@
     "evidence": [
       "https://jlcpcb.com/capabilities/Capabilities?type=1 lines 201-202: multilayer 1 oz minimum track/spacing 0.09/0.09 mm.",
       "https://jlcpcb.com/capabilities/Capabilities?type=1 lines 217-218: SMD pad-to-pad minimum 0.15 mm; the reviewed 0.20 mm board default preserves margin for USB-C fine pitch.",
-      "config/jlcpcb-impedance-evidence.json: USB pair retains calculator-derived 0.1692374064 mm width and 0.2032 mm gap."
+      "config/jlcpcb-impedance-evidence.json: JLC04161H-3313A USB pair uses the manufacturer-calculated 0.290576 mm base width and 0.2032 mm gap over In1.Cu."
     ]
+  },
+  "fine_pitch_exceptions": {
+    "usb_connector_fanout": {
+      "reviewed": true,
+      "nets": ["USB_DP_RAW", "USB_DM_RAW"],
+      "track_width": 0.2,
+      "clearance": 0.15,
+      "scope": "Connector-side J1-to-U2 nets only; never applies after U2.",
+      "evidence": "https://jlcpcb.com/capabilities/Capabilities?type=1 lines 217-218: SMD pad-to-pad minimum 0.15 mm."
+    }
+  },
+  "special_processes": {
+    "open_0p20mm_vias_near_smt_pads": {
+      "status": "confirmation_required",
+      "component": "All open 0.20 mm drill vias, including the 18 unique vias whose drill area intersects an SMT paste-bearing pad",
+      "via_count": 172,
+      "reviewed_intersection_count": 18,
+      "drill_mm": 0.2,
+      "allowed_confirmed_outcomes": [
+        "all_0p20mm_open_vias_epoxy_filled_and_capped",
+        "all_intersecting_vias_moved_clear_and_reverified"
+      ],
+      "selected_outcome": null,
+      "evidence": "build/07-release/evidence/smt-hole-proximity-v2-20260825/report.json; https://jlcpcb.com/help/article/pcb-via-covering",
+      "reason": "The exact adopted board has 20 vendor-style PIN-to-hole intersections representing 18 unique same-net open vias. They are electrically safe but ordinary unfilled construction can wick solder; JLCPCB states that vias in pads or less than 0.35 mm from pads require epoxy or copper filling rather than ink plugging."
+    },
+    "u1_thermal_holes": {
+      "status": "confirmation_required",
+      "component": "U1 ESP32-S3-WROOM-1 exposed ground pad",
+      "hole_count": 12,
+      "drill_mm": 0.2,
+      "current_excellon_classification": "Plated PTH ComponentDrill",
+      "allowed_confirmed_outcomes": [
+        "epoxy_filled_and_capped",
+        "jlcpcb_assembly_engineer_approved_current_construction"
+      ],
+      "selected_outcome": null,
+      "evidence": null,
+      "reason": "Gerber and Excellon cannot prove that the 12 under-module holes receive the intended anti-wicking treatment. Confirm the order/CAM treatment before release."
+    }
   },
   "notes": [
     "Selection records provenance only. Run apply_reviewed_fab_values.py after independent review before real routing.",

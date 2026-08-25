@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "status": "reviewed",
+  "component": "C5",
+  "owner": "U3",
+  "sources": [
+    "https://www.diodes.com/datasheet/download/AP63200-AP63201-AP63203-AP63205.pdf",
+    "https://jlcpcb.com/help/article/minimum-spacing-for-smd-components"
+  ],
+  "requirements": {
+    "electrical": "The 100 nF bootstrap capacitor remains a direct local connection between BST and SW.",
+    "assembly": "The C5 and U3 paste apertures and bodies must not overlap; JLCPCB recommends 0.20 mm between chip 0402 and SOT bodies."
+  },
+  "reviewed_geometry_mm": {
+    "c5_to_u3_pad_center": 1.101374,
+    "maximum_pad_center_distance": 1.2,
+    "maximum_regression_from_pre_fix_overlap": 1.1,
+    "nominal_paste_aperture_gap": 0.28
+  },
+  "decision": "The pre-fix 0.055 mm center distance represented overlapping lands, not a manufacturable optimum. Permit only the bounded increase needed to clear paste while retaining a short direct connection."
+}

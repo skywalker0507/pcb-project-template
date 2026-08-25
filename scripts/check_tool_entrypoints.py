@@ -39,9 +39,14 @@ def audit(root: Path = ROOT, policy_path: Path = DEFAULT_POLICY) -> dict[str, An
             if '"-jar"' in text and ("freerouting" in text or '"java"' in text):
                 problems.append(f"direct_freerouting_invocation:{script.relative_to(root).as_posix()}")
 
-    stage_doctor = (root / "scripts/stage_doctor.py").read_text(encoding="utf-8")
-    if "run_freerouting_headless" not in stage_doctor:
-        problems.append("stage_doctor_missing_freerouting_entrypoint")
+    optional = policy.get("optional_capabilities") or {}
+    if "freerouting" not in (optional.get("alternate_router") or []):
+        problems.append("freerouting_must_be_registered_as_optional_alternate_router")
+    default_stage_tools = {
+        tool for tools in (policy.get("stage_capabilities") or {}).values() for tool in tools
+    }
+    if "freerouting" in default_stage_tools:
+        problems.append("freerouting_must_not_enter_default_stage_capabilities")
     return {
         "schema": 1,
         "success": not problems,

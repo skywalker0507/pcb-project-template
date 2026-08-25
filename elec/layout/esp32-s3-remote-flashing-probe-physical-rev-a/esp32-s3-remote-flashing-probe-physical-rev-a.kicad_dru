@@ -1,0 +1,16 @@
+(version 1)
+
+# USB4105-GF-A, GCT drawing B4. These rules retain the exact reviewed
+# recommended land pattern. They do not apply to routing or other footprints.
+(rule "USB4105 internal locating-hole clearance"
+  (condition "A.memberOfFootprint('J1') && B.memberOfFootprint('J1')")
+  (constraint hole_clearance (min 0.19mm)))
+
+(rule "USB4105 front shell stake to PCB edge"
+  (condition "A.memberOfFootprint('J1') || B.memberOfFootprint('J1')")
+  (constraint edge_clearance (min 0.17mm)))
+
+# Reviewed J1-to-U2 fine-pitch exception; these RAW nets terminate at U2.
+(rule "Reviewed USB connector fanout clearance"
+  (condition "A.NetName == 'USB_DM_RAW' || B.NetName == 'USB_DM_RAW' || A.NetName == 'USB_DP_RAW' || B.NetName == 'USB_DP_RAW'")
+  (constraint clearance (min 0.150000mm)))

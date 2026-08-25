@@ -1,0 +1,73 @@
+"""Reviewed Rev A.1 fixed 5 V to 3.3 V converter slice."""
+
+import ElectricPower
+import Net
+import has_designator
+import has_net_name
+
+from "parts/Diodes_Incorporated_AP63203WU_7/Diodes_Incorporated_AP63203WU_7.ato" import Diodes_Incorporated_AP63203WU_7_package
+from "parts/Coilcraft_XGL4030_472MEC/Coilcraft_XGL4030_472MEC.ato" import Coilcraft_XGL4030_472MEC_package
+from "parts/Samsung_Electro_Mechanics_CL05B104KO5NNNC/Samsung_Electro_Mechanics_CL05B104KO5NNNC.ato" import Samsung_Electro_Mechanics_CL05B104KO5NNNC_package
+from "parts/Samsung_Electro_Mechanics_CL31A226KAHNNNE/Samsung_Electro_Mechanics_CL31A226KAHNNNE.ato" import Samsung_Electro_Mechanics_CL31A226KAHNNNE_package
+
+module PowerBulkCapacitors:
+    usb_5v = new ElectricPower
+    power_3v3 = new ElectricPower
+
+    assert usb_5v.voltage within 4.75V to 5.25V
+    assert power_3v3.voltage within 3.2V to 3.4V
+
+    # Exact named nets are part of the electrical contract. VTREF is absent.
+    gnd = new Net
+    net_3v3 = new Net
+    net_usb_5v = new Net
+    buck_sw = new Net
+    buck_bst = new Net
+
+    trait gnd.part_of has_net_name<name="GND">
+    trait net_3v3.part_of has_net_name<name="3V3">
+    trait net_usb_5v.part_of has_net_name<name="USB_5V">
+    trait buck_sw.part_of has_net_name<name="BUCK_SW">
+    trait buck_bst.part_of has_net_name<name="BUCK_BST">
+
+    gnd.part_of ~ usb_5v.lv
+    gnd.part_of ~ power_3v3.lv
+    net_usb_5v.part_of ~ usb_5v.hv
+    net_3v3.part_of ~ power_3v3.hv
+
+    c2 = new Samsung_Electro_Mechanics_CL31A226KAHNNNE_package
+    c4 = new Samsung_Electro_Mechanics_CL31A226KAHNNNE_package
+    c6 = new Samsung_Electro_Mechanics_CL31A226KAHNNNE_package
+    c7 = new Samsung_Electro_Mechanics_CL31A226KAHNNNE_package
+    c5 = new Samsung_Electro_Mechanics_CL05B104KO5NNNC_package
+    u3 = new Diodes_Incorporated_AP63203WU_7_package
+    l1 = new Coilcraft_XGL4030_472MEC_package
+
+    trait c2 has_designator<designator="C2">
+    trait c4 has_designator<designator="C4">
+    trait c6 has_designator<designator="C6">
+    trait c7 has_designator<designator="C7">
+    trait c5 has_designator<designator="C5">
+    trait u3 has_designator<designator="U3">
+    trait l1 has_designator<designator="L1">
+
+    net_usb_5v.part_of ~ c4.1
+    c4.2 ~ gnd.part_of
+    net_3v3.part_of ~ c2.1
+    c2.2 ~ gnd.part_of
+    net_3v3.part_of ~ c6.1
+    c6.2 ~ gnd.part_of
+    net_3v3.part_of ~ c7.1
+    c7.2 ~ gnd.part_of
+
+    # AP63203WU-7 fixed-output pin contract from the reviewed data sheet.
+    net_usb_5v.part_of ~ u3.VIN
+    net_usb_5v.part_of ~ u3.EN
+    gnd.part_of ~ u3.GND
+    net_3v3.part_of ~ u3.FB
+    buck_sw.part_of ~ u3.SW
+    buck_bst.part_of ~ u3.BST
+    buck_bst.part_of ~ c5.1
+    c5.2 ~ buck_sw.part_of
+    buck_sw.part_of ~ l1.1
+    l1.2 ~ net_3v3.part_of

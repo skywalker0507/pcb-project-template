@@ -1,10 +1,11 @@
 {
   "schema": 1,
-  "authority": "Hardware and firmware interface contract for esp32-s3-remote-flashing-probe Rev A.",
+  "revision": "Rev A.1",
+  "authority": "Hardware and firmware interface contract for esp32-s3-remote-flashing-probe Rev A.1.",
   "controller": {
     "ref": "U1",
     "mpn": "ESP32-S3-WROOM-1-N16R8",
-    "reserved": ["GPIO3", "GPIO45", "GPIO46"],
+    "reserved": ["GPIO3", "GPIO35", "GPIO36", "GPIO37", "GPIO45", "GPIO46"],
     "assignments": {
       "GPIO19": "USB_DM",
       "GPIO20": "USB_DP",
@@ -35,7 +36,7 @@
   },
   "connectors": {
     "J2": {"mpn": "TC2050-IDC-NL", "format": "Tag-Connect 10-pin Plug-of-Nails", "pins": {"1": "VTREF", "2": "SWDIO", "3": "GND", "4": "SWCLK", "5": "GND", "6": "TARGET_TX", "7": "BOOT0", "8": "TARGET_RX", "9": "NRST", "10": "GND"}},
-    "J3": {"format": "2.54 mm 1x8", "pins": {"1": "GND", "2": "VTREF", "3": "SWDIO", "4": "SWCLK", "5": "NRST", "6": "BOOT0", "7": "TARGET_TX", "8": "TARGET_RX"}},
+    "J3": {"mpn": "B8B-XH-A (LF)(SN)", "format": "keyed JST-XH 2.5 mm vertical 1x8", "pins": {"1": "GND", "2": "VTREF", "3": "SWDIO", "4": "SWCLK", "5": "NRST", "6": "BOOT0", "7": "TARGET_TX", "8": "TARGET_RX"}},
     "J4": {"format": "TSW-107-07-L-S", "pins": {"1": "3V3", "2": "GND", "3": "GPIO10", "4": "GPIO11", "5": "GPIO12", "6": "GPIO13", "7": "GPIO14"}}
   }
 }

@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "api_bridge": {
+    "tool": "tools/easyeda-api-skill",
+    "service": "easyeda-bridge",
+    "host": "127.0.0.1",
+    "port_range": [49620, 49629],
+    "required_commit": "11da20daeb4e5d7f7bdedc30920f5cac836d8cb3"
+  },
+  "format_converter": {
+    "product": "JLCEDA Format Converter",
+    "install_root": "C:/Program Files/lceda-pro-format-converter",
+    "required_version": "1.10.1",
+    "adapter": "scripts/convert_easyeda_project.py",
+    "role": "official KiCad to EasyEDA Pro import conversion",
+    "direct_kicad_import_is_not_parity_evidence": true
+  },
+  "kirouting": {
+    "upstream_repository": "https://github.com/easyeda/eext-kirouting-integration.git",
+    "tool": "tools/eext-kirouting-integration",
+    "required_commit": "d682f9f99f018582450e216f75cd19672b09f031",
+    "project_bridge": "scripts/easyeda_kirouting_bridge.py",
+    "host": "127.0.0.1",
+    "port": 8765,
+    "converter_modules": [
+      "easyeda_to_kicad.py",
+      "kicad_diff.py",
+      "coord_transform.py",
+      "layer_mapping.py",
+      "models.py"
+    ]
+  },
+  "routing_contract": {
+    "router_entrypoint": "scripts/krt_flow.py",
+    "router_config": "config/kicad-routing-tools.json",
+    "policy_authority": "build/00-shared/evidence/design-policy/design-policy-resolved.json",
+    "ui_rule_fields_forbidden": [
+      "track_width",
+      "clearance",
+      "via_size",
+      "via_drill",
+      "layers_to_use",
+      "board_edge_clearance",
+      "power_widths",
+      "layer_costs"
+    ],
+    "mvp": {
+      "profile": "outer_low_risk",
+      "maximum_requested_nets": 1,
+      "require_target_nets_without_existing_copper": true,
+      "allow_writeback_operations": ["add_track", "add_via"],
+      "require_candidate_audit": true,
+      "require_board_fingerprint_match": true
+    }
+  }
+}

@@ -1,268 +1,275 @@
 # AI PCB project template
 
-Token-efficient, reproducible atopile-first PCB project template for Codex, with
-EasyEDA Pro as the primary physical backend and KiCad retained as interchange,
-independent validator, and fallback.
-It combines:
+A reproducible, audit-first PCB workflow for Codex. Reviewed atopile source is
+the electrical authority, KiCad is the physical authority and independent
+validator, and KiCadRoutingTools (KRT) creates isolated routing candidates.
 
-- reviewed atopile source as the production electrical authority and immutable
-  release-lane freeze bundles as the only electrical-to-physical handoff;
-- an optional experimental tscircuit/Bun backend for A/B research;
-- an EasyEDA Pro physical-backend contract with deterministic import parity,
-  DRC, and JLC DFM receipt gates (the official bridge/API adapter is pending);
-- the latest `pcb-ai-adapter` branch of the Houtini-LM fork;
-- the project-maintained KiCadRoutingTools `codex/repository-support` checkout
-  behind a guarded adapter;
-- the latest Konnect MCP as the KiCAD-MCP-Server replacement for live,
-  undo-aware KiCad 10 operations;
-- a SHA-verified FreeRouting JAR for bounded headless routing;
-- deterministic DRC, PCB-context, FreeRouting and JLCPCB export scripts;
-- compact stage handoffs that avoid repeatedly loading the whole project.
-
-## Create a project
-
-The workflow has eight stable stages: requirements, parts, electrical,
-electrical freeze, placement, routing, release, and prototype validation. Run
-`python scripts/session_boot.py` once per session for the current stage, gates,
-on-demand files, and next command.
-
-Create a new repository from this GitHub template, clone it, then run:
+The only default production path is:
 
 ```text
-python scripts/init_project.py --project-name my-board --layers 2
+requirements -> electrical -> physical -> routing -> release
 ```
 
-Initialization resets the template handoff to `01-requirements` and points the
-configured board at atopile's `elec/layout/default/default.kicad_pcb` output.
-Use `--preserve-existing` only when intentionally reconfiguring an already-active
-project.
+Electrical freeze is the immutable output of `electrical`, not a separate work
+stage. Part selection is completed during `requirements`. Optional EDA,
+alternate-router, experimental-backend and text-delegation integrations remain
+available through the internal entrypoint registry, but do not enter normal
+session context.
 
-Konnect is configured by default. To omit it, for example while reviewing its
-AGPL/commercial license terms:
+## Start a session
 
-```text
-python scripts/init_project.py --project-name my-board --no-konnect
+Use Python 3.14 throughout this project:
+
+```powershell
+py -3.14 scripts/session_boot.py
 ```
 
-The initializer only writes project-local MCP configuration. It never
-downloads, clones, installs or compiles tools. Install tools manually when the
-network is reliable, then record their local versions and hashes with
-`python scripts/record_toolchain_receipt.py`. API keys are never written to the
-repository.
+The command writes `build/WORKSET.json` and emits one compact navigation
+receipt. Read only the workset by default. Open a path from `read_if_needed`
+only when the active action or a failure requires it. Never load a complete
+`.kicad_pcb`, `.kicad_sch`, DSN or SES into model context.
 
-Before a production atopile build, at minimum record the actual electrical
-compiler identity without requiring the routing toolchain to be installed:
+The Agent-facing command surface is intentionally limited to eight commands:
 
-```text
-python scripts/record_toolchain_receipt.py --electrical-only
+```powershell
+py -3.14 scripts/pcbctl.py status
+py -3.14 scripts/pcbctl.py build
+py -3.14 scripts/pcbctl.py freeze
+py -3.14 scripts/pcbctl.py physical-start
+py -3.14 scripts/pcbctl.py place
+py -3.14 scripts/pcbctl.py route
+py -3.14 scripts/pcbctl.py verify
+py -3.14 scripts/pcbctl.py release
 ```
 
-If a full toolchain receipt already exists, `--electrical-only` refreshes only
-the active electrical backend/compiler fields and preserves the existing KRT,
-FreeRouting, Houtini and Konnect records as explicitly unchecked sections.
+These are thin dispatchers. Common physical and routing operations are grouped
+under stable subcommands, for example `pcbctl.py place score`, `place
+semantics`, `place render`, `place promote`, `route run` and `route escalate`.
+Advanced operations remain in `config/tool-entrypoints.json`; use them only
+when no default subcommand expresses the reviewed operation.
 
-System prerequisites for the production path are Git, Python 3.10+, Java 25,
-KiCad 10, WSL Ubuntu and atopile. Node.js and Bun are required only when running
-the experimental tscircuit backend. The environment check reports missing
-prerequisites and manual remediation steps without changing the machine.
+## Create and configure a project
 
-Konnect replaces the old KiCAD-MCP-Server integration. It is complementary to
-KRT: Konnect's routing tools add explicit trace/via geometry through the live
-KiCad IPC API, while KRT remains the guarded batch-routing candidate generator.
-See `docs/KONNECT_EVALUATION.md` for the boundary and license note.
-
-Restart Codex after initialization. `--tier minimal` is sufficient to begin requirements work; verify the full local toolchain before design work:
-
-```text
-python scripts/check_pcb_environment.py --deep
+```powershell
+py -3.14 scripts/init_project.py --project-name my-board --layers 4
+py -3.14 scripts/check_pcb_environment.py --deep
+py -3.14 scripts/record_toolchain_receipt.py --electrical-only
 ```
 
-`--deep` includes a selected-backend smoke check and KRT capability check. A
-passing router check is not PCB release approval.
+The initializer never installs or downloads tools. The production path expects
+Git, Python 3.14, KiCad 10 and atopile. Konnect is a bounded live-KiCad helper;
+it does not replace KRT and must not author the schematic or approve release.
 
-The template `.ato` entry may be a deliberately non-manufacturing scaffold.
-Replace it with reviewed product sources before creating an electrical freeze,
-opening physical layout work, or creating manufacturing artifacts.
+## Template engine boundary
 
-The authority chain is:
+Reusable policy compilation and manufacturing gates live in the independently
+versioned `template-engine/` Python package. The project owns only reviewed
+inputs, board sources, evidence and artifact paths. `config/template-engine.json`
+pins the engine API, version and source digest; `scripts/` contains thin project
+adapters. The path source can later be replaced by an installed engine package
+without changing the PCB command surface.
 
-```text
-requirements -> atopile -> electrical checks -> immutable ELECTRICAL_FREEZE bundle
-             -> .kicad_pcb interchange -> EasyEDA Pro -> KRT
-             -> final electrical parity + EasyEDA DRC
-             -> independent KiCad validation -> JLC DFM -> release
-```
+Run `py -3.14 scripts/check_template_engine.py` to verify the lock. An engine
+source change fails closed until its version/digest is intentionally reviewed.
 
-`config/backend-architecture.json` keeps electrical backend, physical backend,
-routing engine, validation backend, and manufacturing backend as separate
-roles. KRT is not coupled to the KiCad GUI. Router success never proves release.
-The pending official adapter contract is documented in
-`docs/EASYEDA_BRIDGE_CONTRACT.md`.
+## Authority and gates
 
-Before each new session, run `python scripts/session_boot.py`; its compact
-receipt replaces separately opening `CURRENT.json`, every stage rule,
-acceptance, board-stack, workflow documentation, or long logs. Read its
-`read_if_needed` paths only when the task or a failure requires them.
+- Requirements and reviewed `.ato` files define electrical intent.
+- Physical work starts only from an immutable passing electrical freeze.
+- Any connectivity, identity, part, footprint or net-name change returns to
+  atopile and creates a new freeze.
+- Physical-start compares critical embedded footprints and rule areas with the
+  reviewed project libraries before placement begins.
+- Numeric fabrication, clearance, width and impedance values require reviewed
+  evidence; the Agent may not invent them.
+- Router success is candidate evidence, never release approval.
+- Release requires exact-board DRC, connectivity, final electrical parity,
+  visual review, DFM, package checks and the compiled manufacturing registry.
+- A PCBA release requires DFM evidence recorded with the reviewed finish and
+  solder-mask color, with both PCB DFM and SMT DFM executed and passing.
+- `pcbctl release prepare-dfm` therefore creates an isolated, non-release
+  Gerber + JLC BOM + JLC CPL candidate bound to one audited board SHA. This
+  breaks the SMT-DFM dependency cycle without weakening final export gates.
+- Release also compares reviewed critical embedded footprints with their pinned
+  libraries; missing rule areas require explicit board-level compensation.
+- Under-component holes whose Excellon class does not itself prove plugging or
+  filling require a manufacturer/CAM confirmation before export.
 
-The common Agent-facing command surface has six commands and only dispatches to
-the existing guarded scripts:
-
-```text
-python scripts/pcbctl.py status
-python scripts/pcbctl.py build [build_electrical arguments]
-python scripts/pcbctl.py freeze [create_electrical_freeze arguments]
-python scripts/pcbctl.py route [krt_flow arguments]
-python scripts/pcbctl.py verify [run_pcb_pipeline arguments]
-python scripts/pcbctl.py release [run_pcb_pipeline arguments]
-```
-
-Use specialized scripts directly when detailed arguments are needed. Before
-adding automation, inspect `config/tool-entrypoints.json` or run
-`find_existing_script.py <task-keywords>`. Never start FreeRouting directly;
-reuse its reviewed headless wrapper.
-
-Use `select_manufacturing_profile.py --manufacturer <name> --source
-<URL-or-card>` to record a reviewed process source before manufacturing export;
-the command does not invent fabrication values.
-
-Selecting a source does not authorize real routing. After reviewing it, record explicit values and evidence with `apply_reviewed_fab_values.py`; only then can a non-dry-run KRT attempt proceed.
-
-Before physical placement, routing, or release, compile the shared executable policy:
+Compile the shared reviewed policy before physical work when its inputs change:
 
 ```powershell
 py -3.14 scripts/compile_design_policy.py
-py -3.14 scripts/pcbctl.py status
 ```
 
-The receipt at `build/00-shared/evidence/design-policy/design-policy-resolved.json` records semantic hashes of requirements,
-layer stack, manufacturing evidence, KRT policy, and acceptance rules. Changing
-electrical constraints invalidates it; changing only a log/output directory does
-not. A release additionally needs a SHA-bound
-physical review created by `record_physical_review.py`; `release_pass` alone is
-not sufficient.
+This also emits `manufacturing-registry.json`. Its Gerber layer-presence and
+geometry rules come from `config/manufacturing-rules.json`; special-process
+rules come from `config/manufacturing-profile.json`. All are bound to the same
+design-policy SHA and are evaluated in `validate`, `pre_export` and `gerber`
+phases. Engine code contains no component-specific manufacturing branches.
+The external-DFM phase also rejects reports whose order parameters or executed
+analysis modules differ from the reviewed order profile.
 
-`apply_reviewed_fab_values.py` records canonical KRT names (`via_size`, not
-`via_diameter`). Compilation emits KRT, DFM and KiCad-rule artifacts under
-`build/`. Before a real KRT run on current KRT versions, explicitly synchronize
-the reviewed Default netclass using `apply_kicad_rules.py --board <board>`;
-the command is stage guarded and writes a receipt.
+## Efficient physical workflow
 
-Before a JLCPCB assembly export, complete `config/jlcpcb-parts.json`. The file is
-bound to the board SHA and maps every SMD position to a reviewed board value,
-footprint, MPN and LCSC number; unlisted, duplicate, stale or mismatched refs
-make the export fail. Stock notes are time-sensitive procurement evidence, not
-permission to silently substitute a part.
+Validation has three tiers, defined in `config/validation-tiers.json`:
 
-After an intentional JLCPCB export, use the package-audit path printed by
-`run_pcb_pipeline.py --export`. It is not release approval. Only after that
-receipt and the matching audit have passed, create a non-overwriting evidence
-snapshot with `create_release_snapshot.py --package <export-dir>
---package-check <package-audit> --review-asset <top.png> --review-asset
-<bottom.png>`. The snapshot retains the exact assembly-parts source and cited
-copper renders alongside hash-manifested release evidence.
+- `quick`: isolated candidate integrity, DRC delta and connectivity. Render one
+  cropped copper image only for critical, awkward or uncertain edits.
+- `checkpoint`: full DRC/connectivity after a functional block. If footprints
+  moved, rerun placement semantics and relative routability comparison. Review
+  whole-board front/back copper, without 3D.
+- `release`: full pipeline, exact-board placement semantics, four-view visual
+  review, parity and manufacturing gates.
 
-`config/requirements.json` is the structured requirements record; validate it
-with `python scripts/validate_requirements.py` before electrical capture.
+Before the full release tier, run `pcbctl.py verify readiness --board <adopted
+board>`. It aggregates cached DRC, parity, physical review, DFM and special
+process status in one compact receipt. `pcbctl.py release` fails immediately if
+that receipt is missing, stale or blocked, avoiding repeated partial pipelines.
+Current exact-board evidence is selected through `build/07-release/INPUTS.json`;
+the index records failed receipts too and never implies approval.
+When no `--board` is supplied, release resolves the hash-checked artifact in
+`build/06-routing/CURRENT.json`; it never falls back to a mutable working board.
 
-Manufacturing exports are SHA-bound to passing EasyEDA import parity, final
-electrical parity against the frozen manifest, EasyEDA DRC, JLC DFM,
-independent KiCad release audit, and physical-review receipts.
-Use `run_pcb_pipeline.py --export`; invoking the export script directly also
-requires the matching consolidated manufacturing-gate receipt and cannot
-bypass DRC/DFM approval.
+`pcbctl.py verify prepare-review` creates the exact DRC report/audit, bounded
+footprint equivalence, placement semantics and four-view bundle in one run. It
+also emits an intentionally incomplete assessment template. After a reviewer
+inspects all four views and saves a separate assessment, `verify finalize-review`
+validates that assessment and binds the visual, exact DRC and physical-review
+receipts. The generated template itself is rejected as approval.
 
-After `python scripts/pcbctl.py build`, independently inspect the new candidate
-using the receipt path printed by the build:
+Manufacturing/CAM confirmations use `pcbctl.py release confirm-process` with an
+allowlisted outcome and a real evidence file. The command records hashes,
+updates the reviewed manufacturing profile atomically and recompiles policy;
+it cannot substitute for PCB/SMT DFM.
 
-```text
-python scripts/review_electrical_candidate.py --receipt build/03-electrical/evidence/<run-id>/electrical-build.json --output build/03-electrical/evidence/<review-run-id>
+Do not run placement semantics when footprints did not move. Do not run the
+full pipeline or render four views after each trace.
+
+Placement is judged by function before appearance. `placement-semantics.json`
+protects decoupling, switch-mode power loops, connector-side ESD,
+receiver-side termination, antenna keepouts and connector access.
+Switch-mode input capacitors are judged as a complete VIN/GND current loop,
+including plane-entry vias, not by one short pad distance.
+`placement-routability.json` adds relative weighted airwire length, MST length,
+crossings and critical-group comparison:
+
+```powershell
+py -3.14 scripts/check_kicad_placement_routability.py `
+  --baseline <old.kicad_pcb> --board <candidate.kicad_pcb> `
+  --require-improvement --output <receipt.json>
 ```
 
-This review intentionally fails on any KiCad DRC violation or unconnected item,
-renders the candidate, and never makes it manufacturing-ready.
+This metric is a placement screen, not proof of routability. Before committing
+the floorplan, trial-route the critical USB, power and ground-return groups.
 
-Create the compact schema-2 electrical manifest, validate it, and promote the
-reviewed candidate into an immutable freeze bundle:
+Route critical/high-risk paths first. Batch several related low-risk nets into
+one KRT candidate and audit once per functional block. A route family is bound
+to its placement, obstacle-copper fingerprint, nets, profile and allowed layers.
+The routing task classifier sends short, unrouted two-pad connections to a
+bounded explicit trace plan and reserves KRT for actual search or useful net
+batches. Reviewed functional ordering is enforced; for example, connector
+configuration and data fanout must not be deferred until after a power trunk
+occupies the same escape corridor. Explicit trace plans reject approximate
+existing-copper conflicts before creating a candidate, but KiCad DRC remains
+the exact acceptance check.
 
-```text
-python scripts/extract_kicad_parity_manifest.py --board <candidate.kicad_pcb> --output <candidate-manifest.json>
-python scripts/validate_electrical_contract.py --receipt <electrical-build.json> --manifest <candidate-manifest.json> --output <contract.json>
-python scripts/create_electrical_freeze.py --build-receipt <electrical-build.json> --contract-receipt <contract.json> --candidate-review <candidate-review.json> --freeze-id <freeze-id>
+Long KRT runs use a persistent checkpoint instead of keeping an Agent call open:
+
+```powershell
+py -3.14 scripts/pcbctl.py route start --run-id <id> <route arguments>
+py -3.14 scripts/pcbctl.py route status --run-id <id>
+py -3.14 scripts/pcbctl.py route finalize --run-id <id>
 ```
 
-Then set `manufacturing.gate_receipts.electrical_freeze` in
-`config/pcb-flow.json` to that bundle's immutable receipt. Never point it back
-to an electrical tmp candidate.
+`status` only observes the existing process. `finalize` reads its compact
+receipt and never launches or revalidates the route a second time.
 
-## Audited routing candidates
+Use KRT `--dry-run` as the routing work packet. It returns classification,
+batch advice, route-area health and stopping conditions without artifacts.
+After three consecutive rejected candidates in one route area, diagnose the
+routing hypothesis before another attempt; this does not authorize placement.
 
-Routing work must stay isolated until it has both a before/after DRC comparison
-and an explicit review decision. After a candidate passes
-`krt_candidate_audit.py`, bind it to a SHA-checked receipt instead of changing
-the active board path:
+Only no-path or incomplete-connectivity results count as structural failures.
+Two such failures trigger a routing/corridor escalation, not an automatic
+placement change. Footprints may move only after two distinct strategies fail
+and the proposed placement improves routability, passes semantics and passes
+critical route probes.
 
-```text
-python scripts/record_routing_candidate.py --candidate <candidate.kicad_pcb> --audit <candidate-audit.json> --output <candidate-receipt.json> --scope "short reviewed scope"
+Every real KRT attempt therefore names a stable physical block and structural
+strategy, for example `--route-area usb_input --strategy-class fcu-only`.
+Changing the routed net subset does not create a new area, and numeric tuning
+alone does not count as a distinct strategy. When two independent strategies fail structurally, create the mandatory
+receipt before returning to physical work:
+
+```powershell
+py -3.14 scripts/assess_routing_escalation.py `
+  --scope usb_input --report <attempt-a-krt-report.json> `
+  --report <attempt-b-krt-report.json> --output <escalation.json>
 ```
 
-Use that same board and receipt when creating the routing-stage handoff:
+The receipt may make placement review eligible, but always records
+`placement_change_authorized=false`. A routing-to-physical handoff requires
+that receipt. Promotion of the resulting candidate additionally requires an
+unchanged board outline, an improved routability comparison and passing probe
+reports for every group in `placement-routability.json`.
 
-```text
-python scripts/create_stage_handoff.py --stage routing --status in_progress --objective "..." --board <candidate.kicad_pcb> --candidate-receipt <candidate-receipt.json> --skip-pipeline
+`--route-bbox-mm X0 Y0 X1 Y1` may bind obstacle identity to an explicitly
+reviewed local corridor. If omitted, the whole-board copper fingerprint is used
+conservatively; the template never guesses a local box.
+
+## Visual review
+
+For a bounded local copper edit:
+
+```powershell
+py -3.14 scripts/render_kicad_visual_bundle.py --board <board> `
+  --tier local --trigger critical_net_changed --layer F.Cu `
+  --bbox-mm <x0> <y0> <x1> <y1>
 ```
 
-A `complete` handoff must be backed by a passing pipeline or one or more
-`--completion-receipt` files; `--skip-pipeline` alone cannot claim completion.
+The local assessment is only `accept`, `awkward` or `unsafe`. Checkpoint views
+use `--tier checkpoint`; release uses `--tier release`. Visual judgment is
+complementary evidence and never overrides DRC, connectivity, return-path or
+manufacturing gates.
 
-The receipt verifies the candidate path and SHA against a zero-new-DRC audit.
-It deliberately cannot promote copper, satisfy physical review, authorize an
-export, or act as release evidence. This keeps candidate provenance available
-to an AI without silently changing the configured release board.
+## Artifacts and retention
 
-When two or more rejected candidates for the same routing area encounter
-structural placement constraints (board edge, courtyard, NPTH, or hole
-clearance), record the escalation and return to physical placement rather than
-trying more coordinate variations:
+Each internal artifact stage has `tmp`, `evidence` and `release` lanes. Large
+logs and candidate boards belong in `tmp`; compact decisions and hashes belong
+in `evidence`; immutable passing outputs belong in `release`. Start discovery
+at `build/STAGE_RESULTS.json`, then follow the selected stage's `CURRENT.json`;
+an accepted board must never be referenced only from `tmp`.
 
-```text
-python scripts/assess_routing_escalation.py --audit <rejected-audit-1.json> --audit <rejected-audit-2.json> --scope "J2 escape" --output <escalation.json>
+```powershell
+py -3.14 scripts/artifact_store.py inventory
+py -3.14 scripts/artifact_store.py prune
+py -3.14 scripts/artifact_store.py checkpoint-prune
 ```
 
-## Project layout
+Both prune commands are previews unless `--apply` is explicitly supplied.
+Applied pruning creates and verifies a recoverable zip before removing the
+selected run directories, and never archives a release or active reference.
 
-- `src/` and `ato.yaml`: production atopile electrical design authority;
-- `tscircuit/`: optional experimental electrical backend and locked native toolchain;
-- `elec/layout/`: KiCad interchange/reference boards, not a second electrical authority;
-- `config/physical-backend.json`: EasyEDA-primary and KiCad-fallback physical contract;
-- `config/backend-architecture.json`: explicit electrical/physical/routing/validation/manufacturing role separation;
-- `config/`: reviewed project and tool policy;
-- `scripts/`: deterministic project-local workflow;
-- `experiments/`: disposable candidate boards and A/B trials;
-- `handoff/stages/`: compact cross-session stage state;
-- `manufacturing/`: intentional release exports;
-- `build/00-shared/`: compact toolchain and compiled-policy receipts shared by stages;
-- `build/01-requirements/` through `build/08-prototype/`: stage artifacts;
-- each stage has `tmp/<run-id>`, `evidence/<run-id>`, and `release/<release-id>` lanes;
-- `build/00-legacy/*.zip`: verified, recoverable archives from the former flat layout.
+## Optional capabilities
 
-`tmp` may be deleted after its retention period. `evidence` contains compact,
-independently checkable receipts. `release` is populated only after its gate
-passes; the full immutable manufacturing snapshot remains under
-`manufacturing/releases/`. Use `python scripts/artifact_store.py inventory` to
-inspect the store and `archive-legacy` without `--apply` to preview a migration.
-Use `python scripts/artifact_store.py prune` to preview disposable runs older
-than the configured retention window; add `--apply` only after reviewing the
-list. Pruning creates and verifies a recoverable zip before removing old `tmp`
-runs and never touches `evidence` or `release`.
+EasyEDA Pro remains useful for explicit compatibility/JLC review. FreeRouting
+remains an alternate leftover-net experiment. Experimental electrical backends
+and Houtini text classification also remain available. They are not part of
+the default stage capabilities, are never electrical or physical authorities,
+and cannot relax release gates.
 
-Stages do not duplicate `src/` or `elec/layout/`.
+Key paths:
 
-## Latest-version policy
-
-Repositories and latest channels are declared in `config/toolchain-policy.json`.
-After manually installing or upgrading a tool, record the actual versions,
-commits and hashes in ignored `build/00-shared/evidence/toolchain/toolchain-resolved.json` with
-`record_toolchain_receipt.py`, then rerun the deep environment check before PCB
-work.
-
-See `docs/AI_PCB_WORKFLOW.md` for the normal design and release sequence.
+- `src/`, `ato.yaml`: electrical authority;
+- `elec/layout/`: authoritative KiCad physical boards after freeze;
+- `config/`: reviewed policies and selected evidence;
+- `scripts/`: deterministic guarded operations;
+- `template-engine/`: independently versioned project-neutral engine package;
+- `config/template-engine.json`: project-to-engine version and source lock;
+- `config/manufacturing-rules.json`: reviewed project Gerber rule source;
+- `handoff/stages/CURRENT_STAGE.json`: stage state;
+- `build/WORKSET.json`: compact current-session context;
+- `build/STAGE_RESULTS.json`: one compact index of accepted stage outputs;
+- `build/<stage>/CURRENT.json`: pointer to that stage's adopted immutable artifact;
+- `build/*/{tmp,evidence,release}`: artifact lanes;
+- `manufacturing/`: intentional release exports.

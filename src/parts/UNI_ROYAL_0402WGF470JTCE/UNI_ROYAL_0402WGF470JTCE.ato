@@ -1,0 +1,19 @@
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component UNI_ROYAL_0402WGF470JTCE_package:
+    """47Ω (47R0) ±1%"""
+
+    # This trait marks this file as auto-generated
+    # If you want to manually change it, remove the trait
+    trait is_auto_generated<system="ato_part", source="easyeda:C25118", date="2026-08-11T06:27:03.432999+00:00", checksum="c88bde25c3305b6eb48980add58349ca957ab292d065f2f5ff39e34a3f247ed4">
+
+    trait is_atomic_part<manufacturer="UNI-ROYAL", partnumber="0402WGF470JTCE", footprint="R0402.kicad_mod", symbol="0402WGF470JTCE.kicad_sym">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C25118", manufacturer="UNI-ROYAL", partno="0402WGF470JTCE">
+    trait has_designator_prefix<prefix="R">
+
+    # pins
+    pin 2
+    pin 1

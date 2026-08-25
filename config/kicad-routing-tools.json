@@ -4,7 +4,7 @@
     "repository": "tools/KiCadRoutingTools",
     "python": ".venv-routingtools/Scripts/python.exe",
     "router_script": "py_router/route.py",
-    "commit": "8ae15c6dc2ac13581952c6c5cb138c7c4ae0d7e6"
+    "commit": "dc3f2f01d1793c3e925ab33855f9f891743fe064"
   },
   "kicad_cli": "C:/Program Files/KiCad/10.0/bin/kicad-cli.exe",
   "board_stack": "config/board-stack.json",
@@ -15,6 +15,7 @@
     "require_project_rules": true
   },
   "manufacturing_profile": "config/manufacturing-profile.json",
+  "routing_planner": "config/routing-planner.json",
   "guardrails": {
     "forbidden_signal_layers": [
       "In1.Cu",
@@ -58,6 +59,41 @@
         "extra_args": []
       }
     },
+    "outer_low_risk_fcu": {
+      "allow_layer_subset": true,
+      "require_explicit_include": true,
+      "include_nets": [],
+      "exclude_nets": [
+        "*GND*",
+        "*gnd*",
+        "*VCC*",
+        "*vcc*",
+        "*VDD*",
+        "*vdd*",
+        "USB*",
+        "usb*",
+        "*CLK*",
+        "*clk*"
+      ],
+      "routing": {
+        "layers": [
+          "F.Cu"
+        ],
+        "layer_costs": [
+          1.0
+        ],
+        "track_width": null,
+        "clearance": null,
+        "via_size": null,
+        "via_drill": null,
+        "grid_step": 0.1,
+        "max_ripup": 3,
+        "hole_to_hole_clearance": null,
+        "board_edge_clearance": null,
+        "fab_overrides": null,
+        "extra_args": ["--no-stub-layer-swap"]
+      }
+    },
     "outer_control_clock": {
       "require_explicit_include": true,
       "include_nets": [],
@@ -92,7 +128,113 @@
         "extra_args": []
       }
     },
+    "outer_control_clock_fcu": {
+      "allow_layer_subset": true,
+      "require_explicit_include": true,
+      "include_nets": [],
+      "exclude_nets": [
+        "*GND*",
+        "*gnd*",
+        "*VCC*",
+        "*vcc*",
+        "*VDD*",
+        "*vdd*",
+        "USB*",
+        "usb*"
+      ],
+      "routing": {
+        "layers": [
+          "F.Cu"
+        ],
+        "layer_costs": [
+          1.0
+        ],
+        "track_width": null,
+        "clearance": null,
+        "via_size": null,
+        "via_drill": null,
+        "grid_step": 0.1,
+        "max_ripup": 3,
+        "hole_to_hole_clearance": null,
+        "board_edge_clearance": null,
+        "fab_overrides": null,
+        "extra_args": ["--no-stub-layer-swap"]
+      },
+      "strategy_evidence": {
+        "kind": "continuous_front_copper_control_clock",
+        "constraint": "F.Cu only under native project netclasses; preserve uninterrupted In1 GND reference and reject if no bounded path exists"
+      }
+    },
+    "outer_control_clock_bcu_preferred": {
+      "allow_layer_subset": true,
+      "require_explicit_include": true,
+      "include_nets": [],
+      "exclude_nets": [
+        "*GND*", "*gnd*", "*VCC*", "*vcc*", "*VDD*", "*vdd*",
+        "USB*", "usb*"
+      ],
+      "routing": {
+        "layers": ["B.Cu", "F.Cu"],
+        "layer_costs": [1.0, 3.0],
+        "track_width": null,
+        "clearance": null,
+        "via_size": null,
+        "via_drill": null,
+        "grid_step": 0.1,
+        "max_ripup": 3,
+        "hole_to_hole_clearance": null,
+        "board_edge_clearance": null,
+        "fab_overrides": null,
+        "extra_args": []
+      },
+      "strategy_evidence": {
+        "kind": "back_copper_primary_control_trunk",
+        "constraint": "Use B.Cu as the primary long-distance control corridor and F.Cu only for bounded endpoint escape; reject a perimeter detour even if connectivity passes"
+      }
+    },
+    "outer_ordered_bundle": {
+      "require_explicit_include": true,
+      "include_nets": [],
+      "exclude_nets": [
+        "*GND*",
+        "*gnd*",
+        "*VCC*",
+        "*vcc*",
+        "*VDD*",
+        "*vdd*",
+        "USB*",
+        "usb*",
+        "*CLK*",
+        "*clk*"
+      ],
+      "routing": {
+        "layers": ["F.Cu", "B.Cu"],
+        "layer_costs": [1.0, 3.0],
+        "track_width": null,
+        "clearance": null,
+        "via_size": null,
+        "via_drill": null,
+        "grid_step": 0.1,
+        "max_ripup": 0,
+        "hole_to_hole_clearance": null,
+        "board_edge_clearance": null,
+        "fab_overrides": null,
+        "extra_args": [
+          "--ordering", "bus", "--bus", "--bus-min-nets", "5",
+          "--bus-detection-radius", "12"
+        ]
+      },
+      "strategy_evidence": {
+        "kind": "ordered_parallel_endpoint_bundle",
+        "net_count": 5,
+        "maximum_endpoint_span_mm": 10.16,
+        "source": "J4 GPIO10-GPIO14 pad geometry from the SHA-bound routing candidate"
+      }
+    },
     "outer_power": {
+      "evidence_bound_fields": [
+        "track_width"
+      ],
       "require_explicit_include": true,
       "include_nets": [],
       "exclude_nets": [
@@ -122,6 +264,484 @@
         "board_edge_clearance": null,
         "fab_overrides": null,
         "extra_args": []
+      },
+      "strategy_evidence": {
+        "kind": "reviewed_outer_power_width",
+        "track_width_mm": 1.27,
+        "sources": [
+          "HARDWARE_SPEC.md section 5 requires appropriate power widths and forbids generic autorouting for the AP63203 switching block",
+          "Existing reviewed outer_power profile value",
+          "U3 pin 5 and L1 pad 1 geometry in the frozen physical board"
+        ]
+      }
+    },
+    "outer_power_fcu": {
+      "allow_layer_subset": true,
+      "evidence_bound_fields": [
+        "track_width"
+      ],
+      "require_explicit_include": true,
+      "include_nets": [],
+      "exclude_nets": [
+        "*GND*",
+        "*gnd*",
+        "USB*",
+        "usb*",
+        "*CLK*",
+        "*clk*"
+      ],
+      "routing": {
+        "layers": [
+          "F.Cu"
+        ],
+        "layer_costs": [
+          1.0
+        ],
+        "track_width": 1.27,
+        "clearance": null,
+        "via_size": null,
+        "via_drill": null,
+        "grid_step": 0.1,
+        "max_ripup": 0,
+        "hole_to_hole_clearance": null,
+        "board_edge_clearance": null,
+        "fab_overrides": null,
+        "extra_args": ["--no-stub-layer-swap"]
+      },
+      "strategy_evidence": {
+        "kind": "reviewed_top_layer_switching_power_width",
+        "track_width_mm": 1.27,
+        "source": "HARDWARE_SPEC.md section 5 requires a compact AP63203 switching loop with small SW copper and forbids generic autorouting for this block"
+      }
+    },
+    "buck_sw_fcu_neckdown": {
+      "manufacturing_evidence": "config/manufacturing-profile.json",
+      "routing": {
+        "layers": ["F.Cu"],
+        "track_width": 1.27,
+        "clearance": 0.2,
+        "via_size": 0.45,
+        "via_drill": 0.2
+      },
+      "strategy_evidence": {
+        "kind": "pad_escape_neckdown",
+        "net": "BUCK_SW",
+        "neckdown_width_source": "config/manufacturing-profile.json reviewed default track width",
+        "power_width_source": "reviewed outer_power_fcu track width",
+        "constraint": "F.Cu only, no vias, narrow only until clear of adjacent U3 pad 4"
+      }
+    },
+      "buck_power_local": {
+      "manufacturing_evidence": "config/manufacturing-profile.json",
+      "routing": {
+        "layers": ["F.Cu"],
+        "track_width": 1.27,
+        "clearance": 0.2,
+        "via_size": 0.45,
+        "via_drill": 0.2
+      },
+      "strategy_evidence": {
+        "kind": "local_buck_input_output_and_ground",
+        "nets": ["3V3", "USB_5V", "GND"],
+        "neckdown_width_source": "config/manufacturing-profile.json reviewed default track width",
+        "power_width_source": "reviewed outer_power_fcu track width",
+        "constraint": "F.Cu segments only; vias are GND-only; independent DRC and semantic review remain mandatory"
+        }
+      },
+      "buck_smt_clearance_rework": {
+        "manufacturing_evidence": "config/manufacturing-profile.json",
+        "routing": {
+          "layers": ["F.Cu", "B.Cu"],
+          "track_width": 1.27,
+          "clearance": 0.2,
+          "via_size": 0.45,
+          "via_drill": 0.2
+        },
+        "strategy_evidence": {
+          "kind": "bounded_smt_clearance_rework",
+          "nets": ["3V3", "GND", "BUCK_SW", "BUCK_BST"],
+          "constraint": "Only exact local segment/via replacement after a reviewed Buck placement correction; independent DRC and semantics remain mandatory"
+        }
+      },
+    "buck_feedback_sense": {
+      "manufacturing_evidence": "config/manufacturing-profile.json",
+      "routing": {
+        "layers": ["F.Cu", "B.Cu"],
+        "track_width": 0.2,
+        "clearance": 0.2,
+        "via_size": 0.45,
+        "via_drill": 0.2
+      },
+      "strategy_evidence": {
+        "kind": "buck_post_inductor_feedback_sense",
+        "net": "3V3",
+        "constraint": "Route U3 FB separately from the quiet post-inductor output/capacitor node; use only short F.Cu endpoint escapes, keep any B.Cu sense segment referenced by explicit GND vias, stay away from BUCK_SW, and do not use it as the load-current trunk"
+      }
+    },
+    "3v3_local_escape": {
+      "manufacturing_evidence": "config/manufacturing-profile.json",
+      "routing": {
+        "layers": ["F.Cu"],
+        "track_width": 0.2,
+        "clearance": 0.2,
+        "via_size": 0.45,
+        "via_drill": 0.2
+      },
+      "strategy_evidence": {
+        "kind": "local_3v3_endpoint_escape",
+        "net": "3V3",
+        "constraint": "Use only short F.Cu connections among a supply pin, its local decoupling capacitor and nearby pull-ups; join each cluster to the reviewed wide trunk separately"
+      }
+    },
+    "3v3_low_current_branch": {
+      "manufacturing_evidence": "config/manufacturing-profile.json",
+      "routing": {
+        "layers": ["F.Cu"],
+        "track_width": 0.2,
+        "clearance": 0.2,
+        "via_size": 0.45,
+        "via_drill": 0.2
+      },
+      "strategy_evidence": {
+        "kind": "reviewed_low_current_3v3_branch",
+        "net": "3V3",
+        "load_scope": ["J4 expansion supply", "power/status LED bias", "logic pull-ups"],
+        "source": "HARDWARE_SPEC.md limits J4 external 3V3 load to 25 mA total and identifies the remaining consumers as LED bias or logic pull-ups",
+        "constraint": "F.Cu only with reviewed manufacturing-default width; do not use for ESP32 module supply or the Buck load-current trunk"
+      }
+    },
+    "3v3_low_current_layer_transition": {
+      "manufacturing_evidence": "config/manufacturing-profile.json",
+      "routing": {
+        "layers": ["F.Cu", "B.Cu"],
+        "track_width": 0.2,
+        "clearance": 0.2,
+        "via_size": 0.45,
+        "via_drill": 0.2
+      },
+      "strategy_evidence": {
+        "kind": "reviewed_low_current_3v3_single_transition",
+        "net": "3V3",
+        "load_scope": ["power/status LED bias", "logic pull-ups", "reviewed low-power logic supply islands"],
+        "source": "HARDWARE_SPEC.md and config/power-component-review.json reserve 0.025 A for J4 plus remaining low-power loads; geometry reuses the reviewed manufacturing-default trace and through-via dimensions",
+        "constraint": "Use one short F.Cu pad or local-decoupling escape, at most one 3V3 through-via transition, and a direct tap to the reviewed B.Cu 3V3 trunk; never use for ESP32 supply, J4 external power or Buck load current"
+      }
+    },
+    "3v3_main_trunk": {
+      "manufacturing_evidence": "config/manufacturing-profile.json",
+      "evidence_bound_fields": ["track_width"],
+      "routing": {
+        "layers": ["F.Cu", "B.Cu"],
+        "layer_costs": [1.0, 3.0],
+        "track_width": 1.27,
+        "clearance": 0.2,
+        "via_size": 0.45,
+        "via_drill": 0.2
+      },
+      "strategy_evidence": {
+        "kind": "reviewed_3v3_load_current_trunk",
+        "net": "3V3",
+        "neckdown_width_source": "config/manufacturing-profile.json reviewed default track width",
+        "power_width_source": "reviewed outer_power profile track width",
+        "constraint": "Connect the Buck post-inductor output directly to the ESP32 bulk/local supply island on F.Cu/B.Cu; use a short 0.20 mm F.Cu neckdown only at the ESP32 supply pad and restore the reviewed 1.27 mm width outside the endpoint escape; B.Cu use requires explicit nearby GND return vias; do not enter the antenna keepout or Buck feedback corridor and do not use low-current UI or pull-up branches as series feed paths"
+      }
+    },
+    "usb_5v_distribution": {
+      "manufacturing_evidence": "config/manufacturing-profile.json",
+      "routing": {
+        "layers": ["F.Cu", "B.Cu"],
+        "track_width": 1.27,
+        "clearance": 0.2,
+        "via_size": 0.45,
+        "via_drill": 0.2
+      },
+      "strategy_evidence": {
+        "kind": "protected_usb_power_distribution",
+        "net": "USB_5V",
+        "neckdown_width_source": "config/manufacturing-profile.json reviewed default track width",
+        "power_width_source": "reviewed outer_power profile track width",
+        "constraint": "Explicit USB_5V only; use short 0.20 mm F.Cu neckdowns only at fine-pitch U3 pins 2/3, restore the reviewed 1.27 mm power width outside the pad escape, and require nearby GND return vias for every B.Cu transition plus independent DRC"
+      }
+    },
+    "usb_vbus_raw_escape": {
+      "manufacturing_evidence": "config/manufacturing-profile.json",
+      "routing": {
+        "layers": ["F.Cu", "B.Cu"],
+        "track_width": 1.27,
+        "clearance": 0.2,
+        "via_size": 0.45,
+        "via_drill": 0.2
+      },
+      "strategy_evidence": {
+        "kind": "usb_c_vbus_fine_pitch_escape",
+        "net": "USB_VBUS_RAW",
+        "neckdown_width_source": "reviewed manufacturing default track width",
+        "power_width_source": "reviewed outer_power profile track width",
+        "constraint": "Separate both USB-C VBUS pad groups with short F.Cu neckdowns, merge only after layer transition, and independently audit the protected wide trunk to F1"
+      }
+    },
+    "usb_vbus_sense_dp_reroute": {
+      "manufacturing_evidence": "config/manufacturing-profile.json",
+      "routing": {
+        "layers": ["F.Cu", "B.Cu"],
+        "track_width": 0.2,
+        "clearance": 0.2,
+        "via_size": 0.45,
+        "via_drill": 0.2
+      },
+      "strategy_evidence": {
+        "kind": "usb_esd_supply_escape_with_local_dp_reroute",
+        "nets": ["USB_VBUS_RAW", "USB_DP_RAW"],
+        "constraint": "Remove only the local USB_DP_RAW blocker, preserve USB_DM_RAW and CC routing, then give U2 VBUS a direct escape before restoring DP continuity"
+      }
+    },
+    "usb_shield_bond": {
+      "manufacturing_evidence": "config/manufacturing-profile.json",
+      "evidence_bound_fields": ["track_width"],
+      "routing": {
+        "layers": ["F.Cu", "B.Cu"],
+        "track_width": 1.27,
+        "clearance": 0.2,
+        "via_size": 0.45,
+        "via_drill": 0.2
+      },
+      "strategy_evidence": {
+        "kind": "usb_connector_shield_single_point_bond",
+        "net": "USB_SHIELD",
+        "neckdown_width_source": "config/manufacturing-profile.json reviewed default track width",
+        "strap_width_source": "reviewed outer_power wide-copper width reused without an impedance claim",
+        "source": "HARDWARE_SPEC.md requires J1 shield to connect through replaceable 0-ohm R6 to GND",
+        "constraint": "Connect all J1 shell pads as a local loop-free outer-layer tree, use at most one USB_SHIELD transition for the short R6 neckdown, and do not add any direct USB_SHIELD-to-GND copper that bypasses R6"
+      }
+    },
+    "usb_device_diff_fcu": {
+      "engine": "differential",
+      "impedance_evidence": "config/jlcpcb-impedance-evidence.json",
+      "manufacturing_evidence": "config/manufacturing-profile.json",
+      "evidence_bound_fields": [
+        "track_width",
+        "diff_pair_gap"
+      ],
+      "require_explicit_include": true,
+      "include_nets": [],
+      "exclude_nets": [
+        "*GND*",
+        "*gnd*"
+      ],
+      "routing": {
+        "layers": [
+          "F.Cu"
+        ],
+        "layer_costs": [
+          1.0
+        ],
+        "track_width": 0.290576,
+        "clearance": 0.2,
+        "diff_pair_gap": 0.2032,
+        "via_size": 0.45,
+        "via_drill": 0.2,
+        "grid_step": 0.1,
+        "max_ripup": 3,
+        "hole_to_hole_clearance": null,
+        "board_edge_clearance": null,
+        "diff_pair_intra_match": true,
+        "no_gnd_vias": true,
+        "fab_overrides": null,
+        "extra_args": ["--no-stub-layer-swap"]
+      },
+      "strategy_evidence": {
+        "kind": "protected_usb_pair_with_endpoint_neckdown",
+        "neckdown_width_source": "config/manufacturing-profile.json reviewed default track width",
+        "corridor_geometry_source": "config/jlcpcb-impedance-evidence.json",
+        "constraint": "Short 0.20 mm F.Cu endpoint escapes only; restore the reviewed differential width and gap outside the fine-pitch endpoint region; no layer changes after U2"
+      }
+    },
+    "usb_connector_esd_fanout": {
+      "engine": "single",
+      "geometry_role": "usb_connector_esd_fanout",
+      "manufacturing_evidence": "config/manufacturing-profile.json",
+      "evidence_bound_fields": [],
+      "require_explicit_include": true,
+      "include_nets": [],
+      "exclude_nets": [
+        "*GND*",
+        "*gnd*"
+      ],
+      "routing": {
+        "layers": [
+          "F.Cu",
+          "B.Cu"
+        ],
+        "layer_costs": [
+          1.0,
+          2.0
+        ],
+        "track_width": 0.2,
+        "clearance": 0.15,
+        "via_size": 0.45,
+        "via_drill": 0.2,
+        "grid_step": 0.05,
+        "max_ripup": 1,
+        "hole_to_hole_clearance": null,
+        "board_edge_clearance": null,
+        "fab_overrides": "config/krt-usb-geometry-floor.txt",
+        "extra_args": []
+      }
+    },
+    "usb_cc_local": {
+      "engine": "single",
+      "geometry_role": "usb_type_c_configuration_local",
+      "manufacturing_evidence": "config/manufacturing-profile.json",
+      "evidence_bound_fields": [],
+      "require_explicit_include": true,
+      "include_nets": [],
+      "exclude_nets": ["*GND*", "*gnd*"],
+      "routing": {
+        "layers": ["F.Cu", "B.Cu"], "layer_costs": [1.0, 2.0],
+        "track_width": 0.2, "clearance": 0.2,
+        "via_size": 0.45, "via_drill": 0.2,
+        "grid_step": 0.05, "max_ripup": 0,
+        "hole_to_hole_clearance": null, "board_edge_clearance": null,
+        "fab_overrides": null, "extra_args": []
+      },
+      "strategy_evidence": {
+        "kind": "short_usb_type_c_cc_resistor_connections",
+        "constraint": "USB_CC1 and USB_CC2 only, using reviewed default manufacturing geometry; this profile must never be used for USB D+/D-"
+      }
+    },
+    "internal_ui_control": {
+      "manufacturing_evidence": "config/manufacturing-profile.json",
+      "routing": {
+        "layers": ["F.Cu", "B.Cu"],
+        "track_width": 0.2,
+        "clearance": 0.2,
+        "via_size": 0.45,
+        "via_drill": 0.2
+      },
+      "strategy_evidence": {
+        "kind": "internal_reset_boot_control",
+        "nets": ["ESP_EN", "ESP_BOOT"],
+        "constraint": "Connect the U1-local RC or pull-up cluster first, then route one reviewed remote-button trunk per net; do not accept perimeter detours or excessive layer changes merely because connectivity passes"
+      }
+    },
+    "target_control_local": {
+      "manufacturing_evidence": "config/manufacturing-profile.json",
+      "routing": {
+        "layers": ["F.Cu", "B.Cu"],
+        "track_width": 0.2,
+        "clearance": 0.2,
+        "via_size": 0.45,
+        "via_drill": 0.2
+      },
+      "strategy_evidence": {
+        "kind": "target_control_local_explicit",
+        "nets": ["VTREF_ADC", "TARGET_EN_N", "TARGET_ENABLE_REQUEST", "VTREF_OK_N", "TARGET_INTERLOCK"],
+        "constraint": "Use bounded explicit geometry for short target-control clusters after compact obstacle queries; require independent DRC and connectivity, and do not accept long perimeter detours"
+      }
+    },
+    "routing_corridor_adjustment": {
+      "manufacturing_evidence": "config/manufacturing-profile.json",
+      "routing": {
+        "layers": ["F.Cu", "B.Cu"],
+        "track_width": 0.2,
+        "clearance": 0.2,
+        "via_size": 0.45,
+        "via_drill": 0.2
+      },
+      "strategy_evidence": {
+        "kind": "bounded_existing_signal_corridor_adjustment",
+        "nets": ["GPIO10", "GPIO11", "GPIO12", "GPIO13", "GPIO14", "TARGET_EN_N", "TARGET_ENABLE_REQUEST", "VTREF_OK_N", "TARGET_INTERLOCK"],
+        "constraint": "Replace only exact SHA-bound low-speed segments when a reviewed local corridor is blocked; preserve all other copper and require connectivity, delta DRC and local visual review"
+      }
+    },
+    "usb_device_escape_fcu": {
+      "allow_layer_subset": true,
+      "engine": "single",
+      "geometry_role": "usb_device_endpoint_escape",
+      "manufacturing_evidence": "config/manufacturing-profile.json",
+      "evidence_bound_fields": [],
+      "require_explicit_include": true,
+      "include_nets": [],
+      "exclude_nets": ["*GND*", "*gnd*"],
+      "routing": {
+        "layers": ["F.Cu"], "layer_costs": [1.0],
+        "track_width": 0.2, "clearance": 0.2,
+        "via_size": 0.45, "via_drill": 0.2,
+        "grid_step": 0.05, "max_ripup": 1,
+        "hole_to_hole_clearance": null, "board_edge_clearance": null,
+        "fab_overrides": null, "extra_args": ["--no-stub-layer-swap"]
+      }
+    },
+    "ground_return_vias": {
+      "engine": "single",
+      "geometry_role": "ground_return_vias",
+      "manufacturing_evidence": "config/manufacturing-profile.json",
+      "evidence_bound_fields": [],
+      "require_explicit_include": true,
+      "include_nets": [],
+      "exclude_nets": [],
+      "routing": {
+        "layers": ["F.Cu", "B.Cu"], "layer_costs": [1.0, 1.0],
+        "track_width": 0.2, "clearance": 0.2,
+        "via_size": 0.45, "via_drill": 0.2,
+        "grid_step": 0.05, "max_ripup": 0,
+        "hole_to_hole_clearance": null, "board_edge_clearance": null,
+        "fab_overrides": null, "extra_args": []
+      }
+    },
+    "ground_plane_access": {
+      "manufacturing_evidence": "config/manufacturing-profile.json",
+      "routing": {
+        "layers": ["F.Cu", "B.Cu"],
+        "layer_costs": [1.0, 1.0],
+        "track_width": 0.2,
+        "clearance": 0.2,
+        "via_size": 0.45,
+        "via_drill": 0.2
+      },
+      "strategy_evidence": {
+        "kind": "short_ground_stub_to_reviewed_plane",
+        "net": "GND",
+        "constraint": "Use short explicit outer-layer stubs and reviewed through vias to reach the In1.Cu GND plane; do not route long ground daisy chains in place of plane access"
+      }
+    },
+    "high_current_ground_return": {
+      "manufacturing_evidence": "config/manufacturing-profile.json",
+      "routing": {
+        "layers": ["F.Cu"],
+        "track_width": 1.27,
+        "clearance": 0.2,
+        "via_size": 0.45,
+        "via_drill": 0.2
+      },
+      "strategy_evidence": {
+        "kind": "connector_side_tvs_high_current_ground_return",
+        "net": "GND",
+        "track_width_source": "reviewed outer_power_fcu track width",
+        "constraint": "Use only a short F.Cu wide-copper escape from the TVS ground pad into multiple reviewed through vias to the In1.Cu GND plane; independent DRC and visual review remain mandatory"
+      }
+    },
+    "j3_connector_esd_fanout": {
+      "engine": "single",
+      "geometry_role": "connector_side_esd_fanout",
+      "manufacturing_evidence": "config/manufacturing-profile.json",
+      "evidence_bound_fields": [],
+      "require_explicit_include": true,
+      "include_nets": [],
+      "exclude_nets": [],
+      "routing": {
+        "layers": ["F.Cu", "B.Cu"],
+        "layer_costs": [1.0, 2.0],
+        "track_width": 0.2,
+        "clearance": 0.2,
+        "via_size": 0.45,
+        "via_drill": 0.2,
+        "grid_step": 0.05,
+        "max_ripup": 0,
+        "hole_to_hole_clearance": null,
+        "board_edge_clearance": null,
+        "fab_overrides": null,
+        "extra_args": []
       }
     }
   },
@@ -130,7 +750,42 @@
     "receipt_max_items": 8
   },
   "attempt_policy": {
-    "max_identical_attempts": 2
+    "max_identical_attempts": 2,
+    "max_topology_failures": 2,
+    "max_route_area_rejections_without_acceptance": 3,
+    "require_explicit_route_area": true,
+    "require_explicit_strategy_class": true,
+    "obstacle_fingerprint_scope": "explicit_route_bbox_or_conservative_whole_board",
+    "failure_delegation": false,
+    "count_as_topology_failure": ["structural_no_path_or_incomplete"],
+    "on_structural_limit": "create_routing_escalation_receipt_then_review_corridor",
+    "placement_change_requires": [
+      "two structurally failed attempts",
+      "at least two meaningfully distinct routing strategies",
+      "a routing escalation receipt",
+      "a proposed placement with improved routability comparison",
+      "passing placement semantics and critical route probes"
+    ],
+    "placement_change_is_never_automatic": true
+  },
+  "batch_policy": {
+    "mode": "require_or_explicit_exception",
+    "profiles": ["outer_low_risk", "outer_low_risk_fcu", "outer_control_clock", "outer_ordered_bundle"],
+    "recommended_min_nets": 4,
+    "recommended_max_nets": 20,
+    "reason": "Audit one related low-risk block instead of paying a full-board audit for every single net."
+  },
+  "exploration": {
+    "routing_overrides": {
+      "max_ripup": 0,
+      "max_iterations": 200000,
+      "max_probe_iterations": 5000
+    },
+    "environment": {
+      "KICAD_NET_RESCUE": "0",
+      "KICAD_TERMINAL_ESCALATION": "0",
+      "KICAD_DYNAMIC_ITERATIONS": "0"
+    }
   },
   "audit": {
     "enabled": true,

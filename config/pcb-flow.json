@@ -1,9 +1,10 @@
 {
   "schema": 1,
+  "template_engine": "config/template-engine.json",
   "project": {
     "name": "esp32-s3-remote-flashing-probe",
     "build_target": "default",
-    "board": "elec/layout/rev-a-clearance-fixes-v346/rev-a-clearance-fixes.kicad_pcb"
+    "board": "elec/layout/esp32-s3-remote-flashing-probe-physical-rev-a/esp32-s3-remote-flashing-probe-physical-rev-a.kicad_pcb"
   },
   "board_stack": "config/board-stack.json",
   "backend_architecture": "config/backend-architecture.json",
@@ -11,6 +12,7 @@
   "acceptance": "config/pcb-acceptance.json",
   "stage_checklist": "config/stage-checklist.json",
   "checks": [
+    "scripts/check_template_engine.py",
     "scripts/check_backend_architecture.py",
     "scripts/check_tool_entrypoints.py",
     "scripts/validate_power_component_review.py"
@@ -19,7 +21,7 @@
     "require_in1_ground": true,
     "baseline": "config/pcb-release-baseline.json",
     "routing_paths": "config/routing-paths.json",
-    "physical_review": "build/07-release/release/rev-a-v346/physical-review.json",
+    "physical_review": "build/07-release/evidence/dfm-order-profile-physical-review-20260824.json",
     "audit_json": "build/07-release/evidence/manual/final-routing-audit.json",
     "drc_report": "build/07-release/evidence/manual/drc/kicad-cli-drc.rpt"
   },
@@ -29,15 +31,18 @@
   },
   "manufacturing": {
     "backend": "config/manufacturing-backend.json",
+    "input_index": "build/07-release/INPUTS.json",
     "output": "manufacturing/jlcpcb/esp32-s3-remote-flashing-probe-rev-a",
     "log": "build/07-release/tmp/manual/jlcpcb-export.log",
     "assembly_parts": "config/jlcpcb-parts.json",
     "gate_receipts": {
-      "electrical_freeze": "build/04-electrical-freeze/release/REPLACE_WITH_FREEZE_ID/electrical-freeze.json",
-      "easyeda_import_parity": "build/05-placement/evidence/manual/easyeda-import-parity.json",
-      "final_electrical_parity": "build/07-release/evidence/manual/final-electrical-parity.json",
-      "easyeda_drc": "build/06-routing/evidence/manual/easyeda-drc.json",
+      "electrical_freeze": "build/04-electrical-freeze/release/20260813T-usblc6-routing-order/electrical-freeze.json",
+      "final_electrical_parity": "build/07-release/evidence/u1-j2-keepouts-v1-final-electrical-parity-20260824.json",
       "jlc_dfm": "build/07-release/evidence/manual/jlc-dfm.json"
+    },
+    "optional_gate_receipts": {
+      "easyeda_import_parity": "build/05-placement/evidence/manual/easyeda-import-parity.json",
+      "easyeda_drc": "build/06-routing/evidence/manual/easyeda-drc.json"
     }
   },
   "handoff": {

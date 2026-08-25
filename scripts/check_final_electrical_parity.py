@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from check_easyeda_import_parity import compare_electrical, file_sha256, load_manifest
 from electrical_freeze_contract import DEFAULT_FREEZE_ROOT, load_release_freeze
+from release_inputs import register_release_input
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,6 +56,7 @@ def main() -> int:
     }
     args.output.resolve().parent.mkdir(parents=True, exist_ok=True)
     args.output.resolve().write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    register_release_input("final_electrical_parity", args.output.resolve(), payload)
     print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
     return 0 if payload["success"] else 1
 

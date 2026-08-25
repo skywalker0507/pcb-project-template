@@ -1,8 +1,8 @@
 # Konnect integration boundary
 
-Konnect is the fallback/reference live KiCad MCP backend and replaces the older
-KiCAD-MCP-Server integration. EasyEDA Pro is the primary physical backend;
-Konnect does not replace KiCadRoutingTools (KRT).
+Konnect is the primary bounded live KiCad MCP backend and replaces the older
+KiCAD-MCP-Server integration. KiCad is the physical authority; Konnect does not
+replace KiCadRoutingTools (KRT) or deterministic project verification.
 
 ## Why it replaces KiCAD-MCP-Server
 

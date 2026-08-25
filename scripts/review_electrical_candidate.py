@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Run independent KiCad DRC and render checks on an isolated electrical candidate.
+"""Run independent KiCad parse, topology, DRC and render checks on a candidate.
 
 This script never imports a candidate into the reviewed KiCad layout and never
-creates manufacturing evidence. A non-zero exit status means the candidate
-still needs resolution before a human may consider importing it.
+creates manufacturing evidence. A pristine pre-layout electrical carrier may
+pass review with physical DRC explicitly deferred; a board containing physical
+work must pass DRC before this review passes.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,6 +45,20 @@ def configured_kicad_cli() -> str:
     except (OSError, json.JSONDecodeError, AttributeError):
         pass
     return "kicad-cli"
+
+
+def candidate_review_passes(
+    *,
+    drc_exit_code: int,
+    render_exit_code: int,
+    topology_exit_code: int,
+    violations: int,
+    unconnected: int,
+    pre_layout: bool,
+) -> bool:
+    commands_pass = drc_exit_code == 0 and render_exit_code == 0 and topology_exit_code == 0
+    physical_drc_pass = violations == 0 and unconnected == 0
+    return commands_pass and (pre_layout or physical_drc_pass)
 
 
 def main() -> int:
@@ -91,14 +107,28 @@ def main() -> int:
     render_code, render_log = run([
         args.kicad_cli, "pcb", "render", "--output", str(render), "--width", "1200", "--height", "800", "--side", "top", str(board),
     ])
+    topology_code, topology_log = run([
+        sys.executable,
+        str(ROOT / "scripts/inspect_pcb_topology.py"),
+        "--board",
+        str(board),
+    ])
     result.update({
         "candidate_board": str(board),
         "candidate_board_sha256": hashlib.sha256(board.read_bytes()).hexdigest().upper(),
         "electrical_backend": build.get("backend"),
         "drc_report": str(drc_report),
         "render": str(render),
-        "commands": {"drc_exit_code": drc_code, "render_exit_code": render_code},
-        "logs": {"drc_tail": drc_log.splitlines()[-12:], "render_tail": render_log.splitlines()[-12:]},
+        "commands": {
+            "drc_exit_code": drc_code,
+            "render_exit_code": render_code,
+            "topology_exit_code": topology_code,
+        },
+        "logs": {
+            "drc_tail": drc_log.splitlines()[-12:],
+            "render_tail": render_log.splitlines()[-12:],
+            "topology_tail": topology_log.splitlines()[-4:],
+        },
     })
     try:
         drc = json.loads(drc_report.read_text(encoding="utf-8"))
@@ -117,9 +147,40 @@ def main() -> int:
         write_json(output / "candidate-review.json", result)
         print(json.dumps(result, separators=(",", ":")))
         return 1
-    review_pass = drc_code == 0 and render_code == 0 and drc_summary["violations"] == 0 and drc_summary["unconnected"] == 0
-    result["success"] = drc_code == 0 and render_code == 0
+    try:
+        topology = json.loads(topology_log.splitlines()[-1])
+        if (
+            topology_code != 0
+            or topology.get("kind") != "pcb_topology_summary"
+            or topology.get("board_sha256") != result["candidate_board_sha256"]
+        ):
+            raise ValueError("Topology summary is unsuccessful or references another board")
+        result["topology"] = topology
+    except (IndexError, ValueError, json.JSONDecodeError, AttributeError) as exc:
+        result["error"] = f"unreadable_topology_summary: {exc}"
+        write_json(output / "candidate-review.json", result)
+        print(json.dumps(result, separators=(",", ":")))
+        return 1
+    pre_layout = topology.get("pre_layout") is True
+    physical_drc_pass = drc_summary["violations"] == 0 and drc_summary["unconnected"] == 0
+    review_pass = candidate_review_passes(
+        drc_exit_code=drc_code,
+        render_exit_code=render_code,
+        topology_exit_code=topology_code,
+        violations=drc_summary["violations"],
+        unconnected=drc_summary["unconnected"],
+        pre_layout=pre_layout,
+    )
+    result["success"] = drc_code == 0 and render_code == 0 and topology_code == 0
     result["review_pass"] = review_pass
+    result["review_scope"] = "pre_layout_electrical_carrier" if pre_layout else "physical_candidate"
+    result["physical_drc_pass"] = physical_drc_pass
+    result["physical_drc_deferred"] = pre_layout and not physical_drc_pass
+    if pre_layout:
+        result["next"] = (
+            "Import only from an immutable electrical freeze. Placement, outline, "
+            "routing and every physical DRC item remain mandatory physical-stage work."
+        )
     if not review_pass:
         result["next"] = "Resolve every candidate DRC issue and inspect the render before deliberate KiCad import; do not alter a release baseline."
     write_json(output / "candidate-review.json", result)

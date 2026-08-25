@@ -1,0 +1,20 @@
+import has_designator_prefix
+import is_atomic_part
+
+component TagConnect_TC2050_IDC_NL_package:
+    """Manually reviewed connector atomic part."""
+
+    trait is_atomic_part<manufacturer="Tag-Connect", partnumber="TC2050-IDC-NL", footprint="Tag-Connect_TC2050-IDC-NL_2x05_P1.27mm_Vertical.kicad_mod", symbol="Conn_02x05_Odd_Even.kicad_sym">
+    trait has_designator_prefix<prefix="J">
+
+    # Physical pin numbers are the electrical contract.
+    pin 1
+    pin 2
+    pin 3
+    pin 4
+    pin 5
+    pin 6
+    pin 7
+    pin 8
+    pin 9
+    pin 10

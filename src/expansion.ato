@@ -1,0 +1,37 @@
+"""Trusted internal seven-pin development expansion header."""
+
+import ElectricPower
+import Net
+import has_designator
+import has_net_name
+
+from "parts/Samtec_TSW_107_07_L_S/Samtec_TSW_107_07_L_S.ato" import Samtec_TSW_107_07_L_S_package
+
+module ExpansionHeader:
+    power = new ElectricPower
+    assert power.voltage within 3.2V to 3.4V
+
+    gpio10 = new Net
+    gpio11 = new Net
+    gpio12 = new Net
+    gpio13 = new Net
+    gpio14 = new Net
+
+    trait power.hv has_net_name<name="3V3">
+    trait power.lv has_net_name<name="GND">
+    trait gpio10.part_of has_net_name<name="GPIO10">
+    trait gpio11.part_of has_net_name<name="GPIO11">
+    trait gpio12.part_of has_net_name<name="GPIO12">
+    trait gpio13.part_of has_net_name<name="GPIO13">
+    trait gpio14.part_of has_net_name<name="GPIO14">
+
+    j4 = new Samtec_TSW_107_07_L_S_package
+    trait j4 has_designator<designator="J4">
+
+    j4.1 ~ power.hv
+    j4.2 ~ power.lv
+    j4.3 ~ gpio10.part_of
+    j4.4 ~ gpio11.part_of
+    j4.5 ~ gpio12.part_of
+    j4.6 ~ gpio13.part_of
+    j4.7 ~ gpio14.part_of

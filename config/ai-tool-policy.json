@@ -2,14 +2,17 @@
   "schema": 1,
   "priority": ["accuracy", "codex_token_efficiency", "latency"],
   "stages": {
-    "requirements": ["houtini"],
-    "parts": ["houtini"],
-    "electrical": ["atopile", "tscircuit_experimental", "houtini"],
-    "electrical_freeze": ["atopile", "houtini"],
-    "physical": ["easyeda_pro", "konnect_fallback"],
-    "routing": ["krt", "freerouting", "konnect", "houtini"],
-    "release": ["houtini"],
-    "prototype": ["houtini"]
+    "requirements": [],
+    "electrical": ["atopile"],
+    "physical": ["krt", "konnect", "kicad_cli"],
+    "routing": ["krt", "konnect", "kicad_cli"],
+    "release": ["kicad_cli"]
+  },
+  "optional_tools": {
+    "houtini": ["requirements", "electrical", "physical", "routing", "release"],
+    "freerouting": ["routing"],
+    "easyeda_pro_optional": ["physical", "routing", "release"],
+    "tscircuit_experimental": ["electrical"]
   },
   "houtini": {
     "role": "Bounded text classification and extraction only; never PCB judgment.",
@@ -18,8 +21,9 @@
     "require_line_evidence": true
   },
   "krt": {
-    "role": "Isolated targeted routing candidates only.",
+    "role": "Isolated targeted routing candidates and pre-promotion critical route probes only; never modifies the active board.",
     "max_identical_attempts": 2,
+    "max_topology_failures": 2,
     "require_independent_drc": true
   },
   "freerouting": {
@@ -30,7 +34,7 @@
     "require_independent_drc": true
   },
   "konnect": {
-    "role": "Fallback/reference live KiCad placement, queries, and a small number of explicit trace/via edits.",
+    "role": "Primary live KiCad placement, bounded geometry queries, and a small number of explicit trace/via edits.",
     "max_extra_toolsets": 1,
     "allowed_toolsets": ["pcb_board", "pcb_components", "pcb_routing", "pcb_export", "verification"],
     "forbidden_toolsets": ["sch_components", "sch_wiring", "sch_batch", "templates", "design_review", "manufacturing"],

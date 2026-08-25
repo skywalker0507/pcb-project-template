@@ -43,6 +43,7 @@ def load_parts_source(path: Path, board_path: Path, pos_by_ref: dict[str, dict[s
         footprint.GetReference().strip(): {
             "value": footprint.GetValue().strip(),
             "footprint": board_footprint_name(footprint),
+            "is_smd": any(pad.GetAttribute() == pcbnew.PAD_ATTRIB_SMD for pad in footprint.Pads()),
         }
         for footprint in board.GetFootprints()
     }
@@ -62,19 +63,26 @@ def load_parts_source(path: Path, board_path: Path, pos_by_ref: dict[str, dict[s
         mapped_refs.update(clean_refs)
 
         expected_value = str(part.get("board_value", ""))
-        expected_footprint = str(part.get("footprint", ""))
+        reviewed_footprint = str(part.get("footprint", ""))
+        physical_footprints: set[str] = set()
         for ref in clean_refs:
             actual = inventory.get(ref)
             if actual is None:
                 raise SystemExit(f"Assembly ref is absent from board: {ref}")
-            if actual["value"] != expected_value:
+            # Some electrical-to-physical backends intentionally leave the
+            # display Value blank. A non-empty board value must agree, but an
+            # empty display field must not replace the reviewed BOM identity.
+            if actual["value"] and actual["value"] != expected_value:
                 raise SystemExit(
                     f"Assembly value mismatch for {ref}: board={actual['value']!r} source={expected_value!r}"
                 )
-            if actual["footprint"] != expected_footprint:
-                raise SystemExit(
-                    f"Assembly footprint mismatch for {ref}: board={actual['footprint']!r} source={expected_footprint!r}"
-                )
+            physical_footprints.add(actual["footprint"])
+        if len(physical_footprints) != 1:
+            raise SystemExit(
+                "Assembly refs in one reviewed part group use different physical footprints: "
+                + ", ".join(sorted(physical_footprints))
+            )
+        physical_footprint = next(iter(physical_footprints))
 
         lcsc = str(part.get("lcsc", "")).strip()
         partnumber = str(part.get("mpn", "")).strip()
@@ -84,7 +92,10 @@ def load_parts_source(path: Path, board_path: Path, pos_by_ref: dict[str, dict[s
         source_bom.append(
             {
                 "Designator": ",".join(sorted(clean_refs)),
-                "Footprint": expected_footprint,
+                # CPL/package identity follows the exact audited physical board.
+                # The reviewed source footprint is retained for traceability.
+                "Footprint": physical_footprint,
+                "ReviewedFootprint": reviewed_footprint,
                 "Value": comment,
                 "Partnumber": partnumber,
                 "LCSC Part #": lcsc,
@@ -95,10 +106,11 @@ def load_parts_source(path: Path, board_path: Path, pos_by_ref: dict[str, dict[s
     if not isinstance(dnp_refs, list) or not all(isinstance(ref, str) for ref in dnp_refs):
         raise SystemExit("Assembly dnp_refs must be a list of strings")
     expected_position_refs = mapped_refs.union(ref.strip() for ref in dnp_refs)
-    missing_mappings = sorted(set(pos_by_ref) - expected_position_refs)
+    board_smd_refs = {ref for ref, item in inventory.items() if item["is_smd"]}
+    missing_mappings = sorted(board_smd_refs - expected_position_refs)
     stale_mappings = sorted(mapped_refs - set(pos_by_ref))
     if missing_mappings:
-        raise SystemExit("SMD position refs missing from assembly parts source: " + ", ".join(missing_mappings))
+        raise SystemExit("Physical SMD refs missing from assembly parts source: " + ", ".join(missing_mappings))
     if stale_mappings:
         raise SystemExit("Assembly refs missing from SMD position export: " + ", ".join(stale_mappings))
     return source_bom
@@ -254,6 +266,8 @@ def main() -> None:
             "extra_in_cpl": [],
         },
         "position_rows_excluded_not_in_bom": excluded_position_refs,
+        "physical_footprints_from_exact_board": True,
+        "reviewed_identity_source_preserved": True,
     }
     validation_path = args.output_dir / "assembly-validation.json"
     validation_path.write_text(

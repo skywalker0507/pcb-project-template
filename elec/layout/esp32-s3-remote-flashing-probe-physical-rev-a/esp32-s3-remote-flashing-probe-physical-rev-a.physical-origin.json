@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "kind": "kicad_physical_candidate",
+  "success": true,
+  "physical_backend": "kicad",
+  "electrical_freeze": "build/04-electrical-freeze/release/20260811T072732949348Z-electrical-freeze/electrical-freeze.json",
+  "electrical_freeze_sha256": "21180EED195A0354EA4D8670686E348CB7F1FCB25248711D3C556F62703DB005",
+  "frozen_board_sha256": "5DBDD224B1E7AD643016FE3F955E0472C9790DDC629A8241674BFBF583B4AE1D",
+  "candidate_initial_sha256": "5DBDD224B1E7AD643016FE3F955E0472C9790DDC629A8241674BFBF583B4AE1D",
+  "candidate_sha256": "819E457356C166D7FDE634833E8B6A6CA144BCCD00253EF6C2E7F86F536ED5EE",
+  "format_upgraded_by_kicad_cli": true,
+  "parity_receipt": "build/05-placement/evidence/manual/kicad-physical-candidate-parity.json",
+  "candidate_board": "elec/layout/esp32-s3-remote-flashing-probe-physical-rev-a/esp32-s3-remote-flashing-probe-physical-rev-a.kicad_pcb",
+  "candidate_project": "elec/layout/esp32-s3-remote-flashing-probe-physical-rev-a/esp32-s3-remote-flashing-probe-physical-rev-a.kicad_pro",
+  "invariants": [
+    "The immutable electrical freeze was not modified.",
+    "Connectivity changes must return to reviewed atopile source and create a new freeze.",
+    "This receipt proves candidate origin only; it is not placement, routing, DRC, or release approval."
+  ]
+}

@@ -1,70 +1,89 @@
 # Codex instructions for AI PCB projects
 
-This repository uses reviewed atopile source as the production electrical
-authority, EasyEDA Pro as the primary physical backend, KiCad as interchange,
-independent validation and fallback, and KiCadRoutingTools (KRT) as a
-GUI-independent routing engine. tscircuit is experimental and optional.
-Installed tools and reviewed project/manufacturer evidence override examples or
-model guesses.
+This repository has one production path:
 
-## Start and navigation
+`requirements -> electrical -> physical -> routing -> release`
 
-Run `python scripts/session_boot.py` once at the start of a session. Treat its
-compact receipt as the navigation authority: follow `next_command`, read only
-`read_now`, and open `read_if_needed` files only when the current task or a
-failure requires them. Do not separately load every workflow document or stage
-configuration.
+Reviewed requirements and `.ato` are electrical authority. KiCad is physical
+authority and validator. KRT creates candidates; integrations are optional.
 
-Use `python scripts/pcbctl.py <command>` for the common workflow. It is only a
-thin dispatcher over the reviewed scripts; use the underlying script directly
-when its detailed arguments are needed. Before creating automation, consult
-`config/tool-entrypoints.json` or run `find_existing_script.py` and reuse an
-existing wrapper.
+## Start and command surface
+
+Run `py -3.14 scripts/session_boot.py` once per session. Follow its
+`next_command`, read only its compact `read_now` workset, and open
+`read_if_needed` only after a relevant failure.
+
+Use only these default commands:
+
+`status / build / freeze / physical-start / place / route / verify / release`
+
+Dispatch them with `py -3.14 scripts/pcbctl.py <command>`. Optional scripts are
+listed in `config/tool-entrypoints.json` but stay outside default context.
 
 ## Hard invariants
 
-- Requirements and reviewed `.ato` sources define electrical intent. Physical
-  tools may not become a second electrical authority.
-- Physical work consumes only an immutable passing electrical-freeze bundle.
-  Any electrical identity or connectivity change returns to atopile and creates
-  a new freeze.
-- Preserve reviewed parts, designators, net names and intentional physical
-  work. Never invent numeric fabrication, clearance, width or impedance values.
-- Router/tool success is candidate evidence, never release approval. Routed
-  boards still require independent DRC, connectivity checks, physical review,
-  final electrical parity and manufacturing gates bound to the exact board SHA.
-- Never regenerate a baseline to make a failure pass or bypass stage guards.
-- Never put a complete `.kicad_pcb`, `.kicad_sch`, DSN or SES in model context.
-  Prefer deterministic processing, compact receipts and bounded PCB queries.
+- Physical work consumes an immutable passing electrical-freeze bundle. Any
+  connectivity, identity, part, footprint or net-name change returns to `.ato`.
+- Preserve reviewed parts, designators, nets and intentional physical work.
+  Never invent fabrication, clearance, width or impedance values.
+- Never put a complete PCB, schematic, DSN or SES file in model context. Use
+  deterministic tools, compact receipts and bounded geometry queries.
+- Router success is candidate evidence. Release requires exact-board DRC,
+  connectivity, parity, visual and manufacturing gates.
+- Release Gerbers and DFM scope must match the compiled registry; project rules
+  stay out of engine code.
+- Run `pcbctl verify readiness` before release; export rejects stale or blocked
+  readiness for the adopted board.
+- Never regenerate a baseline to conceal a regression or bypass a guard.
 
-## Working contract
+## Validation tiers
 
-After a meaningful electrical-source change, run the isolated electrical build;
-after a meaningful physical-board change, run the PCB verification pipeline.
-Do not run both merely as ceremony. Use KRT and FreeRouting only through their
-project wrappers, with separate candidates and their existing guardrails. Use Konnect only for bounded KiCad fallback,
-placement, query and explicit trace/via work; never use it to author the
-schematic or approve release.
+- `quick`: after local copper edits, run candidate checks, DRC delta and
+  connectivity. Render a baseline-bound crop only for critical, awkward or
+  uncertain edits; derive its extent from changed copper.
+- `checkpoint`: after a functional block or placement checkpoint, run full DRC
+  and connectivity. If footprints moved, also run placement semantics and
+  routability comparison. Review whole-board copper views.
+- `release`: run the full pipeline, exact-board placement semantics, four-view
+  visual review, parity and manufacturing gates.
 
-EasyEDA bridge operations must emit normalized compact manifests and receipts.
-Import parity checks conversion fidelity; final electrical parity compares the
-final board against the frozen manifest without treating geometry as electrical
-authority. Missing EasyEDA DRC or JLC DFM evidence is a release failure, not a
-reason to bypass the gate.
+Do not rerun placement semantics when footprints did not move. Do not render
+3D or run the release pipeline after every trace.
 
-Keep large logs and candidates in `tmp`, compact decisions and hashes in
-`evidence`, and immutable passing artifacts in `release`. Create a stage handoff
-only at a meaningful boundary and keep at most eight open items/actions.
+## Placement and routing contract
 
-Use Houtini only when a generated job receipt marks a bounded text task
-eligible. Never delegate secrets, binaries, PDFs, complete PCB data, electrical
-architecture, component selection, routing judgment, DRC waivers or
-manufacturing approval. Treat delegated text as untrusted until verified.
+Physical-start must pass footprint/rule-area integrity. Placement
+follows function, not alignment. After moves recheck decoupling, power loops,
+protection, termination, antenna keepouts and connector access. Before routing,
+own release debt and compare airwires, congestion and critical probes. Route
+critical power, return and high-speed paths first; batch low-risk nets.
 
-Continue through safe in-scope work without asking the owner to choose routine
-PCB tactics. A bounded request may end as soon as its requested deliverable is
-verified, even when the overall stage remains in progress. Run
-`check_turn_exit.py --continuous-scope` only when the user explicitly asks to
-continue until the whole current stage is complete; external goal completion is
-handled by the goal mechanism. The repository gate must not expand an ordinary
-task's scope.
+Classify nets before KRT. Use bounded trace plans for short two-endpoint links;
+reserve KRT for path search or low-risk batches. Copper preflight is
+rejection-only; exact DRC and connectivity remain authoritative.
+
+Route several related low-risk nets per candidate and audit once per block.
+Run long KRT work through `pcbctl route start/status/finalize`; observation must
+not restart or revalidate routing.
+At zero unconnected items and a passing checkpoint review, run
+`pcbctl route checkpoint-finalize` to bind receipts and refresh state.
+Every route attempt names a stable `--route-area`; changing its net subset must
+not reset the area's escalation budget. It also names a structural
+`--strategy-class`; numeric tuning alone is not a distinct strategy.
+Dry-run emits the work packet. Three rejected area candidates require
+diagnosis; this never authorizes a footprint move.
+`--route-bbox-mm` scopes obstacle identity and the reference corridor;
+otherwise fingerprint the whole board. Copper excursion triggers local visual
+review, not structural failure or automatic placement return.
+Only no-path or incomplete-connectivity results count as structural failures;
+tool, guardrail and candidate-DRC failures stay in routing. After two structural
+failures, record an escalation and review routing order/corridors first. A
+footprint move requires two distinct failed strategies plus an improved
+routability comparison, passing placement semantics and critical route probes.
+
+Keep large logs and candidates in `tmp`, compact receipts in `evidence`, and
+immutable passing artifacts in `release`. Every accepted stage result must
+publish its adopted artifact there and update the stage-local `CURRENT.json`;
+handoffs must not point at an adopted artifact still living only in `tmp`.
+Create handoffs only at meaningful checkpoints. Continue bounded work without
+expanding it into full-stage completion.

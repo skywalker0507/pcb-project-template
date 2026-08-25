@@ -19,6 +19,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "config/build-artifacts.json"
 CURRENT_INDEX = ROOT / "build/CURRENT.json"
+STAGE_RESULTS_INDEX = ROOT / "build/STAGE_RESULTS.json"
 RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,100}")
 
 
@@ -176,6 +177,83 @@ def finish_run(
     metrics: dict[str, Any] | None = None,
 ) -> None:
     write_manifest(run, "complete" if success else "failed", success=success, artifacts=artifacts, metrics=metrics)
+
+
+def publish_stage_artifact(
+    run: ArtifactRun,
+    source: Path,
+    artifact_name: str,
+    *,
+    evidence: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Copy an accepted KiCad artifact into the immutable lane and update its stage pointer."""
+    source = source.resolve()
+    if not source.is_file() or source.suffix != ".kicad_pcb":
+        raise SystemExit(f"Accepted stage artifact must be a KiCad PCB: {source}")
+    artifact_name = Path(artifact_name).name
+    if not artifact_name.endswith(".kicad_pcb"):
+        raise SystemExit("Published KiCad artifact name must end with .kicad_pcb")
+    destination = run.release / artifact_name
+    result_path = run.release / "stage-result.json"
+    if destination.exists() or result_path.exists():
+        raise SystemExit(f"Stage release is immutable and already populated: {run.release}")
+    run.release.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
+    copied: dict[str, str] = {"board": relative(destination)}
+    destination_stem = destination.with_suffix("")
+    for suffix in (".kicad_pro", ".kicad_prl", ".kicad_dru"):
+        companion = source.with_suffix(suffix)
+        if companion.is_file():
+            target = destination_stem.with_suffix(suffix)
+            shutil.copy2(companion, target)
+            copied[suffix.removeprefix(".")] = relative(target)
+    table = source.parent / "fp-lib-table"
+    if table.is_file():
+        target = run.release / "fp-lib-table"
+        shutil.copy2(table, target)
+        copied["fp_lib_table"] = relative(target)
+    if sha256(destination) != sha256(source):
+        raise SystemExit("Published stage artifact SHA differs from the accepted source")
+    result = {
+        "schema": 1,
+        "kind": "accepted_stage_result",
+        "stage": run.stage,
+        "run_id": run.run_id,
+        "success": True,
+        "source": relative(source),
+        "artifact": relative(destination),
+        "artifact_sha256": sha256(destination),
+        "companions": copied,
+        "evidence": evidence or {},
+        "invariant": "This directory is an accepted immutable stage result; subsequent work consumes a copy or a later-stage candidate.",
+    }
+    result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    pointer_path = stage_directory(run.stage) / "CURRENT.json"
+    pointer_tmp = pointer_path.with_suffix(".json.tmp")
+    pointer = {
+        "schema": 1,
+        "kind": "current_stage_artifact",
+        "stage": run.stage,
+        "run_id": run.run_id,
+        "artifact": relative(destination),
+        "artifact_sha256": result["artifact_sha256"],
+        "stage_result": relative(result_path),
+    }
+    pointer_tmp.write_text(json.dumps(pointer, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    pointer_tmp.replace(pointer_path)
+    stage_index: dict[str, Any] = {"schema": 1, "kind": "accepted_stage_results", "stages": {}}
+    if STAGE_RESULTS_INDEX.is_file():
+        try:
+            loaded = json.loads(STAGE_RESULTS_INDEX.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict) and isinstance(loaded.get("stages"), dict):
+                stage_index = loaded
+        except json.JSONDecodeError:
+            pass
+    stage_index["stages"][run.stage] = pointer
+    stage_index_tmp = STAGE_RESULTS_INDEX.with_suffix(".json.tmp")
+    stage_index_tmp.write_text(json.dumps(stage_index, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    stage_index_tmp.replace(STAGE_RESULTS_INDEX)
+    return result
 
 
 def sha256(path: Path) -> str:
@@ -429,6 +507,93 @@ def prune_tmp(settings: dict[str, Any], *, apply: bool) -> dict[str, Any]:
     return {"success": True, "applied": True, "archive": relative(archive), "run_count": len(candidates), "bytes": sum(item["bytes"] for item in preview)}
 
 
+def prune_checkpoint_runs(settings: dict[str, Any], *, apply: bool) -> dict[str, Any]:
+    """Archive excess completed tmp/evidence runs; preserve releases and active references."""
+    retention = settings.get("retention") or {}
+    keep_success = int(retention.get("keep_successful_evidence_runs_per_stage", 5))
+    keep_failed = int(retention.get("keep_failed_evidence_runs_per_stage", 3))
+    protected_text = ""
+    protected_paths = [
+        CURRENT_INDEX,
+        ROOT / "build/STAGE_RESULTS.json",
+        *list((ROOT / "config").rglob("*.json")),
+        *list((ROOT / "handoff").rglob("*")),
+        *list((ROOT / "build").glob("*/CURRENT.json")),
+        *list((ROOT / "build").glob("*/release/*/stage-result.json")),
+        *list((ROOT / "manufacturing").rglob("manifest.json")),
+    ]
+    for path in protected_paths:
+        if path.is_file():
+            protected_text += path.read_text(encoding="utf-8", errors="replace")
+    selected: list[tuple[str, str, list[Path]]] = []
+    for stage in (settings.get("stages") or {}):
+        stage_root = stage_directory(stage, settings)
+        evidence_root = stage_root / str((settings.get("lanes") or {}).get("evidence", "evidence"))
+        tmp_root = stage_root / str((settings.get("lanes") or {}).get("tmp", "tmp"))
+        release_root = stage_root / str((settings.get("lanes") or {}).get("release", "release"))
+        groups: dict[tuple[str, bool], list[tuple[float, str, Path]]] = {}
+        if not evidence_root.is_dir():
+            continue
+        for manifest in evidence_root.glob("*/run.json"):
+            try:
+                record = json.loads(manifest.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            run_id = str(record.get("run_id", manifest.parent.name))
+            if record.get("status") not in {"complete", "failed"} or run_id in protected_text:
+                continue
+            release_dir = release_root / run_id
+            if release_dir.is_dir() and any(release_dir.iterdir()):
+                continue
+            updated = record.get("updated_at")
+            try:
+                timestamp = datetime.fromisoformat(str(updated)).timestamp()
+            except ValueError:
+                timestamp = manifest.stat().st_mtime
+            group = (str(record.get("operation", "unknown")), record.get("success") is True)
+            groups.setdefault(group, []).append((timestamp, run_id, manifest.parent))
+        for (_, successful), rows in groups.items():
+            keep = keep_success if successful else keep_failed
+            rows.sort(reverse=True)
+            for _, run_id, evidence_dir in rows[keep:]:
+                paths = [evidence_dir]
+                tmp_dir = tmp_root / run_id
+                if tmp_dir.is_dir():
+                    paths.append(tmp_dir)
+                selected.append((stage, run_id, paths))
+    preview = []
+    for stage, run_id, paths in selected:
+        preview.append({
+            "stage": stage, "run_id": run_id,
+            "paths": [relative(path) for path in paths],
+        })
+    if not apply or not selected:
+        return {"success": True, "applied": apply, "run_count": len(selected), "preview": preview[:20], "truncated": len(preview) > 20}
+    archive_root = ROOT / str((settings.get("legacy") or {}).get("archive_root", "build/00-legacy"))
+    archive_root.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    archive = archive_root / f"checkpoint-retention-{stamp}.zip"
+    manifest = {"schema": 1, "kind": "checkpoint_run_archive", "created_at": datetime.now(timezone.utc).isoformat(), "recoverable": True, "runs": preview}
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as bundle:
+        bundle.writestr("retention-manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+        for _, _, paths in selected:
+            for path in paths:
+                require_under(path, ROOT / "build", "Checkpoint run")
+                for item in sorted(entry for entry in path.rglob("*") if entry.is_file()):
+                    bundle.write(item, item.relative_to(ROOT / "build"))
+    with zipfile.ZipFile(archive, "r") as bundle:
+        corrupt = bundle.testzip()
+        if corrupt is not None:
+            archive.unlink(missing_ok=True)
+            raise SystemExit(f"Checkpoint retention archive verification failed: {corrupt}")
+    for _, _, paths in selected:
+        for path in paths:
+            shutil.rmtree(path)
+    sidecar = archive.with_suffix(".manifest.json")
+    sidecar.write_text(json.dumps({**manifest, "archive": relative(archive), "archive_sha256": sha256(archive)}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return {"success": True, "applied": True, "archive": relative(archive), "archive_bytes": archive.stat().st_size, "run_count": len(selected)}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
@@ -448,6 +613,8 @@ def main() -> int:
     release.add_argument("--package-audit", type=Path, required=True)
     prune = commands.add_parser("prune")
     prune.add_argument("--apply", action="store_true")
+    checkpoint_prune = commands.add_parser("checkpoint-prune")
+    checkpoint_prune.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     settings = config(args.config)
     if args.command == "create":
@@ -459,6 +626,8 @@ def main() -> int:
         payload = register_release(args.release_id, args.snapshot_manifest, args.audit, args.physical_review, args.package_audit)
     elif args.command == "prune":
         payload = prune_tmp(settings, apply=args.apply)
+    elif args.command == "checkpoint-prune":
+        payload = prune_checkpoint_runs(settings, apply=args.apply)
     else:
         payload = inventory(settings)
     print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))

@@ -6,15 +6,18 @@
       "status": "primary",
       "required_gates": [
         "electrical_freeze",
-        "easyeda_import_parity",
         "final_electrical_parity",
-        "easyeda_drc",
         "kicad_independent_drc_and_connectivity",
         "jlc_dfm",
+        "compiled_manufacturing_registry",
+        "registry_gerber_rules",
+        "confirmed_special_processes",
         "bom_pnp_gerber_checks",
         "release_audit"
       ],
       "external_receipt_checker": "scripts/check_manufacturing_gates.py",
+      "manufacturing_registry": "build/00-shared/evidence/design-policy/manufacturing-registry.json",
+      "registry_checker": "scripts/check_manufacturing_registry.py",
       "compatibility_export": "scripts/export_jlcpcb_release.py",
       "package_checker": "scripts/check_jlcpcb_release.py"
     }

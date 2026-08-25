@@ -44,8 +44,8 @@ def build_receipt() -> dict[str, object]:
         },
         "work": {
             "blockers": navigation.get("blockers", []),
-            "open_items": navigation.get("open_items", []),
-            "next_actions": navigation.get("stage_next_actions", []),
+            "open_items": list(navigation.get("open_items", []))[:4],
+            "next_actions": list(navigation.get("stage_next_actions", []))[:3],
             "stage_in_progress": navigation.get("stage_in_progress", False),
         },
         "gates": {
@@ -56,22 +56,60 @@ def build_receipt() -> dict[str, object]:
         "next_action": navigation.get("next_action"),
         "required_inputs": navigation.get("required_inputs", []),
         "next_command": navigation.get("next_command"),
-        "command_help": "python scripts/pcbctl.py --help",
+        "command_help": "py -3.14 scripts/pcbctl.py --help",
         "context": {
-            "default_read": ["AGENTS.md", "this session receipt"],
-            "read_now": [],
+            "default_read": ["AGENTS.md", "build/WORKSET.json"],
+            "read_now": ["build/WORKSET.json"],
             "read_if_needed": read_if_needed,
             "artifact_locations": artifact_locations,
             "never_load_complete": ["*.kicad_pcb", "*.kicad_sch", "*.dsn", "*.ses"],
         },
         "final_gate": navigation.get("final_gate"),
         "continuous_gate_required": navigation.get("continuous_gate_required", False),
-        "instruction": "If next_command is present, run it unless the user named a more specific operation; load on-demand files only when needed.",
+        "instruction": "Use the compact workset as the only default context. Load an on-demand file only after its related action or failure requires it.",
+    }
+
+
+def workset(receipt: dict[str, object]) -> dict[str, object]:
+    stage = dict(receipt.get("stage") or {})
+    work = dict(receipt.get("work") or {})
+    release_stage = stage.get("name") == "release"
+    return {
+        "schema": 1,
+        "stage": stage.get("name"),
+        "status": stage.get("status"),
+        "objective": stage.get("objective"),
+        "active_board_stack": receipt.get("active_board_stack"),
+        "blockers": list(work.get("blockers") or [])[:4],
+        "open_items": [] if release_stage else list(work.get("open_items") or [])[:4],
+        "next_actions": list(work.get("next_actions") or [])[:3],
+        "next_command": receipt.get("next_command"),
+        "required_inputs": list(receipt.get("required_inputs") or [])[:3],
+        "details_if_needed": "build/07-release/tmp/release-readiness/current.json" if release_stage else None,
+    }
+
+
+def stdout_index(receipt: dict[str, object]) -> dict[str, object]:
+    stage = dict(receipt.get("stage") or {})
+    work = dict(receipt.get("work") or {})
+    return {
+        "schema": 3,
+        "stage": stage.get("name"),
+        "status": stage.get("status"),
+        "blocker_count": len(work.get("blockers") or []),
+        "next_action": receipt.get("next_action"),
+        "next_command": receipt.get("next_command"),
+        "read_now": ["build/WORKSET.json"],
+        "instruction": "Read build/WORKSET.json once; do not reopen stage policy files unless a related failure requires them.",
     }
 
 
 def main() -> int:
-    print(json.dumps(build_receipt(), ensure_ascii=False, separators=(",", ":")))
+    result = build_receipt()
+    target = ROOT / "build/WORKSET.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(workset(result), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(stdout_index(result), ensure_ascii=False, separators=(",", ":")))
     return 0
 
 

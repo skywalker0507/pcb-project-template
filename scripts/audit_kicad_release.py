@@ -377,9 +377,15 @@ def main() -> int:
     missing_required_zones: list[dict[str, str]] = []
     if args.baseline.is_file():
         baseline = json.loads(args.baseline.read_text(encoding="utf-8"))
-        unexpected_violations, missing_baseline_violations = baseline_differences(
+        reviewed_board = baseline.get("reviewed_board_sha256")
+        if reviewed_board is not None and reviewed_board != audit["board_sha256"]:
+            unexpected_violations.append(
+                "baseline|reviewed board SHA does not match the audited board"
+            )
+        baseline_unexpected, missing_baseline_violations = baseline_differences(
             report, categories, baseline,
         )
+        unexpected_violations.extend(baseline_unexpected)
         actual_zones = {
             (item["layer"], item["net"])
             for item in audit["zones"]

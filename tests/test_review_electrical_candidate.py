@@ -7,11 +7,33 @@ import sys
 import tempfile
 import unittest
 
+from scripts.review_electrical_candidate import candidate_review_passes
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class ElectricalCandidateReviewTests(unittest.TestCase):
+    def test_pristine_pre_layout_carrier_defers_physical_drc(self) -> None:
+        self.assertTrue(candidate_review_passes(
+            drc_exit_code=0,
+            render_exit_code=0,
+            topology_exit_code=0,
+            violations=166,
+            unconnected=171,
+            pre_layout=True,
+        ))
+
+    def test_physical_candidate_cannot_defer_drc(self) -> None:
+        self.assertFalse(candidate_review_passes(
+            drc_exit_code=0,
+            render_exit_code=0,
+            topology_exit_code=0,
+            violations=1,
+            unconnected=0,
+            pre_layout=False,
+        ))
+
     def test_invalid_receipt_still_writes_a_machine_readable_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

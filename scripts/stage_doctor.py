@@ -13,6 +13,7 @@ from design_policy import compile_policy
 from electrical_backend import read_config as read_electrical_config, selected_backend as selected_electrical_backend
 from physical_backend import read_config as read_physical_config, selected_backend as selected_physical_backend
 from create_stage_handoff import tree_hash
+from release_inputs import DEFAULT_READINESS, fresh_release_readiness
 
 
 def handoff_integrity_issues(stage: dict[str, object]) -> list[str]:
@@ -73,67 +74,201 @@ def handoff_integrity_issues(stage: dict[str, object]) -> list[str]:
     return issues
 
 
+def physical_navigation(
+    physical_candidate_exists: bool, required_inputs: list[str]
+) -> tuple[str, str | None, list[str]]:
+    if not physical_candidate_exists:
+        return (
+            "create_kicad_physical_candidate",
+            "py -3.14 scripts/pcbctl.py physical-start",
+            required_inputs,
+        )
+    if "bounded_critical_probe_plan" in required_inputs:
+        return "continue_physical_critical_probes", None, required_inputs
+    if any(value.startswith("bounded_") and value.endswith("_corridor_strategy") for value in required_inputs):
+        return "continue_physical_corridor_review", None, required_inputs
+    return "continue_kicad_placement", None, required_inputs or ["bounded_placement_plan"]
+
+
+def resolve_recorded_path(value: object) -> Path | None:
+    if not isinstance(value, str) or not value:
+        return None
+    path = Path(value)
+    return path.resolve() if path.is_absolute() else (ROOT / path).resolve()
+
+
+def routing_checkpoint_navigation(
+    stage: dict[str, object], routing_board: str, board_hash: str | None,
+) -> tuple[str, str | None, list[str]]:
+    """Use compact receipts to stop routing once connectivity is complete."""
+    records = stage.get("candidate_receipts", [])
+    if not isinstance(records, list) or not board_hash:
+        return "route_next_functional_block", f'py -3.14 scripts/pcbctl.py route check --input "{routing_board}"', []
+    audit_path: Path | None = None
+    unconnected: int | None = None
+    for value in reversed(records):
+        path = resolve_recorded_path(value)
+        if path is None or not path.is_file():
+            continue
+        try:
+            receipt = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if receipt.get("kind") != "routing_candidate" or receipt.get("candidate_sha256") != board_hash:
+            continue
+        audit_path = resolve_recorded_path(receipt.get("audit"))
+        if audit_path is None or not audit_path.is_file():
+            continue
+        try:
+            audit = json.loads(audit_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        counts = audit.get("candidate_counts")
+        if (
+            audit.get("success") is True and audit.get("baseline_pass") is True
+            and audit.get("candidate_sha256") == board_hash and isinstance(counts, dict)
+        ):
+            unconnected = int(counts.get("unconnected_items", -1))
+            break
+    if unconnected != 0 or audit_path is None:
+        return "route_next_functional_block", f'py -3.14 scripts/pcbctl.py route check --input "{routing_board}"', []
+    visual_path: Path | None = None
+    for value in reversed(records):
+        path = resolve_recorded_path(value)
+        if path is None or not path.is_file():
+            continue
+        try:
+            receipt = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if (
+            receipt.get("kind") == "pcb_visual_review" and receipt.get("review_pass") is True
+            and receipt.get("tier") == "checkpoint" and receipt.get("board_sha256") == board_hash
+        ):
+            visual_path = path
+            break
+    if visual_path is None:
+        return "review_routing_complete_candidate", None, ["checkpoint_visual_review"]
+    command = (
+        f'py -3.14 scripts/pcbctl.py route checkpoint-finalize --board "{routing_board}" '
+        f'--audit "{audit_path}" --visual-review "{visual_path}"'
+    )
+    return "finalize_routing_checkpoint", command, []
+
+
+def cached_release_readiness(board: str) -> dict[str, object] | None:
+    path = resolve_recorded_path(board)
+    return fresh_release_readiness(path, DEFAULT_READINESS) if path is not None else None
+
+
+def release_navigation(stage: dict[str, object], board: str) -> tuple[str, str | None, list[str]]:
+    readiness = cached_release_readiness(board)
+    if readiness is None:
+        return (
+            "refresh_release_readiness",
+            f'py -3.14 scripts/pcbctl.py verify readiness --board "{board}"',
+            [],
+        )
+    required = [str(item) for item in list(readiness.get("required_inputs") or [])[:8]]
+    return (
+        str(readiness.get("next_action") or "refresh_release_readiness"),
+        str(readiness["next_command"]) if readiness.get("next_command") else None,
+        required,
+    )
+
+
 def receipt() -> dict[str, object]:
     stage = current_stage()
     checklist = json.loads((ROOT / "config/stage-checklist.json").read_text(encoding="utf-8"))
     execution = json.loads((ROOT / "config/execution-policy.json").read_text(encoding="utf-8"))
     flow = json.loads((ROOT / "config/pcb-flow.json").read_text(encoding="utf-8"))
     configured_board = str((flow.get("project") or {}).get("board", ""))
+    configured_board_path = (ROOT / configured_board).resolve() if configured_board else None
+    physical_candidate_exists = bool(
+        configured_board_path
+        and configured_board_path.is_file()
+        and configured_board_path.with_suffix(".physical-origin.json").is_file()
+    )
     rules = checklist.get("stages", {}).get(stage["stage"], {})
     number = rules.get("number")
     label = f"{int(number):02d}-{stage['stage']}" if isinstance(number, int) else str(stage["stage"])
     blockers: list[str] = []
     handoff_issues = handoff_integrity_issues(stage)
     blockers.extend(handoff_issues)
+    handoff_board = stage.get("board")
+    routing_board = (
+        str(handoff_board)
+        if isinstance(handoff_board, str)
+        and handoff_board
+        and not any(issue.startswith("handoff_board_") for issue in handoff_issues)
+        else configured_board
+    )
+    routing_board_path = resolve_recorded_path(routing_board)
+    routing_board_hash = (
+        hashlib.sha256(routing_board_path.read_bytes()).hexdigest().upper()
+        if routing_board_path is not None and routing_board_path.is_file() else None
+    )
     next_command: str | None
     next_action: str | None = None
     required_inputs: list[str] = []
     if stage.get("status") == "blocked_external_dependency":
         blockers.extend(list(stage.get("open_items", []))[:8])
         next_command = None
+        handoff_required_inputs = stage.get("required_inputs", [])
+        if isinstance(handoff_required_inputs, list):
+            required_inputs = [str(item) for item in handoff_required_inputs[:8]]
+        if stage.get("stage") == "electrical" and "interactive_atopile_authentication" in required_inputs:
+            next_action = "authenticate_atopile"
     elif stage.get("status") == "complete" and not stage.get("next_actions") and not handoff_issues:
         next_command = None
     elif stage["stage"] == "requirements":
         requirements = json.loads((ROOT / "config/requirements.json").read_text(encoding="utf-8"))
         blockers.extend(problems(requirements)[:8])
         next_action = "validate_requirements"
-        next_command = "python scripts/validate_requirements.py" if blockers else "python scripts/validate_requirements.py --require-reviewed"
+        next_command = "py -3.14 scripts/validate_requirements.py" if blockers else "py -3.14 scripts/validate_requirements.py --require-reviewed"
     else:
         actions: dict[str, tuple[str, str | None, list[str]]] = {
-            "parts": ("validate_selected_parts", "python scripts/validate_part_provenance.py", []),
-            "electrical": ("build_electrical_candidate", "python scripts/pcbctl.py build --backend atopile", []),
-            "electrical_freeze": (
-                "create_electrical_freeze", None,
-                ["electrical_build_receipt", "electrical_contract_receipt", "candidate_review_receipt"],
-            ),
-            "physical": (
-                "validate_easyeda_import_parity", None,
-                ["frozen_source_manifest", "easyeda_import_manifest", "output_receipt"],
-            ),
-            "routing": ("check_routing_engine", f"python scripts/pcbctl.py route check --input {configured_board}", []),
-            "release": ("run_guarded_release", "python scripts/pcbctl.py release", []),
-            "prototype": ("inventory_prototype_evidence", "python scripts/artifact_store.py inventory", []),
+            "electrical": ("build_or_freeze_electrical", "py -3.14 scripts/pcbctl.py build --backend atopile", []),
+            "physical": physical_navigation(physical_candidate_exists, []),
+            "routing": routing_checkpoint_navigation(stage, routing_board, routing_board_hash),
+            "release": release_navigation(stage, routing_board),
         }
         selected_action = actions.get(stage["stage"])
         if selected_action:
             next_action, next_command, required_inputs = selected_action
         else:
             next_command = None
+        handoff_required_inputs = stage.get("required_inputs", [])
+        if isinstance(handoff_required_inputs, list) and handoff_required_inputs:
+            required_inputs = [str(item) for item in handoff_required_inputs[:8]]
+            if stage["stage"] == "electrical" and "interactive_atopile_authentication" in required_inputs:
+                next_action = "authenticate_atopile"
+                next_command = None
+            elif stage["stage"] == "physical":
+                next_action, next_command, required_inputs = physical_navigation(
+                    physical_candidate_exists, required_inputs
+                )
         if stage["stage"] in {"physical", "routing", "release"}:
             policy = compile_policy()
             capability = {"physical": "physical", "routing": "candidate_routing", "release": "release"}[stage["stage"]]
             if not policy["capabilities"][capability]:
                 blockers.extend(list(policy["capability_issues"][capability])[:8])
+        if stage["stage"] == "release":
+            readiness = cached_release_readiness(routing_board)
+            if readiness is None:
+                blockers.append("release_readiness_missing_or_stale")
+            else:
+                blockers.extend([
+                    str(item.get("code")) for item in list(readiness.get("blockers") or [])
+                    if isinstance(item, dict) and item.get("code")
+                ][:8])
     blockers = blockers[:8]
     allowed_commands = {
         "requirements": ["validate_requirements", "create_stage_handoff"],
-        "parts": ["validate_part_provenance", "create_stage_handoff"],
-        "electrical": ["check_pcb_environment", "build_electrical", "create_stage_handoff"],
-        "electrical_freeze": ["build_electrical --check", "validate_electrical_contract", "review_electrical_candidate", "create_electrical_freeze", "create_stage_handoff"],
-        "physical": ["check_easyeda_import_parity", "compile_design_policy", "apply_kicad_rules", "run_pcb_pipeline", "record_physical_review", "create_stage_handoff"],
-        "routing": ["compile_design_policy", "apply_kicad_rules", "krt_flow check", "krt_flow route", "run_freerouting_headless", "record_physical_review"],
-        "release": ["compile_design_policy", "check_final_electrical_parity", "check_manufacturing_gates", "record_physical_review", "run_pcb_pipeline --export", "create_release_snapshot"],
-        "prototype": ["record_prototype_measurement", "create_stage_handoff"],
+        "electrical": ["pcbctl build", "pcbctl freeze"],
+        "physical": ["pcbctl physical-start", "pcbctl place", "pcbctl verify"],
+        "routing": ["pcbctl route", "pcbctl verify"],
+        "release": ["pcbctl verify readiness", "compile_design_policy", "check_final_electrical_parity", "check_manufacturing_gates", "pcbctl release prepare-dfm", "render_kicad_visual_bundle", "record_pcb_visual_review", "record_physical_review", "run_pcb_pipeline --export", "create_release_snapshot"],
     }.get(stage["stage"], [])
     return {
         "success": not blockers, "stage": stage["stage"], "stage_number": number, "stage_label": label, "status": stage.get("status"),

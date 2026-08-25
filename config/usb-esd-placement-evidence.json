@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "reviewed": true,
+  "subject": "J1-to-U2 connector-side routing channel",
+  "baseline_candidate_sha256": "4B5B59468A5A006ADF85F6221605BECF41FB48D653E5DA4742B08753CD425681",
+  "baseline_geometry_mm": {
+    "j1_contact_row_lower_edge": 62.07,
+    "u2_connector_pad_row_upper_edge": 61.445,
+    "available_channel_height": 0.625
+  },
+  "reviewed_channel_geometry_mm": {
+    "track_width": 0.2,
+    "clearance": 0.2,
+    "two_channel_minimum_height": 1.0,
+    "selected_u2_offset": 0.4,
+    "resulting_channel_height": 1.025,
+    "residual_margin": 0.025
+  },
+  "placement_semantics": {
+    "maximum_connector_side_regression": 0.4,
+    "condition": "Only for a smaller isolated placement move that passes exact DRC, routability comparison, and the RAW USB plus VBUS critical probes."
+  },
+  "failed_strategy_receipts": [
+    "build/05-placement/evidence/floorplan-q-usb-vbus-raw-explicit-v2-run-20260820/kicad-trace-plan.json",
+    "build/05-placement/evidence/floorplan-q-usb-vbus-dp-reroute-v1-run-20260820/kicad-trace-plan.json"
+  ],
+  "notes": [
+    "The first strategy connected all VBUS anchors but could not escape U2 pin 5 without colliding with pin 6 copper.",
+    "The distinct local-DP-reroute strategy restored D+ and escaped VBUS but crossed the preserved D- fanout.",
+    "The selected 0.4 mm offset is the minimum 0.1 mm-grid move that satisfies the reviewed two-channel geometry; the rejected 1.0 mm trial is not approved."
+  ]
+}

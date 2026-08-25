@@ -46,16 +46,19 @@ def vector_value(value: Any) -> int | list[int] | None:
     return x if x == y else [x, y]
 
 
-def selected_parts(path: Path) -> dict[str, str]:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    result: dict[str, str] = {}
-    for part in data.get("parts", []):
-        if not isinstance(part, dict) or not isinstance(part.get("mpn"), str):
-            continue
-        for reference in part.get("refs", []):
-            if isinstance(reference, str):
-                result[reference] = part["mpn"]
-    return result
+def footprint_part_identity(footprint: Any) -> str | None:
+    """Read identity from the generated candidate, never from expected records."""
+    properties = {
+        str(field.GetName()).casefold(): str(field.GetText()).strip()
+        for field in footprint.GetFields()
+        if str(field.GetText()).strip()
+    }
+    for key in ("manufacturer part number", "mpn", "partnumber"):
+        if key in properties:
+            return properties[key]
+    value = str(footprint.GetValue()).strip()
+    reference = str(footprint.GetReference()).strip()
+    return value if value and value != reference else None
 
 
 def shape_signature(item: Any) -> dict[str, Any]:
@@ -80,7 +83,6 @@ def shape_signature(item: Any) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--board", type=Path, required=True)
-    parser.add_argument("--selected-parts", type=Path, default=ROOT / "config/selected-parts.json")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     ensure_kicad_python()
@@ -88,7 +90,6 @@ def main() -> int:
 
     board_path = args.board.resolve()
     board = pcbnew.LoadBoard(str(board_path))
-    part_map = selected_parts(args.selected_parts.resolve())
     components: list[dict[str, Any]] = []
     holes: list[dict[str, Any]] = []
     nets: set[str] = set()
@@ -125,7 +126,7 @@ def main() -> int:
         components.append({
             "reference": reference,
             "footprint": footprint_name,
-            "part_identity": part_map.get(reference),
+            "part_identity": footprint_part_identity(footprint),
             "side": str(board.GetLayerName(footprint.GetLayer())),
             "rotation_udeg": int(round(float(footprint.GetOrientationDegrees()) * 1_000_000)),
             "pads": sorted(pads, key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":"))),

@@ -20,6 +20,8 @@
       "entry": "main.ato:App",
       "runtime": "wsl-ato",
       "platform": "wsl-native",
+      "distro": "Ubuntu-24.04",
+      "network_mode": "direct",
       "status": "primary"
     },
     "tscircuit": {

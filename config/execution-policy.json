@@ -52,5 +52,5 @@
       "requires_detail": true
     }
   },
-  "gate_command": "python scripts/check_turn_exit.py --continuous-scope"
+  "gate_command": "py -3.14 scripts/check_turn_exit.py --continuous-scope"
 }

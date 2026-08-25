@@ -44,7 +44,7 @@ def create_job(
     paths: list[Path], task_type: str, reason: str, policy_path: Path = DEFAULT_POLICY,
     output_dir: Path | None = DEFAULT_OUTPUT_DIR, job_name: str | None = None,
 ) -> dict[str, Any]:
-    require_tool("houtini")
+    require_tool("houtini", allow_optional=True)
     policy = read_policy(policy_path.resolve())
     if policy.get("enabled") is not True:
         return {"eligible": False, "reason": "delegation_disabled"}

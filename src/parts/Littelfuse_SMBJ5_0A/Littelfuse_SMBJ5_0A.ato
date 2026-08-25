@@ -1,0 +1,17 @@
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component Littelfuse_SMBJ5_0A_package:
+    # This trait marks this file as auto-generated
+    # If you want to manually change it, remove the trait
+    trait is_auto_generated<system="ato_part", source="easyeda:C83333", date="2026-08-11T05:59:25.284546+00:00", checksum="0a4ac53ee3e545c0709361e699f06cc9402a4653a8a49239c5ae9c5d702e7d3a">
+
+    trait is_atomic_part<manufacturer="Littelfuse", partnumber="SMBJ5.0A", footprint="SMB_L4.6-W3.6-LS5.3-RD.kicad_mod", symbol="SMBJ5.0A_C83333.kicad_sym">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C83333", manufacturer="Littelfuse", partno="SMBJ5.0A">
+    trait has_designator_prefix<prefix="D">
+
+    # pins
+    pin 2
+    pin 1

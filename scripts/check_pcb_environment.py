@@ -11,6 +11,10 @@ import shutil
 import subprocess
 import sys
 import hashlib
+import importlib.metadata
+
+from easyeda_bridge_client import compact_health as easyeda_compact_health, read_config as read_easyeda_config
+from start_konnect_mcp import discover_kicad_api_socket
 
 
 def run(command: list[str], cwd: Path, timeout: int = 30) -> tuple[bool, str]:
@@ -55,8 +59,15 @@ def main() -> int:
     if not isinstance(active_backend, str) or not isinstance(active_backend_config, dict):
         active_backend = "invalid"
         active_backend_config = {}
+    handoff_path = root / "handoff/stages/CURRENT_STAGE.json"
+    handoff = json.loads(handoff_path.read_text(encoding="utf-8")) if handoff_path.is_file() else {}
+    current_stage = handoff.get("stage")
+    physical_path = root / "config/physical-backend.json"
+    physical_config = json.loads(physical_path.read_text(encoding="utf-8")) if physical_path.is_file() else {}
+    active_physical = physical_config.get("active")
+    active_physical_config = (physical_config.get("backends") or {}).get(active_physical, {})
 
-    for relative in ("config/electrical-backend.json", "config/backend-architecture.json", "config/physical-backend.json", "config/manufacturing-backend.json", "config/pcb-flow.json", "config/kicad-routing-tools.json", "config/toolchain-policy.json", "config/board-stack.json", "config/pcb-acceptance.json", "config/requirements.json", "handoff/stages/CURRENT_STAGE.json"):
+    for relative in ("config/electrical-backend.json", "config/backend-architecture.json", "config/physical-backend.json", "config/manufacturing-backend.json", "config/pcb-flow.json", "config/template-engine.json", "config/manufacturing-rules.json", "config/kicad-routing-tools.json", "config/easyeda-integration.json", "config/toolchain-policy.json", "config/board-stack.json", "config/pcb-acceptance.json", "config/requirements.json", "handoff/stages/CURRENT_STAGE.json"):
         add(checks, f"project:{relative}", (root / relative).is_file(), relative)
     source_root = active_backend_config.get("source_root")
     entry = active_backend_config.get("entry")
@@ -70,11 +81,47 @@ def main() -> int:
     add(checks, "project:resolved-toolchain", resolved_path.is_file(), str(resolved_path))
     mcp_configured = (root / ".codex/config.toml").is_file() or (root / ".codex/pcb-mcp.fragment.toml").is_file()
     add(checks, "project:mcp-config", mcp_configured, ".codex/config.toml or merge fragment")
+    physical_bridge_required = current_stage == "physical" and active_physical == "easyeda_pro"
+    physical_bridge_configured = (
+        isinstance(active_physical_config, dict)
+        and active_physical_config.get("status") in {"ready", "available"}
+        and active_physical_config.get("integration") not in {None, "official_api_skill_or_bridge"}
+    )
+    easyeda_health: dict[str, object] = {}
+    if physical_bridge_required and physical_bridge_configured:
+        integration_config = active_physical_config.get("bridge_config", "config/easyeda-integration.json")
+        try:
+            easyeda_health = easyeda_compact_health(read_easyeda_config((root / str(integration_config)).resolve()))
+        except (OSError, ValueError, KeyError, json.JSONDecodeError):
+            easyeda_health = {"success": False, "service_found": False, "eda_connected": False}
+    physical_bridge_ready = physical_bridge_configured and (
+        not physical_bridge_required or bool(easyeda_health.get("success"))
+    )
+    add(
+        checks,
+        "easyeda-bridge",
+        physical_bridge_ready if physical_bridge_required else True,
+        (
+            f"stage={current_stage};backend={active_physical};"
+            f"status={active_physical_config.get('status') if isinstance(active_physical_config, dict) else None};"
+            f"integration={active_physical_config.get('integration') if isinstance(active_physical_config, dict) else None};"
+            f"service_found={easyeda_health.get('service_found')};"
+            f"eda_connected={easyeda_health.get('eda_connected')};"
+            f"window_count={easyeda_health.get('window_count')}"
+        ),
+        required=physical_bridge_required,
+    )
 
     kicad = Path(r"C:\Program Files\KiCad\10.0\bin\kicad-cli.exe")
     add(checks, "kicad-cli", kicad.is_file(), str(kicad))
     add(checks, "git", shutil.which("git") is not None, shutil.which("git") or "not found")
     add(checks, "python", sys.version_info >= (3, 10), sys.version.split()[0])
+    expected_gerbonara = str((policy.get("gerber_parser") or {}).get("version", ""))
+    try:
+        actual_gerbonara = importlib.metadata.version("gerbonara")
+    except importlib.metadata.PackageNotFoundError:
+        actual_gerbonara = "missing"
+    add(checks, "gerbonara", actual_gerbonara == expected_gerbonara, f"expected={expected_gerbonara};actual={actual_gerbonara}", required=current_stage == "release")
 
     wsl = shutil.which("wsl.exe") or shutil.which("wsl")
     if active_backend != "atopile":
@@ -95,6 +142,40 @@ def main() -> int:
 
     node = shutil.which("node")
     add(checks, "node", bool(node), node or "not found")
+    easyeda_integration_path = root / "config/easyeda-integration.json"
+    easyeda_integration = json.loads(easyeda_integration_path.read_text(encoding="utf-8")) if easyeda_integration_path.is_file() else {}
+    api_bridge_config = easyeda_integration.get("api_bridge", {})
+    api_skill = root / str(api_bridge_config.get("tool", "tools/easyeda-api-skill"))
+    api_ok, api_head = git_head(api_skill, root)
+    expected_api = api_bridge_config.get("required_commit")
+    add(checks, "easyeda-api-skill-commit", api_ok and api_head == expected_api, f"expected={expected_api};actual={api_head}")
+    format_converter_config = easyeda_integration.get("format_converter", {})
+    format_converter_root = Path(str(format_converter_config.get("install_root", r"C:\Program Files\lceda-pro-format-converter")))
+    format_converter_package = format_converter_root / "resources/app/package.json"
+    format_converter_version = "missing"
+    if format_converter_package.is_file():
+        try:
+            format_converter_version = str(json.loads(format_converter_package.read_text(encoding="utf-8")).get("version", "missing"))
+        except (OSError, json.JSONDecodeError):
+            format_converter_version = "invalid"
+    expected_converter_version = str(format_converter_config.get("required_version", ""))
+    format_converter_ready = (
+        (format_converter_root / "lceda-pro-format-converter.exe").is_file()
+        and (format_converter_root / "resources/node_modules/chamelon/convert-node.cjs").is_file()
+        and format_converter_version == expected_converter_version
+    )
+    add(
+        checks, "easyeda-format-converter", format_converter_ready,
+        f"expected={expected_converter_version};actual={format_converter_version};root={format_converter_root}",
+        required=current_stage == "physical" and active_physical == "easyeda_pro",
+    )
+    kirouting_config = easyeda_integration.get("kirouting", {})
+    kirouting_tool = root / str(kirouting_config.get("tool", "tools/eext-kirouting-integration"))
+    kirouting_ok, kirouting_head = git_head(kirouting_tool, root)
+    expected_kirouting = kirouting_config.get("required_commit")
+    add(checks, "easyeda-kirouting-commit", kirouting_ok and kirouting_head == expected_kirouting, f"expected={expected_kirouting};actual={kirouting_head}", required=current_stage == "routing")
+    easyeda_bridge_python = root / ".venv-easyeda-bridge/Scripts/python.exe"
+    add(checks, "easyeda-kirouting-python", easyeda_bridge_python.is_file(), str(easyeda_bridge_python), required=current_stage == "routing")
     bun = shutil.which("bun")
     tscircuit_root = root / "tscircuit"
     add(checks, "bun", bool(bun), bun or "not found", required=active_backend == "tscircuit")
@@ -137,6 +218,8 @@ def main() -> int:
             and binary_hash.lower() == str(konnect_resolved.get("binary_sha256", "")).lower(),
             f"version={output};sha256={binary_hash}",
         )
+        socket = discover_kicad_api_socket()
+        add(checks, "konnect-ipc-address", bool(socket), socket or "unavailable", required=False)
 
     if tier == "deep" and (root / "scripts/krt_flow.py").is_file():
         ok, output = run([sys.executable, "scripts/krt_flow.py", "check"], root, 120)
@@ -157,18 +240,31 @@ def main() -> int:
     required_by_tier = {
         "minimal": {
             "project:config/electrical-backend.json", "project:config/backend-architecture.json", "project:config/physical-backend.json", "project:config/manufacturing-backend.json", "project:active-electrical-source", "project:config/pcb-flow.json", "project:config/kicad-routing-tools.json",
-            "project:config/toolchain-policy.json", "project:config/board-stack.json", "project:config/pcb-acceptance.json", "project:config/requirements.json",
+            "project:config/easyeda-integration.json", "project:config/toolchain-policy.json", "project:config/template-engine.json", "project:config/manufacturing-rules.json", "project:config/board-stack.json", "project:config/pcb-acceptance.json", "project:config/requirements.json",
             "project:handoff/stages/CURRENT_STAGE.json", "project:mcp-config", "python",
         },
         "standard": {
             "project:config/electrical-backend.json", "project:config/backend-architecture.json", "project:config/physical-backend.json", "project:config/manufacturing-backend.json", "project:active-electrical-source", "project:config/pcb-flow.json", "project:config/kicad-routing-tools.json",
-            "project:config/toolchain-policy.json", "project:config/board-stack.json", "project:config/pcb-acceptance.json", "project:config/requirements.json",
+            "project:config/easyeda-integration.json", "project:config/toolchain-policy.json", "project:config/template-engine.json", "project:config/manufacturing-rules.json", "project:config/board-stack.json", "project:config/pcb-acceptance.json", "project:config/requirements.json",
             "project:handoff/stages/CURRENT_STAGE.json", "project:resolved-toolchain", "project:mcp-config",
             "kicad-cli", "git", "python", "node", "houtini-commit",
             "houtini-build", "krt-repository", "krt-python", "krt-commit", "java", "freerouting",
         },
         "deep": {item["name"] for item in checks if item["required"]},
     }
+    if current_stage == "release":
+        required_by_tier["minimal"].add("gerbonara")
+        required_by_tier["standard"].add("gerbonara")
+        required_by_tier["deep"].add("gerbonara")
+    if physical_bridge_required:
+        required_by_tier["standard"].update({"easyeda-bridge", "easyeda-api-skill-commit", "easyeda-format-converter"})
+        required_by_tier["deep"].update({"easyeda-bridge", "easyeda-api-skill-commit", "easyeda-format-converter"})
+    if active_physical == "kicad" and current_stage in {"physical", "routing"}:
+        required_by_tier["standard"].update({"konnect", "konnect-ipc-address"})
+        required_by_tier["deep"].update({"konnect", "konnect-ipc-address"})
+    if current_stage == "routing":
+        required_by_tier["standard"].update({"easyeda-api-skill-commit", "easyeda-kirouting-commit", "easyeda-kirouting-python"})
+        required_by_tier["deep"].update({"easyeda-api-skill-commit", "easyeda-kirouting-commit", "easyeda-kirouting-python"})
     for item in checks:
         item["required"] = item["name"] in required_by_tier[tier]
     if active_backend == "tscircuit":
@@ -187,6 +283,11 @@ def main() -> int:
         suggestions.append("Run: python scripts/init_project.py --project-name <name>")
     if "project:resolved-toolchain" in names:
         suggestions.append("After installing tools manually, run: python scripts/record_toolchain_receipt.py")
+    if "easyeda-bridge" in names:
+        suggestions.append(
+            "Start the reviewed EasyEDA API Skill Bridge and connect one EasyEDA window "
+            "through the Run API Gateway extension."
+        )
     if active_backend == "atopile" and ("wsl" in names or "wsl-atopile" in names):
         suggestions.append(f"Install atopile manually in WSL {args.distro}, then verify: wsl.exe -d {args.distro} -- bash -lc 'ato --version'")
     if active_backend == "tscircuit" and ("bun" in names or "tscircuit-lockfile" in names):

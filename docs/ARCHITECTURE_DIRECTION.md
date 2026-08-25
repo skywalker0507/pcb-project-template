@@ -24,11 +24,15 @@ LLMs are narrow-interface operators, never design or release authorities.
 4. A passing immutable release-lane `ELECTRICAL_FREEZE` bundle is the one-way
    boundary into physical work. Final electrical parity is measured only
    against its frozen manifest.
-5. EasyEDA Pro is the primary physical backend. KiCad is the native atopile
-   interchange, independent validator, and fallback/reference backend.
+5. KiCad is the primary physical backend and native atopile physical
+   interchange. EasyEDA Pro is an optional compatibility, JLC DFM, and ordering
+   capability; it is not a second physical authority.
 6. KiCadRoutingTools is a GUI-independent routing engine; FreeRouting is secondary.
 7. A generated resolved policy is the executable contract consumed by routing,
    DFM checks, handoffs, and release guards.
+8. The independently versioned `template-engine/` package owns reusable policy
+   and manufacturing logic. The project owns reviewed inputs and binds the
+   engine through a version/API/source-digest contract.
 
 No generated artifact supersedes its reviewed input. EasyEDA, KiCad, KRT, and
 FreeRouting may not become electrical authorities. A changed input invalidates
@@ -43,7 +47,7 @@ requirements + reviewed frozen modules + board stack + reviewed fab capability
                       compile_design_policy.py
                                   |
                                   v
-                  build/00-shared/evidence/design-policy/design-policy-resolved.json
+              design-policy-resolved.json + manufacturing-registry.json
                                   |
        +--------------------------+---------------------------+
        |                          |                           |
@@ -88,6 +92,9 @@ machine or another set of transition configuration.
 - External KiCad or Konnect edits cannot be completely prevented. Their board
   SHA changes invalidate dependent receipts, so later guarded operations must
   rerun the required checks.
+- Gerber layer, package-file and geometry rules compile from project policy into
+  one registry. Manufacturer/process evidence stays project-owned; component
+  names and rule branches are forbidden in the engine implementation.
 
 ## Delivery order
 
@@ -129,6 +136,9 @@ machine or another set of transition configuration.
   unreviewed values cannot authorize real KRT routing.
 - Houtini large-text eligibility jobs: short receipts are not delegated; jobs
   use Flash, disabled thinking, and bounded JSON output.
+- A pinned project-neutral template-engine package with thin project adapters.
+- A design-policy-derived manufacturing registry covering required copper
+  layers, outline/drill artifacts, geometric keepouts and special processes.
 
 ## Explicit non-goals
 

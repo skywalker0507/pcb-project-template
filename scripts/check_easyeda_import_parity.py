@@ -14,6 +14,10 @@ from typing import Any
 LENGTH_UNIT = "nm"
 ROTATION_UNIT = "microdegree"
 FULL_ROTATION_UDEG = 360_000_000
+# EasyEDA's PCB API exposes geometry on a 0.1 mil grid. Comparing both
+# manifests on that documented interchange grid avoids false failures below
+# the representable resolution while retaining exact electrical comparison.
+EASYEDA_GRID_NM = 2_540
 
 
 def file_sha256(path: Path) -> str:
@@ -28,6 +32,31 @@ def canonical_collection(value: Any) -> str:
     if isinstance(value, list):
         return canonical(sorted(value, key=canonical))
     return canonical(value)
+
+
+def quantize_nm(value: int) -> int:
+    sign = -1 if value < 0 else 1
+    magnitude = abs(value)
+    return sign * ((magnitude + EASYEDA_GRID_NM // 2) // EASYEDA_GRID_NM) * EASYEDA_GRID_NM
+
+
+def quantize_length_value(value: Any) -> Any:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return quantize_nm(value)
+    if isinstance(value, list):
+        return [quantize_length_value(item) for item in value]
+    return value
+
+
+def normalize_physical(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: quantize_length_value(child) if key.endswith("_nm") else normalize_physical(child)
+            for key, child in value.items()
+        }
+    if isinstance(value, list):
+        return [normalize_physical(item) for item in value]
+    return value
 
 
 def reject_floats(value: Any, label: str) -> None:
@@ -141,13 +170,23 @@ def pad_net_counter(component: dict[str, Any]) -> Counter[tuple[str, str | None]
 
 
 def pad_physical_counter(component: dict[str, Any]) -> Counter[str]:
-    return Counter(canonical({
-        "number": str(pad["number"]),
-        "net": pad.get("net"),
-        "drill_nm": pad.get("drill_nm"),
-        "pad_type": pad.get("pad_type"),
-        "geometry_signature": pad.get("geometry_signature"),
-    }) for pad in component["pads"])
+    normalized = []
+    for pad in component["pads"]:
+        geometry = normalize_physical(pad.get("geometry_signature"))
+        size = geometry.get("size_nm") if isinstance(geometry, dict) else None
+        shape = geometry.get("shape") if isinstance(geometry, dict) else None
+        if isinstance(size, list) and len(size) == 2 and shape in {"0", "1", "2", "4"}:
+            geometry["orientation_udeg"] = int(geometry.get("orientation_udeg", 0)) % 180_000_000
+        if isinstance(size, list) and len(size) == 2 and size[0] == size[1] and shape in {"0", "1", "4"}:
+            geometry["orientation_udeg"] = 0
+        normalized.append(canonical({
+            "number": str(pad["number"]),
+            "net": pad.get("net"),
+            "drill_nm": quantize_length_value(pad.get("drill_nm")),
+            "pad_type": pad.get("pad_type"),
+            "geometry_signature": geometry,
+        }))
+    return Counter(normalized)
 
 
 def compare_electrical(source: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
@@ -218,9 +257,9 @@ def compare(source: dict[str, Any], imported: dict[str, Any]) -> dict[str, Any]:
         failures["rotation"] = rotation_mismatches
     if pad_geometry_mismatches:
         failures["pad_geometry"] = pad_geometry_mismatches
-    if canonical_collection(source["board_outline"]) != canonical_collection(imported["board_outline"]):
+    if canonical_collection(normalize_physical(source["board_outline"])) != canonical_collection(normalize_physical(imported["board_outline"])):
         failures["board_outline"] = True
-    if canonical_collection(source["holes"]) != canonical_collection(imported["holes"]):
+    if canonical_collection(normalize_physical(source["holes"])) != canonical_collection(normalize_physical(imported["holes"])):
         failures["holes"] = True
     electrical_keys = {"component_references", "footprints", "part_identity", "pad_numbers", "pad_to_net_mapping", "nets"}
     return {

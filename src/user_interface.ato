@@ -1,0 +1,63 @@
+"""Reviewed RESET/BOOT buttons and indicator LEDs."""
+
+import ElectricPower
+import Net
+import has_designator
+import has_net_name
+
+from "parts/ALPSALPINE_SKRPANE010/ALPSALPINE_SKRPANE010.ato" import ALPSALPINE_SKRPANE010_package
+from "parts/Lite_On_LTST_C190KGKT/Lite_On_LTST_C190KGKT.ato" import Lite_On_LTST_C190KGKT_package
+from "parts/Lite_On_LTST_C190TBKT/Lite_On_LTST_C190TBKT.ato" import Lite_On_LTST_C190TBKT_package
+from "parts/UNI_ROYAL_0402WGF1001TCE/UNI_ROYAL_0402WGF1001TCE.ato" import UNI_ROYAL_0402WGF1001TCE_package
+
+module UserInterface:
+    power = new ElectricPower
+    assert power.voltage within 3.2V to 3.4V
+
+    reset = new Net
+    boot = new Net
+    status_led = new Net
+    power_led_drive = new Net
+    status_led_drive = new Net
+
+    trait power.hv has_net_name<name="3V3">
+    trait power.lv has_net_name<name="GND">
+    trait reset.part_of has_net_name<name="ESP_EN">
+    trait boot.part_of has_net_name<name="ESP_BOOT">
+    trait status_led.part_of has_net_name<name="STATUS_LED">
+    trait power_led_drive.part_of has_net_name<name="POWER_LED_A">
+    trait status_led_drive.part_of has_net_name<name="STATUS_LED_A">
+
+    sw1 = new ALPSALPINE_SKRPANE010_package
+    sw2 = new ALPSALPINE_SKRPANE010_package
+    led1 = new Lite_On_LTST_C190KGKT_package
+    led2 = new Lite_On_LTST_C190TBKT_package
+    r19 = new UNI_ROYAL_0402WGF1001TCE_package
+    r20 = new UNI_ROYAL_0402WGF1001TCE_package
+
+    trait sw1 has_designator<designator="SW1">
+    trait sw2 has_designator<designator="SW2">
+    trait led1 has_designator<designator="LED1">
+    trait led2 has_designator<designator="LED2">
+    trait r19 has_designator<designator="R19">
+    trait r20 has_designator<designator="R20">
+
+    # SKRP official circuit: pins 1/2 form one contact and pins 3/4 the other.
+    reset.part_of ~ sw1.1
+    reset.part_of ~ sw1.2
+    power.lv ~ sw1.3
+    power.lv ~ sw1.4
+    boot.part_of ~ sw2.1
+    boot.part_of ~ sw2.2
+    power.lv ~ sw2.3
+    power.lv ~ sw2.4
+
+    power.hv ~ r19.1
+    r19.2 ~ power_led_drive.part_of
+    power_led_drive.part_of ~ led1.pos
+    led1.neg ~ power.lv
+
+    status_led.part_of ~ r20.1
+    r20.2 ~ status_led_drive.part_of
+    status_led_drive.part_of ~ led2.A
+    led2.K ~ power.lv

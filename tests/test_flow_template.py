@@ -3,11 +3,13 @@ from __future__ import annotations
 import importlib.util
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,8 +31,11 @@ requirements = load("requirements_template", "scripts/validate_requirements.py")
 stage_policy = load("stage_policy_template", "scripts/stage_policy.py")
 atopile_build = load("atopile_build_template", "scripts/build_atopile_isolated.py")
 jlc_check = load("jlc_check_template", "scripts/check_jlcpcb_release.py")
+dfm_candidate = load("dfm_candidate_template", "scripts/prepare_jlcpcb_dfm_candidate.py")
 snapshot = load("snapshot_template", "scripts/create_release_snapshot.py")
 houtini_job = load("houtini_job_template", "scripts/create_houtini_job.py")
+easyeda_contract = load("easyeda_kirouting_contract_template", "scripts/easyeda_kirouting_contract.py")
+easyeda_writeback = load("easyeda_writeback_template", "scripts/apply_easyeda_route_plan.py")
 design_policy = load("design_policy_template", "scripts/design_policy.py")
 fab_values = load("fab_values_template", "scripts/apply_reviewed_fab_values.py")
 electrical_backend = load("electrical_backend_template", "scripts/electrical_backend.py")
@@ -43,6 +48,7 @@ backend_architecture = load("backend_architecture_template", "scripts/check_back
 pcbctl = load("pcbctl_template", "scripts/pcbctl.py")
 session_boot = load("session_boot_template", "scripts/session_boot.py")
 stage_doctor = load("stage_doctor_template", "scripts/stage_doctor.py")
+stage_handoff = load("stage_handoff_template", "scripts/create_stage_handoff.py")
 toolchain_receipt = load("toolchain_receipt_template", "scripts/record_toolchain_receipt.py")
 init_project = load("init_project_template", "scripts/init_project.py")
 
@@ -75,21 +81,92 @@ class FlowTemplateTests(unittest.TestCase):
         self.assertLessEqual(len(instructions.split()), 650)
         self.assertNotIn("--no-clamp-netclasses", instructions)
         receipt = session_boot.build_receipt()
-        self.assertEqual(receipt["context"]["default_read"], ["AGENTS.md", "this session receipt"])
-        self.assertEqual(receipt["context"]["read_now"], [])
-        self.assertEqual(receipt["command_help"], "python scripts/pcbctl.py --help")
+        self.assertEqual(receipt["context"]["default_read"], ["AGENTS.md", "build/WORKSET.json"])
+        self.assertEqual(receipt["context"]["read_now"], ["build/WORKSET.json"])
+        self.assertEqual(receipt["command_help"], "py -3.14 scripts/pcbctl.py --help")
         self.assertNotIn("core_commands", receipt)
         self.assertNotIn("release_requires", receipt)
         self.assertNotIn("tool_entrypoints", receipt)
+        index = session_boot.stdout_index(receipt)
+        self.assertEqual(index["read_now"], ["build/WORKSET.json"])
+        self.assertNotIn("open_items", index)
+
+    def test_handoff_refreshes_and_verifies_compact_workset(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "build/WORKSET.json"
+            original_root = stage_handoff.ROOT
+
+            def compile_workset(*args, **kwargs):
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(json.dumps({
+                    "stage": "routing",
+                    "status": "in_progress",
+                    "objective": "Route the next block",
+                }), encoding="utf-8")
+                return subprocess.CompletedProcess(args[0], 0, stdout='{"stage":"routing"}')
+
+            try:
+                stage_handoff.ROOT = root
+                with mock.patch.object(stage_handoff.subprocess, "run", side_effect=compile_workset):
+                    receipt = stage_handoff.refresh_workset("routing", "Route the next block")
+            finally:
+                stage_handoff.ROOT = original_root
+            self.assertEqual(receipt["path"], "build/WORKSET.json")
+            self.assertEqual(receipt["stage"], "routing")
 
     def test_pcbctl_is_only_a_thin_dispatcher_to_existing_scripts(self) -> None:
-        self.assertEqual(set(pcbctl.COMMANDS), {"status", "build", "freeze", "route", "verify", "release"})
+        self.assertEqual(set(pcbctl.COMMANDS), {"status", "build", "freeze", "physical-start", "place", "route", "verify", "release"})
         for target in pcbctl.COMMANDS.values():
             self.assertTrue((ROOT / target[0]).is_file())
         routed = pcbctl.command_argv("route", ["check", "--input", "board.kicad_pcb"])
         self.assertEqual(routed[1:], ["scripts/krt_flow.py", "check", "--input", "board.kicad_pcb"])
         released = pcbctl.command_argv("release", ["--run-id", "test"])
         self.assertEqual(released[1:], ["scripts/run_pcb_pipeline.py", "--export", "--run-id", "test"])
+        scored = pcbctl.command_argv("place", ["score", "--board", "candidate.kicad_pcb"])
+        self.assertEqual(scored[1:], ["scripts/check_kicad_placement_routability.py", "--board", "candidate.kicad_pcb"])
+        queried = pcbctl.command_argv("place", ["query", "--board", "candidate.kicad_pcb", "--ref", "U1"])
+        self.assertEqual(queried[1:], ["scripts/query_pcb_geometry.py", "--board", "candidate.kicad_pcb", "--ref", "U1"])
+        delta = pcbctl.command_argv("verify", ["delta", "--input", "base.kicad_pcb", "--candidate", "candidate.kicad_pcb"])
+        self.assertEqual(delta[1:], ["scripts/krt_candidate_audit.py", "--input", "base.kicad_pcb", "--candidate", "candidate.kicad_pcb"])
+        checkpoint = pcbctl.command_argv("verify", ["--tier", "checkpoint", "--board", "candidate.kicad_pcb", "--baseline-board", "base.kicad_pcb"])
+        self.assertEqual(checkpoint[1:], ["scripts/run_pcb_pipeline.py", "--tier", "checkpoint", "--board", "candidate.kicad_pcb", "--baseline-board", "base.kicad_pcb"])
+        escalated = pcbctl.command_argv("route", ["escalate", "--scope", "usb_input"])
+        self.assertEqual(escalated[1:], ["scripts/assess_routing_escalation.py", "--scope", "usb_input"])
+        started = pcbctl.command_argv("route", ["start", "--run-id", "route-1", "--profile", "outer_low_risk"])
+        self.assertEqual(started[1:], ["scripts/krt_checkpoint.py", "start", "--run-id", "route-1", "--profile", "outer_low_risk"])
+        with self.assertRaises(ValueError):
+            pcbctl.command_argv("place", ["unknown-action"])
+        with self.assertRaises(ValueError):
+            pcbctl.command_argv("verify", ["unknown-action"])
+
+    def test_default_flow_has_five_stages_and_three_validation_tiers(self) -> None:
+        stages = json.loads((ROOT / "config/stage-checklist.json").read_text(encoding="utf-8"))["stages"]
+        self.assertEqual(list(stages), ["requirements", "electrical", "physical", "routing", "release"])
+        tiers = json.loads((ROOT / "config/validation-tiers.json").read_text(encoding="utf-8"))["tiers"]
+        self.assertEqual(set(tiers), {"quick", "checkpoint", "release"})
+        self.assertFalse(tiers["quick"]["full_pipeline"])
+        self.assertTrue(tiers["release"]["full_pipeline"])
+
+    def test_physical_stage_allows_isolated_krt_critical_probes(self) -> None:
+        policy = json.loads((ROOT / "config/ai-tool-policy.json").read_text(encoding="utf-8"))
+        self.assertIn("krt", policy["stages"]["physical"])
+        self.assertIn("critical route probes", policy["krt"]["role"])
+        self.assertIn("never modifies the active board", policy["krt"]["role"])
+
+    def test_routing_to_physical_return_requires_eligible_escalation(self) -> None:
+        with self.assertRaises(SystemExit):
+            stage_handoff.validate_routing_return("routing", "physical", None)
+        self.assertIsNone(stage_handoff.validate_routing_return("electrical", "physical", None))
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "escalation.json"
+            receipt.write_text(json.dumps({
+                "kind": "routing_escalation",
+                "placement_review_eligible": True,
+                "placement_change_authorized": False,
+            }), encoding="utf-8")
+            result = stage_handoff.validate_routing_return("routing", "physical", receipt)
+            self.assertEqual(result["sha256"], hashlib.sha256(receipt.read_bytes()).hexdigest().upper())
 
     def test_stage_navigation_uses_the_configured_project_board(self) -> None:
         original_stage = stage_doctor.current_stage
@@ -111,14 +188,41 @@ class FlowTemplateTests(unittest.TestCase):
         self.assertIn(flow["project"]["board"], navigation["next_command"])
         self.assertNotIn("elec/layout/default/default.kicad_pcb", navigation["next_command"])
 
+    def test_routing_navigation_continues_from_sha_bound_handoff_candidate(self) -> None:
+        original_stage = stage_doctor.current_stage
+        original_policy = stage_doctor.compile_policy
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                candidate = Path(directory) / "accepted candidate.kicad_pcb"
+                candidate.write_text("candidate", encoding="utf-8")
+                stage_doctor.current_stage = lambda: {
+                    "stage": "routing", "status": "in_progress", "objective": "test",
+                    "open_items": [], "next_actions": [], "board": str(candidate),
+                    "board_sha256": hashlib.sha256(candidate.read_bytes()).hexdigest().upper(),
+                }
+                stage_doctor.compile_policy = lambda: {
+                    "capabilities": {"candidate_routing": True},
+                    "capability_issues": {"candidate_routing": []},
+                }
+                navigation = stage_doctor.receipt()
+                self.assertIn(str(candidate), navigation["next_command"])
+                self.assertNotIn("elec/layout/esp32-s3", navigation["next_command"])
+        finally:
+            stage_doctor.current_stage = original_stage
+            stage_doctor.compile_policy = original_policy
+
     def test_navigation_never_uses_help_as_a_stage_action(self) -> None:
         original_stage = stage_doctor.current_stage
         original_policy = stage_doctor.compile_policy
         try:
-            for stage_name, expected_action, expected_input in (
-                ("electrical_freeze", "create_electrical_freeze", "electrical_build_receipt"),
-                ("physical", "validate_easyeda_import_parity", "easyeda_import_manifest"),
-            ):
+            physical_board = ROOT / json.loads((ROOT / "config/pcb-flow.json").read_text(encoding="utf-8"))["project"]["board"]
+            physical_initialized = physical_board.is_file() and physical_board.with_suffix(".physical-origin.json").is_file()
+            for stage_name, expected_action, expected_input, expect_command in ((
+                "physical",
+                "continue_kicad_placement" if physical_initialized else "create_kicad_physical_candidate",
+                "bounded_placement_plan" if physical_initialized else None,
+                not physical_initialized,
+            ),):
                 stage_doctor.current_stage = lambda name=stage_name: {
                     "stage": name, "status": "in_progress", "objective": "test",
                     "open_items": [], "next_actions": [],
@@ -129,11 +233,62 @@ class FlowTemplateTests(unittest.TestCase):
                 }
                 navigation = stage_doctor.receipt()
                 self.assertEqual(navigation["next_action"], expected_action)
-                self.assertIsNone(navigation["next_command"])
-                self.assertIn(expected_input, navigation["required_inputs"])
+                if expect_command:
+                    self.assertEqual(navigation["next_command"], "py -3.14 scripts/pcbctl.py physical-start")
+                else:
+                    self.assertIsNone(navigation["next_command"])
+                if expected_input:
+                    self.assertIn(expected_input, navigation["required_inputs"])
         finally:
             stage_doctor.current_stage = original_stage
             stage_doctor.compile_policy = original_policy
+
+    def test_physical_navigation_respects_explicit_critical_probe_work(self) -> None:
+        action, command, inputs = stage_doctor.physical_navigation(
+            True, ["bounded_critical_probe_plan"]
+        )
+        self.assertEqual(action, "continue_physical_critical_probes")
+        self.assertIsNone(command)
+        self.assertEqual(inputs, ["bounded_critical_probe_plan"])
+
+    def test_physical_navigation_respects_explicit_corridor_review(self) -> None:
+        action, command, inputs = stage_doctor.physical_navigation(
+            True, ["bounded_3v3_corridor_strategy"]
+        )
+        self.assertEqual(action, "continue_physical_corridor_review")
+        self.assertIsNone(command)
+        self.assertEqual(inputs, ["bounded_3v3_corridor_strategy"])
+
+    def test_electrical_navigation_does_not_repeat_build_while_auth_input_is_required(self) -> None:
+        original_stage = stage_doctor.current_stage
+        try:
+            stage_doctor.current_stage = lambda: {
+                "stage": "electrical", "status": "in_progress", "objective": "test",
+                "open_items": ["authenticate"], "next_actions": [],
+                "required_inputs": ["interactive_atopile_authentication"],
+            }
+            navigation = stage_doctor.receipt()
+        finally:
+            stage_doctor.current_stage = original_stage
+        self.assertEqual(navigation["next_action"], "authenticate_atopile")
+        self.assertIsNone(navigation["next_command"])
+        self.assertEqual(navigation["required_inputs"], ["interactive_atopile_authentication"])
+
+    def test_blocked_electrical_navigation_preserves_auth_required_input(self) -> None:
+        original_stage = stage_doctor.current_stage
+        try:
+            stage_doctor.current_stage = lambda: {
+                "stage": "electrical", "status": "blocked_external_dependency", "objective": "test",
+                "open_items": ["signed out"], "next_actions": [],
+                "required_inputs": ["interactive_atopile_authentication"],
+            }
+            navigation = stage_doctor.receipt()
+        finally:
+            stage_doctor.current_stage = original_stage
+        self.assertFalse(navigation["success"])
+        self.assertEqual(navigation["next_action"], "authenticate_atopile")
+        self.assertEqual(navigation["required_inputs"], ["interactive_atopile_authentication"])
+        self.assertIsNone(navigation["next_command"])
 
     def test_electrical_only_toolchain_refresh_preserves_full_tool_records(self) -> None:
         existing = {
@@ -190,10 +345,10 @@ class FlowTemplateTests(unittest.TestCase):
     def test_physical_backend_roles_are_separate_from_routing_and_electrical(self) -> None:
         config = physical_backend.read_config()
         name, backend = physical_backend.selected_backend(config)
-        self.assertEqual(name, "easyeda_pro")
+        self.assertEqual(name, "kicad")
         self.assertEqual(backend["role"], "primary")
-        _, fallback = physical_backend.selected_backend(config, "kicad")
-        self.assertEqual(fallback["role"], "reference_fallback")
+        _, optional = physical_backend.selected_backend(config, "easyeda_pro")
+        self.assertEqual(optional["role"], "optional_compatibility")
         architecture = json.loads((ROOT / "config/backend-architecture.json").read_text(encoding="utf-8"))
         self.assertEqual(architecture["routing_engine"]["active"], "kicad_routing_tools")
         self.assertTrue(architecture["routing_engine"]["independent_of_gui_backend"])
@@ -276,6 +431,7 @@ class FlowTemplateTests(unittest.TestCase):
             frozen_manifest.write_text("{}", encoding="utf-8")
             source_manifest.write_text("{}", encoding="utf-8")
             digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest().upper()
+            registry = json.loads((ROOT / "build/00-shared/evidence/design-policy/manufacturing-registry.json").read_text(encoding="utf-8"))
             freeze_path = bundle / "electrical-freeze.json"
             freeze = {
                 "schema": 2, "kind": "electrical_freeze", "success": True, "freeze_pass": True,
@@ -300,8 +456,14 @@ class FlowTemplateTests(unittest.TestCase):
                     "backend": "easyeda_pro", "board_sha256": digest(board),
                 },
                 "dfm.json": {
-                    "schema": 1, "kind": "manufacturing_dfm", "success": True, "dfm_pass": True,
+                    "schema": 2, "kind": "manufacturing_dfm", "success": True, "dfm_pass": True,
                     "backend": "jlcpcb", "board_sha256": digest(board),
+                    "policy_sha256": registry["policy_sha256"], "registry_sha256": registry["registry_sha256"],
+                    "order_parameters": {"surface_finish": "ENIG", "solder_mask_color": "black"},
+                    "analysis_modules": {
+                        "pcb": {"executed": True, "pass": True},
+                        "smt": {"executed": True, "pass": True},
+                    },
                 },
             }
             for name, value in receipts.items():
@@ -447,6 +609,126 @@ class FlowTemplateTests(unittest.TestCase):
         failure = atopile_build.classify_failure("Fetching component data failed: connection error: Name or service not known")
         self.assertEqual(failure["class"], "component_data_unreachable")
 
+    def test_atopile_direct_network_mode_removes_proxy_environment(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {"HTTP_PROXY": "http://proxy", "ALL_PROXY": "socks://proxy", "WSLENV": "HTTP_PROXY/u:KEEP/u"},
+            clear=False,
+        ):
+            env = atopile_build.wsl_process_environment("direct")
+        self.assertNotIn("HTTP_PROXY", env)
+        self.assertNotIn("ALL_PROXY", env)
+        self.assertEqual(env.get("WSLENV"), "KEEP/u")
+
+    def test_electrical_build_rejects_reviewed_input_mutation(self) -> None:
+        text = (ROOT / "scripts/build_electrical.py").read_text(encoding="utf-8")
+        self.assertIn("reviewed_inputs_mutated_during_build", text)
+        self.assertIn('post_status["source_sha256"] != status["source_sha256"]', text)
+
+    def test_physical_environment_requires_easyeda_bridge(self) -> None:
+        text = (ROOT / "scripts/check_pcb_environment.py").read_text(encoding="utf-8")
+        self.assertIn('current_stage == "physical"', text)
+        self.assertIn('"easyeda-bridge"', text)
+
+    def test_easyeda_kirouting_mvp_rejects_existing_target_copper(self) -> None:
+        config = {
+            "routing_contract": {
+                "ui_rule_fields_forbidden": ["track_width"],
+                "mvp": {
+                    "profile": "outer_low_risk", "maximum_requested_nets": 1,
+                    "require_target_nets_without_existing_copper": True,
+                },
+            },
+        }
+        payload = {
+            "board": {}, "components": [], "nets": ["GPIO10"],
+            "existing_tracks": [{"net": "GPIO10"}], "existing_vias": [],
+            "routing_config": {"nets_to_route": ["GPIO10"], "track_width": 99},
+        }
+        with self.assertRaisesRegex(ValueError, "no existing copper"):
+            easyeda_contract.validate_mvp_request(payload, config)
+
+    def test_easyeda_kirouting_mvp_ignores_ui_rules_and_fingerprints_board(self) -> None:
+        config = {
+            "routing_contract": {
+                "ui_rule_fields_forbidden": ["track_width", "clearance"],
+                "mvp": {
+                    "profile": "outer_low_risk", "maximum_requested_nets": 1,
+                    "require_target_nets_without_existing_copper": True,
+                },
+            },
+        }
+        payload = {
+            "board": {"outline": []}, "components": [], "nets": ["GPIO10"],
+            "existing_tracks": [], "existing_vias": [],
+            "routing_config": {"nets_to_route": ["GPIO10"], "track_width": 99, "clearance": 99},
+        }
+        result = easyeda_contract.validate_mvp_request(payload, config)
+        self.assertEqual(result["nets"], ["GPIO10"])
+        self.assertEqual(result["ignored_ui_rule_fields"], ["clearance", "track_width"])
+        self.assertEqual(len(result["board_fingerprint"]), 64)
+
+    def test_easyeda_project_bridge_never_imports_official_routing_runner(self) -> None:
+        text = (ROOT / "scripts/easyeda_kirouting_bridge.py").read_text(encoding="utf-8")
+        self.assertNotIn("from routing_runner import", text)
+        self.assertIn('str(KRT_FLOW), "route"', text)
+        self.assertIn('"127.0.0.1"', text)
+
+    def test_easyeda_writeback_requires_one_completed_mil_net(self) -> None:
+        route = easyeda_writeback.normalize_plan({
+            "status": "completed", "units_mm": False,
+            "tracks": [{"net": "GPIO10"}], "vias": [],
+        })
+        self.assertEqual(route["net"], "GPIO10")
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            easyeda_writeback.normalize_plan({
+                "status": "completed", "units_mm": False,
+                "tracks": [{"net": "GPIO10"}, {"net": "GPIO11"}], "vias": [],
+            })
+
+    def test_easyeda_writeback_geometry_verification_is_exact(self) -> None:
+        route = {
+            "net": "GPIO10",
+            "tracks": [{"net": "GPIO10", "layer": 1, "startX": 10.2, "startY": 20.4, "endX": 30.2, "endY": 40.4, "width": 8.1}],
+            "vias": [],
+        }
+        payload = {
+            "existing_tracks": [{"net": "GPIO10", "layer": 1, "startX": 10, "startY": 20, "endX": 30, "endY": 40, "width": 8}],
+            "existing_vias": [],
+        }
+        self.assertTrue(easyeda_writeback.verify_geometry(payload, route)["success"])
+        payload["existing_tracks"][0]["endX"] = 31
+        self.assertFalse(easyeda_writeback.verify_geometry(payload, route)["success"])
+
+    def test_atopile_failure_classifies_easyeda_tls_timeout(self) -> None:
+        failure = atopile_build.classify_failure(
+            "EasyEDA API is unavailable: Failed to fetch footprint data for C12891: "
+            "the handshake operation timed out"
+        )
+        self.assertEqual(failure["class"], "component_data_unreachable")
+
+    def test_atopile_failure_classifies_required_sign_in(self) -> None:
+        failure = atopile_build.classify_failure(
+            "Part picking on atopile 0.15.8 requires sign-in. Run `ato auth login`."
+        )
+        self.assertEqual(failure["class"], "atopile_auth_required")
+
+    def test_atopile_failure_classifies_footprint_resource_mismatch(self) -> None:
+        failure = atopile_build.classify_failure(
+            "Footprint `USB_C_Receptacle` doesn't exist in library `Reviewed_USB`"
+        )
+        self.assertEqual(failure["class"], "footprint_resource_mismatch")
+
+    def test_atopile_picker_preflight_only_triggers_for_explicit_part_constraints(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            (source / "main.ato").write_text("module App:\n    pass\n", encoding="utf-8")
+            self.assertFalse(atopile_build.source_requires_part_picker(source))
+            (source / "parts.ato").write_text(
+                'module SelectedPart:\n    lcsc_id = "C12891"\n', encoding="utf-8"
+            )
+            self.assertTrue(atopile_build.source_requires_part_picker(source))
+
     def test_candidate_diff_is_triage_only(self) -> None:
         diff = krt.candidate_diff(
             {"segments": {"F.Cu": 1}, "vias": 0, "widths_mm": [0.2]},
@@ -465,6 +747,19 @@ class FlowTemplateTests(unittest.TestCase):
             report = jlc_check.package_report(root / "missing", stack)
             self.assertFalse(report["success"])
             self.assertIn("gerber_files_present", report["failures"])
+
+    def test_dfm_candidate_binds_reviewed_parts_to_exact_board_without_mutating_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "parts.json"
+            destination = root / "assembly-parts-bound.json"
+            original = {"schema": 1, "board_sha256": None, "parts": [{"refs": ["R1"]}]}
+            source.write_text(json.dumps(original), encoding="utf-8")
+            bound = dfm_candidate.bind_assembly_parts_source(source, destination, "ABC123")
+            self.assertEqual(bound["board_sha256"], "ABC123")
+            self.assertEqual(json.loads(source.read_text(encoding="utf-8")), original)
+            recorded = json.loads(destination.read_text(encoding="utf-8"))
+            self.assertEqual(recorded["derived_from_sha256"], dfm_candidate.sha256(source))
 
     def test_release_snapshot_name_uses_board_hash(self) -> None:
         self.assertEqual(snapshot.snapshot_name("ABCDEF0123456789"), "release-abcdef012345")
@@ -509,7 +804,10 @@ class FlowTemplateTests(unittest.TestCase):
             original_root = houtini_job.ROOT
             try:
                 houtini_job.ROOT = root
-                result = houtini_job.create_job([receipt], "test", "test", policy_path, root / "out")
+                # This unit test exercises the receipt-size gate, independently
+                # of whichever workflow stage the developer currently has open.
+                with mock.patch.object(houtini_job, "require_tool", return_value={}):
+                    result = houtini_job.create_job([receipt], "test", "test", policy_path, root / "out")
             finally:
                 houtini_job.ROOT = original_root
             self.assertFalse(result["eligible"])
@@ -522,12 +820,14 @@ class FlowTemplateTests(unittest.TestCase):
                 "requirements": root / "requirements.json",
                 "board_stack": root / "board-stack.json",
                 "manufacturing_profile": root / "manufacturing.json",
+                "manufacturing_rules": root / "manufacturing-rules.json",
                 "krt": root / "krt.json",
                 "acceptance": root / "acceptance.json",
             }
             files["requirements"].write_text(json.dumps({"schema": 2, "status": "reviewed", "unknowns": [], "critical_nets": [], "placement_regions": []}), encoding="utf-8")
             files["board_stack"].write_text(json.dumps({"active": "two", "profiles": {"two": {"copper_layers": ["F.Cu", "B.Cu"], "forbidden_signal_layers": []}}}), encoding="utf-8")
             files["manufacturing_profile"].write_text(json.dumps({"selected": True, "routing_rules": {"reviewed": True, "values": {"track_width": 0.2, "clearance": 0.2, "via_diameter": 0.6, "via_drill": 0.3}, "evidence": ["card"]}}), encoding="utf-8")
+            files["manufacturing_rules"].write_text(json.dumps({"schema": 2, "gerber_file_patterns": {"F.Cu": "*-F_Cu.gtl", "B.Cu": "*-B_Cu.gbl"}, "gerber_rules": []}), encoding="utf-8")
             files["krt"].write_text(json.dumps({"profiles": {"outer_low_risk": {"routing": {"layers": ["F.Cu", "B.Cu"]}}}}), encoding="utf-8")
             files["acceptance"].write_text("{}", encoding="utf-8")
             original = design_policy.INPUTS
@@ -542,6 +842,48 @@ class FlowTemplateTests(unittest.TestCase):
             self.assertNotEqual(first_hash, design_policy.policy_sha256(second))
             self.assertTrue(second["capabilities"]["release"])
 
+    def test_krt_profile_may_explicitly_restrict_routing_to_layer_subset(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stack = root / "board-stack.json"
+            stack.write_text(json.dumps({
+                "active": "four",
+                "profiles": {"four": {
+                    "copper_layers": ["F.Cu", "In1.Cu", "In2.Cu", "B.Cu"],
+                    "forbidden_signal_layers": ["In1.Cu", "In2.Cu"],
+                }},
+            }), encoding="utf-8")
+            config = {
+                "board_stack": "board-stack.json",
+                "guardrails": {"forbidden_signal_layers": ["In1.Cu", "In2.Cu"]},
+            }
+            profile = {
+                "allow_layer_subset": True,
+                "routing": {"layers": ["F.Cu"]},
+            }
+            krt.require_active_stack(config, root, profile)
+
+    def test_krt_layer_subset_requires_explicit_opt_in(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stack = root / "board-stack.json"
+            stack.write_text(json.dumps({
+                "active": "two",
+                "profiles": {"two": {
+                    "copper_layers": ["F.Cu", "B.Cu"],
+                    "forbidden_signal_layers": [],
+                }},
+            }), encoding="utf-8")
+            config = {"board_stack": "board-stack.json", "guardrails": {"forbidden_signal_layers": []}}
+            with self.assertRaises(SystemExit):
+                krt.require_active_stack(config, root, {"routing": {"layers": ["F.Cu"]}})
+
+    def test_usb_device_escape_profile_explicitly_opts_into_fcu_subset(self) -> None:
+        config = json.loads((ROOT / "config" / "kicad-routing-tools.json").read_text(encoding="utf-8"))
+        profile = config["profiles"]["usb_device_escape_fcu"]
+        self.assertIs(profile.get("allow_layer_subset"), True)
+        self.assertEqual(profile["routing"]["layers"], ["F.Cu"])
+
     def test_physical_review_must_match_board_and_policy(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -552,6 +894,8 @@ class FlowTemplateTests(unittest.TestCase):
                 "review_pass": True,
                 "board_sha256": __import__("hashlib").sha256(board.read_bytes()).hexdigest().upper(),
                 "policy_sha256": "policy",
+                "visual_review_pass": True,
+                "evidence": {"visual": ["visual-review.json"]},
             }), encoding="utf-8")
             self.assertTrue(export.require_passing_physical_review(board, review, {"policy_sha256": "policy"})["review_pass"])
             with self.assertRaises(SystemExit):

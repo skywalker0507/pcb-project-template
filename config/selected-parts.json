@@ -1,30 +1,41 @@
 {
   "schema": 1,
-  "status": "release_review",
-  "purpose": "Primary-source provenance for the Rev A electrical design. The SHA-bound JLCPCB assembly mapping is config/jlcpcb-parts.json; supplier stock remains volatile and must be rechecked before ordering.",
+  "revision": "Rev A.1",
+  "status": "electrical_review",
+  "purpose": "Primary-source provenance for the Rev A.1 electrical design. Supplier mappings remain provisional until a new electrical freeze and board SHA are created.",
+  "footprint_and_polarity_review": {
+    "status": "reviewed",
+    "reviewed_refs": ["U1", "J1", "J2", "J3", "J4", "U2", "U3", "L1", "U4", "U5", "Q1", "Q2", "Q3", "Q4", "Q5", "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15", "C2", "C4", "C6", "C7", "F1", "SW1", "SW2", "LED1", "LED2"],
+    "evidence_file": "config/footprint-provenance.json",
+    "method": "Cross-check exact package/order code, physical pin numbering, diode/LED/MOSFET polarity, connector pin 1 and custom land patterns against the cited primary sources before electrical capture.",
+    "limitations": ["Generic resistor and small non-polar capacitor footprints are controlled by config/jlcpcb-parts.json.", "Supplier stock remains volatile and is rechecked before ordering."]
+  },
   "parts": [
     {"refs": ["U1"], "mpn": "ESP32-S3-WROOM-1-N16R8", "manufacturer": "Espressif", "source": "https://documentation.espressif.com/esp32-s3-wroom-1_wroom-1u_datasheet_en.pdf", "evidence": "WROOM-1 module with PCB antenna; supply range 3.0–3.6 V."},
     {"refs": ["J1"], "mpn": "USB4105-GF-A", "manufacturer": "GCT", "source": "https://gct.co/files/drawings/usb4105.pdf", "evidence": "Revision B4 product drawing; J1 land pattern was verified against the recommended layout and is SHA-recorded in config/footprint-provenance.json."},
-    {"refs": ["J2"], "mpn": "TC2050-IDC-NL", "manufacturer": "Tag-Connect", "source": "https://www.tag-connect.com/wp-content/uploads/bsk-pdf-manager/TC2050-IDC-NL_Datasheet_8.pdf", "evidence": "10-pin Plug-of-Nails footprint with explicit keepout and solder-mask constraints."},
-    {"refs": ["U2"], "mpn": "USBLC6-2P6", "manufacturer": "STMicroelectronics", "source": "https://www.st.com/resource/en/datasheet/usblc6-2.pdf", "evidence": "Two-line, low-capacitance USB ESD protector in SOT-666. The verified pin map is 1/6 = I/O1 (D-), 3/4 = I/O2 (D+), 2 = GND, 5 = VBUS."},
+    {"refs": ["J2"], "mpn": "TC2050-IDC-NL", "manufacturer": "Tag-Connect", "source": "https://www.tag-connect.com/wp-content/uploads/bsk-pdf-manager/TC2050-IDC-NL_Datasheet_8.pdf", "evidence": "DNL PCB contact footprint for the 10-pin Plug-of-Nails cable, with explicit keepout and no solder paste on contact pads."},
+    {"refs": ["J3"], "mpn": "B8B-XH-A (LF)(SN)", "manufacturer": "JST", "source": "https://www.jst-mfg.com/product/pdf/eng/eXH.pdf", "evidence": "Keyed 8-circuit 2.5 mm vertical XH header. The official drawing gives A=17.5 mm, B=22.4 mm and identifies circuit 1; KiCad Connector_JST:JST_XH_B8B-XH-A_1x08_P2.50mm_Vertical matches the 0.95 mm drill, 2.5 mm pitch and pin-1 orientation. Mating housing is XHP-8."},
+    {"refs": ["J4"], "mpn": "TSW-107-07-L-S", "manufacturer": "Samtec", "source": "https://www.samtec.com/products/tsw-107-07-l-s", "evidence": "Seven-position 2.54 mm vertical through-hole development header with 0.635 mm square posts. The reviewed KiCad 1x7 vertical footprint uses 1.00 mm drills on 2.54 mm pitch; trusted internal use only."},
+    {"refs": ["U2"], "mpn": "USBLC6-2P6", "manufacturer": "STMicroelectronics", "source": "https://www.st.com/resource/en/datasheet/usblc6-2.pdf", "evidence": "Two-line, low-capacitance USB ESD protector in SOT-666. The verified pin map is 1/6 = I/O1, 3/4 = I/O2, 2 = GND and 5 = VBUS. ST specifies tightly matched D+/D- behavior, so either protection channel may carry either polarity; Rev A.1 assigns D+ to I/O1 and D- to I/O2 for crossover-free routing."},
     {"refs": ["U3"], "mpn": "AP63203WU-7", "manufacturer": "Diodes Incorporated", "source": "https://www.diodes.com/datasheet/download/AP63200-AP63201-AP63203-AP63205.pdf", "evidence": "3.3 V fixed-output, 1.1 MHz, 2 A synchronous buck in TSOT26; BST-to-SW capacitor is 100 nF."},
     {"refs": ["L1"], "mpn": "XGL4030-472MEC", "manufacturer": "Coilcraft", "source": "https://www.coilcraft.com/getmedia/032d9c73-4222-482f-b6bc-7808590e27c9/xgl4030.pdf", "evidence": "4.7 uH XGL4030 shielded inductor. Official data specifies 3.2 A at 20% inductance drop and 6.6 A for 40°C rise; the matching JLCPCB assembly listing is C7159276. Footprint authority is KiCad Inductor_SMD:L_Coilcraft_XxL4030."},
     {"refs": ["U4"], "mpn": "TMUX1574PWR", "manufacturer": "Texas Instruments", "source": "https://www.ti.com/product/TMUX1574/part-details/TMUX1574PWR", "evidence": "16-pin TSSOP four-channel SPDT switch, bidirectional signal paths, and powered-off protection through 3.6 V."},
     {"refs": ["U5"], "mpn": "TLV803EA26RDBZR", "manufacturer": "Texas Instruments", "source": "https://www.ti.com/product/TLV803E/part-details/TLV803EA26RDBZR", "evidence": "Active-low open-drain supervisor in 3-pin SOT-23 with fixed delay option."},
-    {"refs": ["Q1", "Q3", "Q4"], "mpn": "2N7002LT1G", "manufacturer": "onsemi", "source": "https://www.onsemi.com/PowerSolutions/MaterialComposition.do?export=pdf&opnId=2N7002LT1G", "evidence": "60 V N-channel SOT-23 MOSFET; electrical data-sheet and pinout must be attached before footprint freeze."},
+    {"refs": ["Q1", "Q3", "Q4"], "mpn": "2N7002LT1G", "manufacturer": "onsemi", "source": "https://www.onsemi.com/pdf/datasheet/2n7002l-d.pdf", "evidence": "60 V N-channel SOT-23 MOSFET, style 21: pin 1 gate, pin 2 source, pin 3 drain."},
     {"refs": ["Q5"], "mpn": "AO3400A", "manufacturer": "Alpha & Omega Semiconductor", "source": "https://www.aosmd.com/res/data_sheets/AO3400A.pdf", "evidence": "30 V N-channel SOT-23 MOSFET."},
     {"refs": ["Q2"], "mpn": "AO3401A", "manufacturer": "Alpha & Omega Semiconductor", "source": "https://aosmd.com/res/data_sheets/AO3401A.pdf", "evidence": "30 V P-channel SOT-23 MOSFET; source/drain orientation is a release-critical check."},
-    {"refs": ["D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15"], "mpn": "PESD3V3U1UL,315", "manufacturer": "Nexperia", "source": "https://www.nexperia.com/product/PESD3V3U1UL", "evidence": "Ultra-low capacitance unidirectional ESD diode in SOD882."},
+    {"refs": ["D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15"], "mpn": "PESD5V0U1UA,115", "manufacturer": "Nexperia", "source": "https://assets.nexperia.com/documents/data-sheet/PESD5V0U1UA_UB_UL.pdf", "evidence": "5 V reverse-standoff, 2 pF unidirectional ESD diode in SOD-323; pin 1 cathode and pin 2 anode. LCSC mapping is C139614."},
+    {"refs": ["C2", "C4", "C6", "C7"], "mpn": "CL31A226KAHNNNE", "manufacturer": "Samsung Electro-Mechanics", "source": "https://product.samsungsem.com/mlcc/CL31A226KAHNNN.do", "evidence": "22 uF, 25 V, X5R, 1206 MLCC. Official typical DC-bias curves show about -20.52% at 3.3 V and -37.96% at 5 V; curves are design-reference data, not guaranteed minima. LCSC mapping C12891."},
     {"refs": ["D1"], "mpn": "SMBJ5.0A", "manufacturer": "Littelfuse", "source": "https://www.littelfuse.com/products/tvs-diodes/surface-mount/smbj", "evidence": "5 V standoff unidirectional TVS in DO-214AA/SMB; assembly mapping C83333."},
     {"refs": ["F1"], "mpn": "1206L075/16WR", "manufacturer": "Littelfuse", "source": "https://www.littelfuse.com/products/polyswitch-resettable-pptcs/surface-mount/1206l", "evidence": "750 mA hold, 16 V resettable PTC in 1206; assembly mapping C371166."},
-    {"refs": ["SW1", "SW2"], "mpn": "EVQPUJ02K", "manufacturer": "Panasonic", "source": "https://industrial.panasonic.com/ww/products/pt/tactile-switch/light-touch/number/evqpuj02k", "evidence": "Top-actuated tactile switch matching the Panasonic EVQPUJ/EVQPUA land pattern; assembly mapping C2936858."},
+    {"refs": ["SW1", "SW2"], "mpn": "SKRPANE010", "manufacturer": "Alps Alpine", "source": "https://tech.alpsalpine.com/e/products/detail/SKRPANE010/", "evidence": "Standard-production top-actuated 4.2 x 3.2 x 2.5 mm SMD tactile switch, 1.57 N and 1,000,000 cycles. Official circuit diagram binds pins 1/2 as one common and 3/4 as the other. Assembly mapping C470426 had more than 14,000 units at review on 2026-08-11."},
     {"refs": ["LED1"], "mpn": "LTST-C190KGKT", "manufacturer": "Lite-On", "source": "https://www.lcsc.com/product-detail/C125094.html", "evidence": "Specified yellow-green 0603 power indicator; assembly mapping C125094."},
     {"refs": ["LED2"], "mpn": "LTST-C190TBKT", "manufacturer": "Lite-On", "source": "https://www.lcsc.com/product-detail/C125096.html", "evidence": "Specified blue 0603 status indicator; assembly mapping C125096."}
   ],
   "release_notes": [
-    "config/jlcpcb-parts.json maps every SMD position to an exact MPN and LCSC number and is bound to the released board SHA-256.",
+    "Rev A.1 invalidates the previous board-SHA assembly mapping; config/jlcpcb-parts.json must be rebound after a new electrical and physical freeze.",
     "J2 is a no-component Tag-Connect footprint; J3 and J4 are through-hole headers and are intentionally absent from the SMD assembly BOM/CPL.",
-    "PESD3V3U1UL,315 (C552530) and EVQPUJ02K (C2936858) were out of stock at the 2026-08-09 review. Do not silently substitute them; recheck stock or perform a reviewed alternate-part change before ordering.",
+    "PESD5V0U1UA,115 is mapped to LCSC C139614. J3/J4 are through-hole parts; recheck all stock before ordering and do not silently substitute them.",
     "Always inspect JLCPCB's placement preview and polarity/orientation warnings before approving an order."
   ]
 }

@@ -1,47 +1,185 @@
 {
-  "schema": 1,
-  "retrieved_at": "2026-08-08",
+  "schema": 2,
+  "retrieved_at": "2026-08-12",
   "manufacturer": "JLCPCB",
-  "calculator": "https://jlcpcb.com/pcb-impedance-calculator/",
-  "calculator_api": "https://jlcpcb.com/api/jlcTools/impedance/calc",
+  "calculator": "https://tools.jlc.com/jlcTools/index.html#/impedanceCalculatenew",
+  "calculator_api": "https://tools.jlc.com/api/jlcTools/impedance/calc",
+  "template_api": "https://tools.jlc.com/api/jlcTools/impedance/selectPageImpedanceDefaultTemplate",
   "stackup": {
     "template": "JLC04161H-3313A",
+    "template_access_id": "5010a4d2e49c43daaa9fa0e75447f761",
+    "laminated_construction_code": "20221109041028832",
     "layers": 4,
-    "finished_thickness_mm": 1.6,
+    "order_thickness_mm": 1.6,
+    "manufacturer_nominal_finished_thickness_mm": 1.58,
+    "manufacturer_finished_thickness_tolerance_pct": 10,
     "outer_copper_oz": 1.0,
     "inner_copper_oz": 0.5,
     "laminate": "NP-155F",
-    "l1_to_l2_prepreg_mm": 0.107,
-    "l1_to_l2_dielectric_constant": 4.1
+    "template_query": {
+      "appointName": "JLC04161H-3313A"
+    },
+    "physical_layers": [
+      {
+        "name": "F.Cu",
+        "kind": "copper",
+        "thickness_mm": 0.035
+      },
+      {
+        "name": "dielectric 1.1",
+        "kind": "prepreg",
+        "material": "NP-155F 3313 RC57%",
+        "thickness_mm": 0.107,
+        "epsilon_r": 4.1
+      },
+      {
+        "name": "dielectric 1.2",
+        "kind": "prepreg",
+        "material": "NP-155F 3313 RC57%",
+        "thickness_mm": 0.0994,
+        "epsilon_r": 4.1
+      },
+      {
+        "name": "In1.Cu",
+        "kind": "copper",
+        "thickness_mm": 0.0152
+      },
+      {
+        "name": "dielectric 2",
+        "kind": "core",
+        "material": "NP-155F 1.1mm H/HOZ including copper",
+        "thickness_mm": 1.065,
+        "epsilon_r": 4.38
+      },
+      {
+        "name": "In2.Cu",
+        "kind": "copper",
+        "thickness_mm": 0.0152
+      },
+      {
+        "name": "dielectric 3.1",
+        "kind": "prepreg",
+        "material": "NP-155F 3313 RC57%",
+        "thickness_mm": 0.0994,
+        "epsilon_r": 4.1
+      },
+      {
+        "name": "dielectric 3.2",
+        "kind": "prepreg",
+        "material": "NP-155F 3313 RC57%",
+        "thickness_mm": 0.107,
+        "epsilon_r": 4.1
+      },
+      {
+        "name": "B.Cu",
+        "kind": "copper",
+        "thickness_mm": 0.035
+      }
+    ],
+    "kicad_dielectric_groups": [
+      {
+        "name": "dielectric 1",
+        "type": "prepreg",
+        "sublayers": [
+          {
+            "thickness_mm": 0.107,
+            "material": "NP-155F 3313 RC57%",
+            "epsilon_r": 4.1,
+            "loss_tangent": 0.02
+          },
+          {
+            "thickness_mm": 0.0994,
+            "material": "NP-155F 3313 RC57%",
+            "epsilon_r": 4.1,
+            "loss_tangent": 0.02
+          }
+        ]
+      },
+      {
+        "name": "dielectric 2",
+        "type": "core",
+        "sublayers": [
+          {
+            "thickness_mm": 1.065,
+            "material": "NP-155F 1.1mm H/HOZ including copper",
+            "epsilon_r": 4.38,
+            "loss_tangent": 0.02
+          }
+        ]
+      },
+      {
+        "name": "dielectric 3",
+        "type": "prepreg",
+        "sublayers": [
+          {
+            "thickness_mm": 0.0994,
+            "material": "NP-155F 3313 RC57%",
+            "epsilon_r": 4.1,
+            "loss_tangent": 0.02
+          },
+          {
+            "thickness_mm": 0.107,
+            "material": "NP-155F 3313 RC57%",
+            "epsilon_r": 4.1,
+            "loss_tangent": 0.02
+          }
+        ]
+      }
+    ]
   },
   "usb2_differential": {
     "target_ohm": 90,
     "signal_layer": "L1",
     "reference_layer": "L2",
     "topology": "edge-coupled coated microstrip",
-    "calculator_request_mil": {
-      "H1": 4.2,
-      "Er1": 4.1,
+    "calculator_model": "DiffEdgeCoupledCoatedMicrostrip1B",
+    "back_calculation_request_mil": {
+      "H1": 8.126,
+      "Er1": 4.3,
+      "W1": 5.2,
+      "W2": 4.7,
+      "S1": 8,
       "T1": 1.6,
-      "C1": 1.2,
+      "C1": 1,
       "C2": 0.6,
-      "C3": 1.2,
+      "C3": 1,
       "CEr": 3.8,
-      "Zo": 90
+      "Zo": 90,
+      "dCalculateMode": 3
     },
-    "calculator_response_mil": {
-      "dImpedance": 90.0045754479,
-      "W1_base_width": 6.66289001465,
-      "W2_top_width": 5.96289001465,
-      "S1_pair_gap": 8.0
+    "back_calculation_response_mil": {
+      "dImpedance": 89.720612087,
+      "W1_base_width": 11.443359375,
+      "W2_top_width": 10.943359375,
+      "S1_pair_gap": 8
+    },
+    "rounded_geometry_verification_request_mil": {
+      "H1": 8.126,
+      "Er1": 4.3,
+      "W1": 11.44,
+      "W2": 10.94,
+      "S1": 8,
+      "T1": 1.6,
+      "C1": 1,
+      "C2": 0.6,
+      "C3": 1,
+      "CEr": 3.8,
+      "Zo": 90,
+      "dCalculateMode": 3
+    },
+    "rounded_geometry_verification_response": {
+      "dImpedance": 89.7320186168,
+      "dResultValid": 1
     },
     "pcb_geometry_mm": {
-      "base_width": 0.1692374064,
+      "base_width": 0.290576,
+      "top_width": 0.277876,
       "pair_gap": 0.2032
     },
     "limitations": [
-      "This evidence binds the USB L1 differential pair only; it does not establish generic via geometry.",
-      "Final order must select the recorded JLC04161H-3313A stackup or recalculate before release."
+      "The manufacturer calculator combines the two L1-to-L2 3313 prepregs into H1=8.126 mil and uses its template-specific effective Er1=4.3; do not substitute a single 4.2 mil prepreg.",
+      "This evidence binds only the USB L1 differential pair over the continuous L2/In1.Cu plane; it does not establish generic via or power geometry.",
+      "Final order must select JLC04161H-3313A. Any stack template, copper weight or layer change requires a new calculator receipt before routing or release."
     ]
   }
 }

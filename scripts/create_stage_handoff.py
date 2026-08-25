@@ -61,6 +61,35 @@ def git(*args: str) -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
+def refresh_workset(expected_stage: str, expected_objective: str) -> dict[str, object]:
+    """Compile WORKSET from the just-written handoff and verify it is current."""
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/session_boot.py")],
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    target = ROOT / "build/WORKSET.json"
+    if result.returncode != 0 or not target.is_file():
+        raise SystemExit("Handoff was written but WORKSET refresh failed: " + result.stdout[-800:])
+    try:
+        value = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Refreshed WORKSET is invalid: {exc}") from exc
+    if value.get("stage") != expected_stage or value.get("objective") != expected_objective:
+        raise SystemExit("Refreshed WORKSET does not match the new handoff stage/objective")
+    return {
+        "path": portable_path(target),
+        "bytes": target.stat().st_size,
+        "stage": value.get("stage"),
+        "status": value.get("status"),
+    }
+
+
 def run_pipeline(config: Path) -> dict[str, object]:
     result = subprocess.run(
         [
@@ -117,11 +146,9 @@ def completion_receipt_passes_stage(stage: str, receipt: dict[str, object]) -> b
         return False
     kind = receipt.get("kind")
     allowed = {
-        "requirements": {"requirements_validation": "success"},
-        "parts": {"part_provenance_validation": "success"},
-        "electrical": {"electrical_build": "success", "electrical_contract_validation": "contract_pass"},
-        "electrical_freeze": {"electrical_freeze": "freeze_pass"},
-        "physical": {"easyeda_import_parity": "parity_pass", "physical_review": "review_pass"},
+        "requirements": {"requirements_validation": "success", "part_provenance_validation": "success"},
+        "electrical": {"electrical_build": "success", "electrical_contract_validation": "contract_pass", "electrical_freeze": "freeze_pass"},
+        "physical": {"kicad_physical_candidate": "success", "physical_review": "review_pass"},
         "routing": {"routing_candidate": "success"},
         "release": {"release_snapshot": "release_pass"},
     }.get(stage, {})
@@ -130,14 +157,34 @@ def completion_receipt_passes_stage(stage: str, receipt: dict[str, object]) -> b
 
 def completion_receipt_kinds_required(stage: str) -> set[str]:
     return {
-        "requirements": {"requirements_validation"},
-        "parts": {"part_provenance_validation"},
-        "electrical": {"electrical_build", "electrical_contract_validation"},
-        "electrical_freeze": {"electrical_freeze"},
-        "physical": {"easyeda_import_parity", "physical_review"},
+        "requirements": {"requirements_validation", "part_provenance_validation"},
+        "electrical": {"electrical_build", "electrical_contract_validation", "electrical_freeze"},
+        "physical": {"kicad_physical_candidate", "physical_review"},
         "routing": {"routing_candidate"},
         "release": {"release_snapshot"},
     }.get(stage, set())
+
+
+def validate_routing_return(
+    previous_stage: str | None, next_stage: str, receipt_path: Path | None,
+) -> dict[str, str] | None:
+    if previous_stage != "routing" or next_stage != "physical":
+        return None
+    if receipt_path is None:
+        raise SystemExit("Returning from routing to physical requires --routing-escalation evidence")
+    resolved = receipt_path.resolve()
+    try:
+        receipt = json.loads(resolved.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Invalid routing escalation receipt: {receipt_path}: {exc}") from exc
+    if (
+        not isinstance(receipt, dict)
+        or receipt.get("kind") != "routing_escalation"
+        or receipt.get("placement_review_eligible") is not True
+        or receipt.get("placement_change_authorized") is not False
+    ):
+        raise SystemExit("Routing escalation does not establish placement-review eligibility")
+    return {"path": portable_path(resolved), "sha256": hashlib.sha256(resolved.read_bytes()).hexdigest().upper()}
 
 
 def main() -> int:
@@ -147,6 +194,7 @@ def main() -> int:
     parser.add_argument("--objective", required=True)
     parser.add_argument("--open-item", action="append", default=[])
     parser.add_argument("--next-action", action="append", default=[])
+    parser.add_argument("--required-input", action="append", default=[])
     parser.add_argument("--blocking-condition")
     parser.add_argument("--blocking-observations", type=int, default=0)
     parser.add_argument("--safe-alternatives-exhausted", action="store_true")
@@ -156,6 +204,7 @@ def main() -> int:
         "--candidate-receipt", action="append", type=Path, default=[],
         help="Audited isolated-candidate receipt(s) that must match --board.",
     )
+    parser.add_argument("--routing-escalation", type=Path, help="Required only when returning from routing to physical placement review.")
     parser.add_argument(
         "--config",
         type=Path,
@@ -181,10 +230,22 @@ def main() -> int:
     stage_rules = checklist.get("stages", {}).get(args.stage)
     if not isinstance(stage_rules, dict):
         raise SystemExit(f"Unknown stage {args.stage!r}; use a key from {checklist_path}")
+    current_handoff_path = ROOT / config["handoff"]["output"]
+    previous_stage = None
+    if current_handoff_path.is_file():
+        try:
+            previous_stage = json.loads(current_handoff_path.read_text(encoding="utf-8")).get("stage")
+        except (OSError, json.JSONDecodeError):
+            previous_stage = None
+    routing_return = validate_routing_return(
+        str(previous_stage) if previous_stage is not None else None,
+        args.stage,
+        args.routing_escalation,
+    )
     stage_number = stage_rules.get("number")
     stage_label = f"{int(stage_number):02d}-{args.stage}" if isinstance(stage_number, int) else args.stage
     limit = int(config["handoff"].get("max_open_items", 8))
-    if len(args.open_item) > limit or len(args.next_action) > limit:
+    if len(args.open_item) > limit or len(args.next_action) > limit or len(args.required_input) > limit:
         raise SystemExit(f"Handoff lists are limited to {limit} items")
     blocked_statuses = {"blocked", "blocked_external_dependency"}
     if args.status in blocked_statuses:
@@ -288,7 +349,10 @@ def main() -> int:
         "electrical_backend": backend_name,
         "physical_backend": physical_backend_name,
         "routing_engine": "kicad_routing_tools",
-        "validation_backends": ["easyeda_pro_drc", "kicad_cli"],
+        "validation_backends": list(
+            json.loads((ROOT / "config/backend-architecture.json").read_text(encoding="utf-8"))
+            .get("validation_backend", {}).get("required", [])
+        ),
         "manufacturing_backend": "jlcpcb",
         "source_sha256": tree_hash([
             ROOT / "config/electrical-backend.json",
@@ -297,6 +361,7 @@ def main() -> int:
         "board": portable_path(board_path),
         "board_sha256": board_sha256,
         "candidate_receipts": candidate_receipts,
+        "routing_return_escalation": routing_return,
         "completion_verified": completion_verified,
         "completion_basis": "pipeline" if pipeline_completion else "receipts" if completion_receipts else None,
         "completion_receipts": completion_receipts,
@@ -308,6 +373,7 @@ def main() -> int:
         "pipeline": pipeline,
         "open_items": args.open_item,
         "next_actions": args.next_action,
+        "required_inputs": args.required_input,
         "read_first": [
             relative_to(ROOT, output),
         ],
@@ -357,6 +423,7 @@ def main() -> int:
         + "\n",
         encoding="utf-8",
     )
+    refreshed_workset = refresh_workset(args.stage, args.objective)
     print(
         json.dumps(
             {
@@ -364,6 +431,7 @@ def main() -> int:
                 "markdown": str(markdown.resolve()),
                 "bytes": output.stat().st_size,
                 "pipeline_success": pipeline.get("success") if pipeline else None,
+                "workset": refreshed_workset,
             },
             separators=(",", ":"),
         )

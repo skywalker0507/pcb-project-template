@@ -1,0 +1,198 @@
+"""Reviewed target isolation, VTREF interlock, reset and boot controls."""
+
+import ElectricPower
+import Net
+import has_designator
+import has_net_name
+
+from "parts/Texas_Instruments_TMUX1574PWR/Texas_Instruments_TMUX1574PWR.ato" import Texas_Instruments_TMUX1574PWR_package
+from "parts/Texas_Instruments_TLV803EA26RDBZR/Texas_Instruments_TLV803EA26RDBZR.ato" import Texas_Instruments_TLV803EA26RDBZR_package
+from "parts/onsemi_2N7002LT1G/onsemi_2N7002LT1G.ato" import onsemi_2N7002LT1G_package
+from "parts/Alpha___Omega_Semicon_AO3401A/Alpha___Omega_Semicon_AO3401A.ato" import Alpha___Omega_Semicon_AO3401A_package
+from "parts/Alpha___Omega_Semicon_AO3400A/Alpha___Omega_Semicon_AO3400A.ato" import Alpha___Omega_Semicon_AO3400A_package
+from "parts/Samsung_Electro_Mechanics_CL05B104KO5NNNC/Samsung_Electro_Mechanics_CL05B104KO5NNNC.ato" import Samsung_Electro_Mechanics_CL05B104KO5NNNC_package
+from "parts/UNI_ROYAL_0402WGF1002TCE/UNI_ROYAL_0402WGF1002TCE.ato" import UNI_ROYAL_0402WGF1002TCE_package
+from "parts/UNI_ROYAL_0402WGF1003TCE/UNI_ROYAL_0402WGF1003TCE.ato" import UNI_ROYAL_0402WGF1003TCE_package
+from "parts/UNI_ROYAL_0402WGF470JTCE/UNI_ROYAL_0402WGF470JTCE.ato" import UNI_ROYAL_0402WGF470JTCE_package
+from "parts/UNI_ROYAL_0402WGF1001TCE/UNI_ROYAL_0402WGF1001TCE.ato" import UNI_ROYAL_0402WGF1001TCE_package
+
+module TargetControl:
+    probe_power = new ElectricPower
+    assert probe_power.voltage within 3.2V to 3.4V
+
+    probe_swdio = new Net
+    probe_swclk = new Net
+    probe_uart_tx = new Net
+    probe_uart_rx = new Net
+    nrst_assert = new Net
+    boot0_assert = new Net
+    target_enable_request = new Net
+    vtref_adc = new Net
+
+    vtref = new Net
+    swdio = new Net
+    swclk = new Net
+    target_tx = new Net
+    target_rx = new Net
+    nrst = new Net
+    boot0 = new Net
+    target_en_n = new Net
+
+    swdio_mux = new Net
+    swclk_mux = new Net
+    target_tx_mux = new Net
+    target_rx_mux = new Net
+    interlock_node = new Net
+    supervisor_reset = new Net
+    boot_gate = new Net
+
+    trait probe_power.hv has_net_name<name="3V3">
+    trait probe_power.lv has_net_name<name="GND">
+    trait probe_swdio.part_of has_net_name<name="PROBE_SWDIO">
+    trait probe_swclk.part_of has_net_name<name="PROBE_SWCLK">
+    trait probe_uart_tx.part_of has_net_name<name="PROBE_UART_TX">
+    trait probe_uart_rx.part_of has_net_name<name="PROBE_UART_RX">
+    trait nrst_assert.part_of has_net_name<name="NRST_ASSERT">
+    trait boot0_assert.part_of has_net_name<name="BOOT0_ASSERT">
+    trait target_enable_request.part_of has_net_name<name="TARGET_ENABLE_REQUEST">
+    trait vtref_adc.part_of has_net_name<name="VTREF_ADC">
+    trait vtref.part_of has_net_name<name="VTREF">
+    trait swdio.part_of has_net_name<name="SWDIO">
+    trait swclk.part_of has_net_name<name="SWCLK">
+    trait target_tx.part_of has_net_name<name="TARGET_TX">
+    trait target_rx.part_of has_net_name<name="TARGET_RX">
+    trait nrst.part_of has_net_name<name="NRST">
+    trait boot0.part_of has_net_name<name="BOOT0">
+    trait target_en_n.part_of has_net_name<name="TARGET_EN_N">
+    trait swdio_mux.part_of has_net_name<name="SWDIO_MUX">
+    trait swclk_mux.part_of has_net_name<name="SWCLK_MUX">
+    trait target_tx_mux.part_of has_net_name<name="TARGET_TX_MUX">
+    trait target_rx_mux.part_of has_net_name<name="TARGET_RX_MUX">
+    trait interlock_node.part_of has_net_name<name="TARGET_INTERLOCK">
+    trait supervisor_reset.part_of has_net_name<name="VTREF_OK_N">
+    trait boot_gate.part_of has_net_name<name="BOOT_GATE">
+
+    u4 = new Texas_Instruments_TMUX1574PWR_package
+    u5 = new Texas_Instruments_TLV803EA26RDBZR_package
+    q1 = new onsemi_2N7002LT1G_package
+    q2 = new Alpha___Omega_Semicon_AO3401A_package
+    q3 = new onsemi_2N7002LT1G_package
+    q4 = new onsemi_2N7002LT1G_package
+    q5 = new Alpha___Omega_Semicon_AO3400A_package
+    c8 = new Samsung_Electro_Mechanics_CL05B104KO5NNNC_package
+    c9 = new Samsung_Electro_Mechanics_CL05B104KO5NNNC_package
+    c10 = new Samsung_Electro_Mechanics_CL05B104KO5NNNC_package
+    r7 = new UNI_ROYAL_0402WGF1002TCE_package
+    r8 = new UNI_ROYAL_0402WGF470JTCE_package
+    r9 = new UNI_ROYAL_0402WGF470JTCE_package
+    r10 = new UNI_ROYAL_0402WGF1001TCE_package
+    r11 = new UNI_ROYAL_0402WGF1001TCE_package
+    r12 = new UNI_ROYAL_0402WGF1003TCE_package
+    r13 = new UNI_ROYAL_0402WGF1003TCE_package
+    r14 = new UNI_ROYAL_0402WGF1003TCE_package
+    r15 = new UNI_ROYAL_0402WGF1003TCE_package
+    r16 = new UNI_ROYAL_0402WGF1003TCE_package
+    r17 = new UNI_ROYAL_0402WGF1003TCE_package
+    r21 = new UNI_ROYAL_0402WGF1003TCE_package
+    r22 = new UNI_ROYAL_0402WGF1003TCE_package
+
+    trait u4 has_designator<designator="U4">
+    trait u5 has_designator<designator="U5">
+    trait q1 has_designator<designator="Q1">
+    trait q2 has_designator<designator="Q2">
+    trait q3 has_designator<designator="Q3">
+    trait q4 has_designator<designator="Q4">
+    trait q5 has_designator<designator="Q5">
+    trait c8 has_designator<designator="C8">
+    trait c9 has_designator<designator="C9">
+    trait c10 has_designator<designator="C10">
+    trait r7 has_designator<designator="R7">
+    trait r8 has_designator<designator="R8">
+    trait r9 has_designator<designator="R9">
+    trait r10 has_designator<designator="R10">
+    trait r11 has_designator<designator="R11">
+    trait r12 has_designator<designator="R12">
+    trait r13 has_designator<designator="R13">
+    trait r14 has_designator<designator="R14">
+    trait r15 has_designator<designator="R15">
+    trait r16 has_designator<designator="R16">
+    trait r17 has_designator<designator="R17">
+    trait r21 has_designator<designator="R21">
+    trait r22 has_designator<designator="R22">
+
+    # TMUX defaults disabled: SEL and all B inputs are grounded; nEN is pulled up.
+    u4.VDD ~ probe_power.hv
+    u4.GND ~ probe_power.lv
+    u4.SEL ~ probe_power.lv
+    u4.S1B ~ probe_power.lv
+    u4.S2B ~ probe_power.lv
+    u4.S3B ~ probe_power.lv
+    u4.S4B ~ probe_power.lv
+    probe_power.hv ~ c8.1
+    c8.2 ~ probe_power.lv
+    probe_power.hv ~ r7.1
+    r7.2 ~ target_en_n.part_of
+    target_en_n.part_of ~ u4.nEN
+
+    probe_swdio.part_of ~ u4.S1A
+    u4.D1 ~ swdio_mux.part_of
+    swdio_mux.part_of ~ r8.1
+    r8.2 ~ swdio.part_of
+    probe_swclk.part_of ~ u4.S2A
+    u4.D2 ~ swclk_mux.part_of
+    swclk_mux.part_of ~ r9.1
+    r9.2 ~ swclk.part_of
+    probe_uart_tx.part_of ~ u4.S3A
+    u4.D3 ~ target_rx_mux.part_of
+    target_rx_mux.part_of ~ r10.1
+    r10.2 ~ target_rx.part_of
+    probe_uart_rx.part_of ~ u4.S4A
+    u4.D4 ~ target_tx_mux.part_of
+    target_tx_mux.part_of ~ r11.1
+    r11.2 ~ target_tx.part_of
+
+    # VTREF-only supervisor permits Q5/Q4 to pull TARGET_EN_N low.
+    target_enable_request.part_of ~ q4.G
+    q4.G ~ r21.1
+    r21.2 ~ probe_power.lv
+    q4.D ~ target_en_n.part_of
+    q4.S ~ interlock_node.part_of
+    q5.D ~ interlock_node.part_of
+    q5.S ~ probe_power.lv
+    q5.G ~ supervisor_reset.part_of
+    u5.nRESET ~ supervisor_reset.part_of
+    u5.GND ~ probe_power.lv
+    u5.VDD ~ vtref.part_of
+    vtref.part_of ~ r22.1
+    r22.2 ~ supervisor_reset.part_of
+    vtref.part_of ~ c10.1
+    c10.2 ~ probe_power.lv
+
+    # NRST is open-drain pull-low only.
+    nrst_assert.part_of ~ q1.G
+    q1.G ~ r12.1
+    r12.2 ~ probe_power.lv
+    q1.S ~ probe_power.lv
+    q1.D ~ nrst.part_of
+
+    # BOOT0 can only be sourced from target VTREF through Q2.
+    vtref.part_of ~ q2.S
+    q2.D ~ boot0.part_of
+    q2.G ~ boot_gate.part_of
+    vtref.part_of ~ r13.1
+    r13.2 ~ boot_gate.part_of
+    q3.D ~ boot_gate.part_of
+    q3.S ~ probe_power.lv
+    boot0_assert.part_of ~ q3.G
+    q3.G ~ r14.1
+    r14.2 ~ probe_power.lv
+    boot0.part_of ~ r15.1
+    r15.2 ~ probe_power.lv
+
+    # 100k/100k VTREF divider with 100 nF ADC filter.
+    vtref.part_of ~ r16.1
+    r16.2 ~ vtref_adc.part_of
+    vtref_adc.part_of ~ r17.1
+    r17.2 ~ probe_power.lv
+    vtref_adc.part_of ~ c9.1
+    c9.2 ~ probe_power.lv

@@ -1,37 +1,77 @@
 {
   "schema": 1,
-  "generated_at": null,
-  "project": "pcb-project-template",
-  "stage": "requirements",
-  "stage_number": 1,
-  "stage_label": "01-requirements",
-  "status": "not_started",
-  "objective": "Capture requirements, interfaces, rails, mechanics, and manufacturer choice.",
+  "generated_at": "2026-08-25T02:24:44.458812+00:00",
+  "project": "esp32-s3-remote-flashing-probe",
+  "stage": "release",
+  "stage_number": 5,
+  "stage_label": "05-release",
+  "status": "in_progress",
+  "objective": "Resolve reviewed release debt, run exact-board release gates, and export the reproducible manufacturing package.",
   "stage_rules": {
     "required_evidence": [
-      "requirements recorded with explicit unknowns"
+      "release_pass=true bound to board SHA",
+      "full DRC and connectivity",
+      "final electrical parity",
+      "four-view visual review",
+      "critical footprint rule-area equivalence bound to the exact board",
+      "DFM and BOM/PnP/Gerber package checks",
+      "DFM order parameters and required PCB/SMT modules match the reviewed order profile",
+      "compiled manufacturing registry passes for the exact Gerber package",
+      "all configured special manufacturing processes are confirmed"
     ],
     "forbidden": [
-      "routing",
-      "manufacturing_export",
-      "inventing electrical or fabrication values"
+      "baseline regeneration to pass",
+      "export without release_pass"
     ]
   },
+  "stage_files": [
+    "config/pcb-acceptance.json",
+    "config/manufacturing-backend.json",
+    "build/07-release/evidence/",
+    "build/07-release/release/",
+    "manufacturing/"
+  ],
+  "electrical_backend": "atopile",
+  "physical_backend": "kicad",
+  "routing_engine": "kicad_routing_tools",
+  "validation_backends": [
+    "kicad_cli"
+  ],
+  "manufacturing_backend": "jlcpcb",
+  "source_sha256": "B3C81581FE7DCD954E58BD2BB35005ECAE3574078511BE5EB04C43842124EEE3",
+  "board": "build/06-routing/release/smt-dfm-real-fixes-adopted-20260825/routed.kicad_pcb",
+  "board_sha256": "984472D7179C9C5C2EA2973C16A12FABAE0ED2625C58C199771A6A4B592E1911",
+  "candidate_receipts": [
+    "build/06-routing/evidence/smt-dfm-real-fixes-adopted-20260825/routing-candidate.json"
+  ],
+  "routing_return_escalation": null,
+  "completion_verified": false,
+  "completion_basis": null,
+  "completion_receipts": [],
+  "git": {
+    "commit": "6877b6091b65e3cc85a89e2b32b094ed35fa858a",
+    "dirty": true,
+    "dirty_path_count": 176
+  },
+  "pipeline": null,
   "open_items": [
-    "Record requirements and explicit unknowns."
+    "Resolve or independently review exact-board DRC category lib_footprint_mismatch (3 item(s)); do not regenerate the baseline.",
+    "Resolve or independently review exact-board DRC category silk_edge_clearance (2 item(s)); do not regenerate the baseline.",
+    "Resolve or independently review exact-board DRC category silk_over_copper (51 item(s)); do not regenerate the baseline.",
+    "Resolve or independently review exact-board DRC category silk_overlap (5 item(s)); do not regenerate the baseline."
   ],
   "next_actions": [
-    "Validate requirements before selecting parts or editing electrical source."
+    "Run the compact release-readiness preview, resolve classified debt, then execute the guarded release pipeline."
   ],
+  "required_inputs": [],
   "read_first": [
     "handoff/stages/CURRENT_STAGE.json"
   ],
   "authoritative_docs": [
     "AGENTS.md",
+    "README.md",
     "config/stage-checklist.json",
     "config/pcb-acceptance.json",
     "config/board-stack.json"
-  ],
-  "completion_verified": false,
-  "completion_receipts": []
+  ]
 }

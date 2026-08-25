@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "local_direct": {
+    "maximum_pad_endpoints": 2,
+    "maximum_span_mm": 5.0,
+    "require_no_existing_copper": true,
+    "recommended_engine": "explicit_trace_plan"
+  },
+  "reviewed_multipoint_profiles": {
+    "USB_VBUS_RAW": {
+      "sequence": ["connector_escape", "protection_input"],
+      "profiles": ["usb_vbus_raw_escape"],
+      "rule": "Route the connector-side high-current escape explicitly before any low-risk batch."
+    },
+    "USB_5V": {
+      "sequence": ["protection_output", "buck_input", "local_decoupling"],
+      "profiles": ["usb_5v_distribution", "buck_power_local"],
+      "rule": "Preserve the reviewed current path and local input loop; do not treat all endpoints as one generic multipoint route."
+    },
+    "3V3": {
+      "sequence": ["regulator_output_loop", "main_trunk", "critical_supply_islands", "local_decoupling", "low_current_bias_branches"],
+      "profiles": ["buck_power_local", "3v3_main_trunk", "3v3_local_escape", "3v3_low_current_branch", "3v3_low_current_layer_transition"],
+      "rule": "Build the reviewed trunk and supply islands before bias branches; never use a pull-up branch as a series supply feed."
+    }
+  },
+  "krt_prerequisite_gate": {
+    "name": "critical_power_before_low_risk_krt",
+    "required_connected_nets": ["USB_VBUS_RAW", "USB_5V", "3V3"],
+    "exempt_nets": [
+      "USB_VBUS_RAW", "USB_5V", "3V3", "GND", "USB_SHIELD",
+      "USB_DP_RAW", "USB_DM_RAW", "USB_DP_ESD", "USB_DM_ESD", "USB_DP", "USB_DM"
+    ],
+    "rule": "Do not start a low-risk KRT batch until the critical power path is connected; critical power, ground return and USB data probes remain permitted."
+  },
+  "ordered_scopes": [
+    {
+      "name": "usb_type_c_connector_fanout",
+      "groups": [
+        {"name": "configuration", "nets": ["USB_CC1", "USB_CC2"]},
+        {"name": "raw_data", "nets": ["USB_DP_RAW", "USB_DM_RAW"]},
+        {"name": "power", "nets": ["USB_VBUS_RAW"]}
+      ],
+      "rule": "Complete or atomically include earlier fine-pitch connector escapes before routing a later group."
+    }
+  ]
+}

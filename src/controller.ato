@@ -1,0 +1,99 @@
+"""Reviewed ESP32-S3 controller core and firmware pin contract."""
+
+import ElectricPower
+import Net
+import has_designator
+import has_net_name
+
+from "parts/Espressif_Systems_ESP32_S3_WROOM_1_N16R8/Espressif_Systems_ESP32_S3_WROOM_1_N16R8.ato" import Espressif_Systems_ESP32_S3_WROOM_1_N16R8_package
+from "parts/Samsung_Electro_Mechanics_CL05B104KO5NNNC/Samsung_Electro_Mechanics_CL05B104KO5NNNC.ato" import Samsung_Electro_Mechanics_CL05B104KO5NNNC_package
+from "parts/Samsung_Electro_Mechanics_CL05A105KA5NQNC/Samsung_Electro_Mechanics_CL05A105KA5NQNC.ato" import Samsung_Electro_Mechanics_CL05A105KA5NQNC_package
+from "parts/UNI_ROYAL_0402WGF1002TCE/UNI_ROYAL_0402WGF1002TCE.ato" import UNI_ROYAL_0402WGF1002TCE_package
+
+module ControllerCore:
+    power = new ElectricPower
+    assert power.voltage within 3.2V to 3.4V
+
+    usb_dp = new Net
+    usb_dm = new Net
+    esp_en = new Net
+    esp_boot = new Net
+    nrst_assert = new Net
+    boot0_assert = new Net
+    vtref_adc = new Net
+    target_enable_request = new Net
+    probe_uart_tx = new Net
+    probe_uart_rx = new Net
+    swdio = new Net
+    swclk = new Net
+    status_led = new Net
+    exp_gpio10 = new Net
+    exp_gpio11 = new Net
+    exp_gpio12 = new Net
+    exp_gpio13 = new Net
+    exp_gpio14 = new Net
+
+    trait power.hv has_net_name<name="3V3">
+    trait power.lv has_net_name<name="GND">
+    trait usb_dp.part_of has_net_name<name="USB_DP">
+    trait usb_dm.part_of has_net_name<name="USB_DM">
+    trait esp_en.part_of has_net_name<name="ESP_EN">
+    trait esp_boot.part_of has_net_name<name="ESP_BOOT">
+    trait nrst_assert.part_of has_net_name<name="NRST_ASSERT">
+    trait boot0_assert.part_of has_net_name<name="BOOT0_ASSERT">
+    trait vtref_adc.part_of has_net_name<name="VTREF_ADC">
+    trait target_enable_request.part_of has_net_name<name="TARGET_ENABLE_REQUEST">
+    trait probe_uart_tx.part_of has_net_name<name="PROBE_UART_TX">
+    trait probe_uart_rx.part_of has_net_name<name="PROBE_UART_RX">
+    trait swdio.part_of has_net_name<name="PROBE_SWDIO">
+    trait swclk.part_of has_net_name<name="PROBE_SWCLK">
+    trait status_led.part_of has_net_name<name="STATUS_LED">
+    trait exp_gpio10.part_of has_net_name<name="GPIO10">
+    trait exp_gpio11.part_of has_net_name<name="GPIO11">
+    trait exp_gpio12.part_of has_net_name<name="GPIO12">
+    trait exp_gpio13.part_of has_net_name<name="GPIO13">
+    trait exp_gpio14.part_of has_net_name<name="GPIO14">
+
+    u1 = new Espressif_Systems_ESP32_S3_WROOM_1_N16R8_package
+    c1 = new Samsung_Electro_Mechanics_CL05B104KO5NNNC_package
+    c3 = new Samsung_Electro_Mechanics_CL05A105KA5NQNC_package
+    r1 = new UNI_ROYAL_0402WGF1002TCE_package
+    r18 = new UNI_ROYAL_0402WGF1002TCE_package
+
+    trait u1 has_designator<designator="U1">
+    trait c1 has_designator<designator="C1">
+    trait c3 has_designator<designator="C3">
+    trait r1 has_designator<designator="R1">
+    trait r18 has_designator<designator="R18">
+
+    u1.P3V3 ~ power.hv
+    u1.GND ~ power.lv
+    power.hv ~ c1.1
+    c1.2 ~ power.lv
+
+    # EN RC and GPIO0 default-high boot strap.
+    power.hv ~ r1.1
+    r1.2 ~ esp_en.part_of
+    esp_en.part_of ~ u1.EN
+    esp_en.part_of ~ c3.1
+    c3.2 ~ power.lv
+    power.hv ~ r18.1
+    r18.2 ~ esp_boot.part_of
+    esp_boot.part_of ~ u1.IO0
+
+    usb_dm.part_of ~ u1.IO19
+    usb_dp.part_of ~ u1.IO20
+    nrst_assert.part_of ~ u1.IO4
+    boot0_assert.part_of ~ u1.IO7
+    vtref_adc.part_of ~ u1.IO8
+    target_enable_request.part_of ~ u1.IO9
+    probe_uart_tx.part_of ~ u1.IO15
+    probe_uart_rx.part_of ~ u1.IO16
+    swdio.part_of ~ u1.IO17
+    swclk.part_of ~ u1.IO18
+    status_led.part_of ~ u1.IO21
+    exp_gpio10.part_of ~ u1.IO10
+    exp_gpio11.part_of ~ u1.IO11
+    exp_gpio12.part_of ~ u1.IO12
+    exp_gpio13.part_of ~ u1.IO13
+    exp_gpio14.part_of ~ u1.IO14

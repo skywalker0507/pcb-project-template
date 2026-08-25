@@ -24,6 +24,27 @@ export = load("export_jlcpcb_release", "scripts/export_jlcpcb_release.py")
 
 
 class ReleaseGuardTests(unittest.TestCase):
+    def test_four_layer_export_accepts_power_plane_layer_type(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            board = root / "board.kicad_pcb"
+            board.write_text(
+                '(kicad_pcb (layers (0 "F.Cu" signal) (4 "In1.Cu" power) '
+                '(6 "In2.Cu" power) (2 "B.Cu" signal)))', encoding="utf-8",
+            )
+            stack = root / "stack.json"
+            stack.write_text(json.dumps({
+                "active": "four",
+                "profiles": {"four": {
+                    "copper_layers": ["F.Cu", "In1.Cu", "In2.Cu", "B.Cu"],
+                    "gerber_layers": ["F.Cu", "In1.Cu", "In2.Cu", "B.Cu"],
+                }},
+            }), encoding="utf-8")
+            self.assertEqual(
+                export.configured_layers(board, stack),
+                "F.Cu,In1.Cu,In2.Cu,B.Cu",
+            )
+
     def test_empty_baseline_rejects_unconnected_items(self) -> None:
         report = "[unconnected_items]:\n@(1,2): U1.1 -> U2.1\n"
         unexpected, missing = audit.baseline_differences(
@@ -39,6 +60,19 @@ class ReleaseGuardTests(unittest.TestCase):
         unexpected, missing = audit.baseline_differences(
             report, audit.Counter({"clearance": 1}),
             {"allowed_violation_items": {"clearance": ["@(1,2): Track A"]}},
+        )
+        self.assertEqual(unexpected, [])
+        self.assertEqual(missing, [])
+
+    def test_board_bound_baseline_metadata_does_not_weaken_exact_items(self) -> None:
+        report = "[silk_overlap]:\n@(1,2): Segment A\n"
+        unexpected, missing = audit.baseline_differences(
+            report, audit.Counter({"silk_overlap": 1}),
+            {
+                "reviewed_board_sha256": "A" * 64,
+                "allowed_violation_items": {"silk_overlap": ["@(1,2): Segment A"]},
+                "expected_category_counts": {"silk_overlap": 1},
+            },
         )
         self.assertEqual(unexpected, [])
         self.assertEqual(missing, [])

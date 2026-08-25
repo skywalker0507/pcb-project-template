@@ -2,10 +2,30 @@
   "schema": 1,
   "purpose": "Tracks primary-source land-pattern evidence before a footprint is used for physical freeze or geometry-sensitive routing.",
   "parts": {
+    "U1": {
+      "mpn": "ESP32-S3-WROOM-1-N16R8",
+      "manufacturer": "Espressif Systems",
+      "status": "verified",
+      "physical_integrity_gate": true,
+      "primary_source": {
+        "url": "https://documentation.espressif.com/esp32-s3-wroom-1_wroom-1u_datasheet_en.pdf",
+        "revision": "v1.8, Figure 11-1, reviewed 2026-08-11"
+      },
+      "footprint": "RF_Module:ESP32-S3-WROOM-1",
+      "verification": {
+        "reviewed": [
+          "40 peripheral pads use the documented 1.5 mm x 0.9 mm geometry and 1.27 mm pitch",
+        "EPAD uses the documented 3 x 3 copper pattern with thermal-pad vias",
+          "PCB-antenna area and courtyard/keepout geometry are retained",
+          "The EasyEDA C2913202 auto-generated footprint was rejected because its 3 x 3 EPAD copper lacked the recommended thermal vias"
+        ]
+      }
+    },
     "J1": {
       "mpn": "USB4105-GF-A",
       "manufacturer": "GCT",
       "status": "verified",
+      "physical_integrity_gate": true,
       "primary_source": {
         "url": "https://gct.co/files/drawings/usb4105.pdf",
         "revision": "B4",
@@ -16,13 +36,122 @@
         "board": "elec/layout/rev-a-placement-v56/rev-a-placement.kicad_pcb",
         "board_sha256": "A5D9576881BDF93C191DEB46BAF8C682FE4695E60A1DA1D397B1751FAE607C68",
         "reviewed": [
-          "16 SMT contacts: 12 x 0.30 mm and 4 x 0.60 mm, all 1.15 mm long",
+          "16 logical SMT contacts form 12 distinct solder lands: four 0.60 mm-wide overlapping VBUS/GND lands and eight 0.30 mm-wide signal lands, all 1.15 mm long",
           "2 x 0.65 mm locating holes",
           "4 plated shell slots with the drawing's 0.60 mm slot width and 1.00 mm copper width",
-          "Contact and shell-slot relative locations match the recommended PCB layout"
+          "All four shell slots share pad number SH and the contact/shell-slot relative locations match the recommended PCB layout",
+          "The EasyEDA C3020560 auto-generated footprint was rejected because it emitted 16 separate 0.30 mm lands and separate shell pad numbers"
         ]
       },
       "limitation": "This verifies the connector land pattern only. The interleaved USB D+/D- breakout still requires a separately reviewed routing recipe."
+    },
+    "J2": {
+      "mpn": "TC2050-IDC-NL",
+      "manufacturer": "Tag-Connect",
+      "status": "verified",
+      "physical_integrity_gate": true,
+      "primary_source": {
+        "url": "https://www.tag-connect.com/wp-content/uploads/bsk-pdf-manager/TC2050-IDC-NL_Datasheet_8.pdf",
+        "revision": "official DNL drawing referenced by KiCad footprint, reviewed 2026-08-11"
+      },
+      "footprint": "Connector:Tag-Connect_TC2050-IDC-NL_2x05_P1.27mm_Vertical",
+      "verification": {
+        "reviewed": [
+          "Ten numbered 1.27 mm-pitch contact pads match the 2x5 cable contact pattern",
+          "All ten contacts use F.Cu and F.Mask with no F.Paste",
+          "Three unplated alignment holes are retained",
+          "Pin numbering is bound to config/design-data.json and src/target_connectors.ato"
+        ]
+      }
+    },
+    "J3": {
+      "mpn": "B8B-XH-A (LF)(SN)",
+      "manufacturer": "JST",
+      "status": "verified",
+      "primary_source": {
+        "url": "https://www.jst-mfg.com/product/pdf/eng/eXH.pdf",
+        "revision": "current official XH series drawing reviewed 2026-08-11"
+      },
+      "footprint": "Connector_JST:JST_XH_B8B-XH-A_1x08_P2.50mm_Vertical",
+      "verification": {
+        "reviewed": [
+          "Eight through-hole contacts on 2.50 mm pitch",
+          "Official dimensions A=17.5 mm and B=22.4 mm",
+          "KiCad footprint uses 0.95 mm drills and marks pad 1 at the drawing's circuit-1 end",
+          "Mating housing is XHP-8; select the crimp contact for the final wire gauge"
+        ]
+      }
+    },
+    "D2-D15": {
+      "mpn": "PESD5V0U1UA,115",
+      "manufacturer": "Nexperia",
+      "status": "verified",
+      "primary_source": {
+        "url": "https://assets.nexperia.com/documents/data-sheet/PESD5V0U1UA_UB_UL.pdf",
+        "revision": "current official family datasheet reviewed 2026-08-11"
+      },
+      "footprint": "Diode_SMD:D_SOD-323",
+      "verification": {
+        "reviewed": [
+          "Exact U1UA ordering code uses SOD-323",
+          "Physical pin 1 is cathode and pin 2 is anode",
+          "LCSC C139614 maps to exact MPN PESD5V0U1UA,115"
+        ]
+      }
+    },
+    "J4": {
+      "mpn": "TSW-107-07-L-S",
+      "manufacturer": "Samtec",
+      "status": "verified",
+      "primary_source": {
+        "url": "https://www.samtec.com/products/tsw-107-07-l-s",
+        "revision": "live exact-product record reviewed 2026-08-11"
+      },
+      "footprint": "Connector_PinHeader_2.54mm:PinHeader_1x07_P2.54mm_Vertical",
+      "verification": {
+        "reviewed": [
+          "Exact order code is a seven-position single-row vertical through-hole header",
+          "Contact system is 0.635 mm square post on 2.54 mm pitch",
+          "KiCad footprint uses seven 1.00 mm drilled pads on exact 2.54 mm pitch",
+          "Rectangular pad 1 and source pin contract bind 3V3 to pin 1"
+        ]
+      }
+    },
+    "SW1-SW2": {
+      "mpn": "SKRPANE010",
+      "manufacturer": "Alps Alpine",
+      "status": "verified",
+      "primary_source": {
+        "url": "https://tech.alpsalpine.com/cms.media/product_catalog_ta_02_skrp_en_2cd80f610b.pdf",
+        "revision": "Update 2510, Drawing No. 1, reviewed 2026-08-11"
+      },
+      "footprint": "ALPSALPINE_SKRPANE010:SW-SMD_4P-L4.2-W3.2-P2.15-LS4.6-2",
+      "verification": {
+        "reviewed": [
+          "Top-push 4.2 mm x 3.2 mm body with 2.5 mm height",
+          "Recommended land pattern uses four SMD lands with 3.1 mm inner and 5.2 mm outer horizontal spacing",
+          "Pins 1 and 2 are internally common; pins 3 and 4 are internally common; actuation connects the two groups",
+          "LCSC C470426 maps to exact MPN SKRPANE010"
+        ]
+      }
+    },
+    "C2-C4-C6-C7": {
+      "mpn": "CL31A226KAHNNNE",
+      "manufacturer": "Samsung Electro-Mechanics",
+      "status": "verified",
+      "primary_source": {
+        "url": "https://product.samsungsem.com/mlcc/CL31A226KAHNNN.do",
+        "revision": "live official characteristic data reviewed 2026-08-11"
+      },
+      "footprint": "Capacitor_SMD:C_1206_3216Metric",
+      "verification": {
+        "reviewed": [
+          "22 uF, 25 V, X5R in 1206/3216 metric package",
+          "Typical capacitance change approximately -20.52% at 3.3 V and -37.96% at 5 V",
+          "LCSC C12891 maps to exact package code CL31A226KAHNNNE"
+        ]
+      },
+      "limitation": "DC-bias curves are typical design-reference data and do not replace prototype startup/load-transient validation."
     }
   }
 }

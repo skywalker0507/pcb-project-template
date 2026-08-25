@@ -28,17 +28,22 @@ def allowed_tools(stage: str | None = None, path: Path = DEFAULT_POLICY) -> list
     return [str(value) for value in values]
 
 
-def require_tool(tool: str, *, stage: str | None = None, path: Path = DEFAULT_POLICY) -> dict[str, Any]:
+def require_tool(tool: str, *, stage: str | None = None, path: Path = DEFAULT_POLICY, allow_optional: bool = False) -> dict[str, Any]:
     policy = read_policy(path)
     selected_stage = stage or str(current_stage().get("stage"))
     allowed = [str(value) for value in (policy.get("stages") or {}).get(selected_stage, [])]
-    if tool not in allowed:
+    optional_stages = [str(value) for value in (policy.get("optional_tools") or {}).get(tool, [])]
+    optional_allowed = allow_optional and selected_stage in optional_stages
+    if tool not in allowed and not optional_allowed:
         raise SystemExit(json.dumps({
             "success": False,
             "error": "ai_tool_forbidden_for_stage",
             "tool": tool,
             "stage": selected_stage,
             "allowed_tools": allowed,
+            "optional_tools_require_explicit_entrypoint": sorted(
+                name for name, stages in (policy.get("optional_tools") or {}).items() if selected_stage in stages
+            ),
             "next": "Run scripts/stage_doctor.py and use only the stage-scoped tool profile.",
         }, separators=(",", ":")))
     detail = policy.get(tool)

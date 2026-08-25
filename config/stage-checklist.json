@@ -1,62 +1,109 @@
 {
-  "schema": 1,
+  "schema": 2,
   "stages": {
     "requirements": {
       "number": 1,
-      "files": ["config/requirements.json", "config/stage-checklist.json", "handoff/stages/CURRENT_STAGE.json"],
-      "objective": "Capture interfaces, rails, constraints, board outline, and manufacturer choice before selecting parts.",
-      "required_evidence": ["CURRENT_STAGE.json", "requirements recorded with explicit unknowns"],
-      "forbidden": ["routing", "manufacturing_export", "inventing electrical or fabrication values"]
-    },
-    "parts": {
-      "number": 2,
-      "files": ["config/requirements.json", "config/jlcpcb-parts.json", "HARDWARE_SPEC.md"],
-      "objective": "Select exact parts and footprints with manufacturer provenance before electrical implementation.",
-      "required_evidence": ["selected-part provenance", "footprint and polarity review", "explicit availability unknowns"],
-      "forbidden": ["automatic substitution approval", "routing", "manufacturing_export"]
+      "files": [
+        "HARDWARE_SPEC.md",
+        "config/requirements.json",
+        "config/product-decisions.json",
+        "config/selected-parts.json",
+        "handoff/stages/CURRENT_STAGE.json"
+      ],
+      "objective": "Freeze interfaces, constraints, manufacturer assumptions and exact part/footprint choices before implementation.",
+      "required_evidence": [
+        "requirements and selected-part provenance",
+        "explicit unknowns",
+        "cross-file consistency pass"
+      ],
+      "forbidden": ["routing", "manufacturing export", "inventing electrical or fabrication values"]
     },
     "electrical": {
-      "number": 3,
-      "files": ["config/electrical-backend.json", "src/", "ato.yaml", "build/03-electrical/", "build/00-shared/evidence/design-policy/design-policy-resolved.json"],
-      "objective": "Validate reviewed atopile sources, generated KiCad candidate, interfaces, rails, connectivity, and exact part selections.",
-      "required_evidence": ["atopile electrical build receipt", "backend-neutral electrical contract receipt", "selected-part provenance"],
-      "forbidden": ["manual schematic authority", "manufacturing_export"]
-    },
-    "electrical_freeze": {
-      "number": 4,
-      "files": ["config/electrical-backend.json", "src/", "ato.yaml", "config/requirements.json", "scripts/create_electrical_freeze.py", "build/04-electrical-freeze/", "handoff/stages/CURRENT_STAGE.json"],
-      "objective": "Create a SHA-bound boundary that freezes reviewed atopile connectivity, references, net names, footprints and exact part identities before physical work.",
-      "required_evidence": ["passing atopile build receipt", "passing electrical contract and candidate review receipts", "immutable release-lane electrical freeze bundle", "resolved exact-part mapping", "resolved electrical toolchain identity"],
-      "forbidden": ["unreviewed connectivity changes", "placement", "routing", "manufacturing_export"]
+      "number": 2,
+      "files": [
+        "src/",
+        "ato.yaml",
+        "config/electrical-backend.json",
+        "build/03-electrical/",
+        "build/04-electrical-freeze/"
+      ],
+      "objective": "Build and review atopile electrical intent, then create the immutable physical-input freeze.",
+      "required_evidence": [
+        "passing isolated electrical build",
+        "backend-neutral electrical contract",
+        "immutable release-lane electrical freeze bundle"
+      ],
+      "forbidden": ["manual schematic authority", "placement", "routing", "manufacturing export"]
     },
     "physical": {
-      "number": 5,
-      "files": ["config/physical-backend.json", "config/backend-architecture.json", "elec/layout/", "config/board-stack.json", "build/05-placement/", "build/00-shared/evidence/design-policy/design-policy-resolved.json"],
-      "objective": "Import the frozen KiCad interchange board into the selected physical backend, prove parity, place reviewed blocks, and preserve backend-specific manual work.",
-      "required_evidence": ["immutable electrical freeze bundle", "EasyEDA import parity pass", "board SHA", "placement review notes"],
-      "forbidden": ["unreviewed broad autorouting", "manufacturing_export"]
+      "number": 3,
+      "files": [
+        "config/physical-backend.json",
+        "config/placement-semantics.json",
+        "config/placement-routability.json",
+        "config/board-stack.json",
+        "build/05-placement/"
+      ],
+      "objective": "Create an origin-proven KiCad candidate and a functionally correct, routable placement.",
+      "required_evidence": [
+        "immutable electrical freeze bundle",
+        "physical candidate origin receipt",
+        "critical footprint and rule-area integrity at physical origin",
+        "placement semantics after footprint movement",
+        "placement routability comparison and critical route probes",
+        "checkpoint whole-board copper review"
+      ],
+      "forbidden": ["broad autorouting before critical probes", "manufacturing export"]
     },
     "routing": {
-      "number": 6,
-      "files": ["config/kicad-routing-tools.json", "build/00-shared/evidence/design-policy/design-policy-krt.json", "build/06-routing/tmp/", "build/06-routing/evidence/"],
-      "objective": "Create isolated, audited low-risk routing candidates with KRT as a GUI-independent routing engine.",
-      "required_evidence": ["candidate receipt", "candidate DRC comparison", "reviewed routing rules when committing real copper"],
-      "notes": ["In the four_layer template, In1.Cu and In2.Cu are reserved planes; KRT signal routing is limited to outer layers."],
-      "forbidden": ["in-place KRT routing", "treating route_ok as release"]
+      "number": 4,
+      "files": [
+        "config/kicad-routing-tools.json",
+        "config/validation-tiers.json",
+        "build/06-routing/tmp/",
+        "build/06-routing/evidence/"
+      ],
+      "objective": "Classify and route critical paths first, then create and audit batched low-risk KRT candidates.",
+      "required_evidence": [
+        "isolated candidate receipt",
+        "DRC delta and connectivity result",
+        "unchanged-placement receipt or fresh placement semantics",
+        "checkpoint visual review per functional block"
+      ],
+      "notes": [
+        "In the four-layer template, In1.Cu and In2.Cu are planes; ordinary signal routing uses the outer layers.",
+        "Use explicit trace plans for short two-endpoint local routes, and asynchronous start/status/finalize checkpoints for long KRT runs.",
+        "Fast copper preflight and routing-order checks reject bad candidates early but never replace exact KiCad DRC and connectivity.",
+        "Three consecutive rejected candidates in one route area trigger diagnosis without automatically returning to placement."
+      ],
+      "forbidden": ["in-place KRT routing", "treating route_ok as release", "counting tool/audit/DRC failures as no-path topology failures", "moving footprints directly from a routing failure without an escalation and improved placement evidence"]
     },
     "release": {
-      "number": 7,
-      "files": ["config/pcb-acceptance.json", "config/manufacturing-backend.json", "build/07-release/evidence/", "build/07-release/release/", "manufacturing/"],
-      "objective": "Run EasyEDA DRC, independent KiCad DRC/connectivity validation, JLC DFM, copper review, package checks, and guarded manufacturing export.",
-      "required_evidence": ["release_pass=true", "matching board SHA", "selected manufacturing profile", "final electrical parity pass", "EasyEDA DRC pass", "KiCad independent validation", "JLC DFM pass", "BOM/PnP/Gerber package pass"],
+      "number": 5,
+      "files": [
+        "config/pcb-acceptance.json",
+        "config/manufacturing-backend.json",
+        "build/07-release/INPUTS.json",
+        "build/07-release/tmp/release-readiness/current.json",
+        "build/07-release/evidence/",
+        "build/07-release/release/",
+        "manufacturing/"
+      ],
+      "objective": "Run exact-board electrical, physical and manufacturing gates and export a reproducible package.",
+      "required_evidence": [
+        "fresh release readiness has no blockers",
+        "release review packet and separate explicit visual assessment",
+        "release_pass=true bound to board SHA",
+        "full DRC and connectivity",
+        "final electrical parity",
+        "four-view visual review",
+        "critical footprint rule-area equivalence bound to the exact board",
+        "DFM and BOM/PnP/Gerber package checks",
+        "DFM order parameters and required PCB/SMT modules match the reviewed order profile",
+        "compiled manufacturing registry passes for the exact Gerber package",
+        "all configured special manufacturing processes have evidence-bound confirmations"
+      ],
       "forbidden": ["baseline regeneration to pass", "export without release_pass"]
-    },
-    "prototype": {
-      "number": 8,
-      "files": ["manufacturing/releases/", "handoff/stages/CURRENT_STAGE.json", "build/08-prototype/evidence/"],
-      "objective": "Record assembly inspection and measured bring-up results against the exact released board.",
-      "required_evidence": ["released board SHA", "power and interface measurements", "explicit failures and rework"],
-      "forbidden": ["claiming hardware validation from DRC alone", "silently changing released manufacturing evidence"]
     }
   }
 }

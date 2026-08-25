@@ -4,9 +4,20 @@ manufacturing/
 .venv-routingtools/
 tscircuit/node_modules/
 tools/KiCadRoutingTools/
+tools/easyeda-api-skill/
+tools/eext-kirouting-integration/
 tools/houtini-lm/
 tools/freerouting/
 tools/konnect/
+.venv-easyeda-bridge/
+
+# Local interactive-tool state and generated review material.
+/.konnect/
+/tmp/
+/*-3d.png
+/*-copper.png
+/visual-bundle.json
+/嘉立创DFM*.pdf
 .codex/config.toml
 .codex/pcb-mcp.fragment.toml
 .codex/konnect/
@@ -15,3 +26,4 @@ __pycache__/
 *.kicad_prl
 *.kicad_pcb.lck
 *-backups/
+.history/

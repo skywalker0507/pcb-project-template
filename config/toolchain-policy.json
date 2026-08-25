@@ -33,6 +33,12 @@
     "major": 10,
     "cli": "C:/Program Files/KiCad/10.0/bin/kicad-cli.exe"
   },
+  "gerber_parser": {
+    "package": "gerbonara",
+    "version": "1.6.3",
+    "python": "py -3.14",
+    "requirements": "requirements-pcb-tools.txt"
+  },
   "freerouting": {
     "latest_release_api": "https://api.github.com/repos/freerouting/freerouting/releases/latest",
     "jar_asset_suffix": ".jar",

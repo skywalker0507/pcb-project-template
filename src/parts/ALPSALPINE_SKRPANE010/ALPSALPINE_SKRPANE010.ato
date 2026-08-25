@@ -1,0 +1,21 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component ALPSALPINE_SKRPANE010_package:
+    # This trait marks this file as auto-generated
+    # If you want to manually change it, remove the trait
+    trait is_auto_generated<system="ato_part", source="easyeda:C470426", date="2026-08-11T06:54:48.736461+00:00", checksum="f0b429ab8e56a9291566d76320cf50f9b145e289bbf6b669cb83189de1f9d9bc">
+
+    trait is_atomic_part<manufacturer="ALPSALPINE", partnumber="SKRPANE010", footprint="SW-SMD_4P-L4.2-W3.2-P2.15-LS4.6-2.kicad_mod", symbol="SKRPANE010.kicad_sym">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C470426", manufacturer="ALPSALPINE", partno="SKRPANE010">
+    trait has_designator_prefix<prefix="SW">
+    trait has_datasheet<datasheet="https://tech.alpsalpine.com/e/products/detail/SKRPANE010/">
+
+    # pins
+    pin 1
+    pin 2
+    pin 3
+    pin 4

@@ -50,6 +50,7 @@ def main() -> int:
     payload = {
         "schema": 1,
         "kind": "routing_candidate",
+        "success": True,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
         "candidate": str(candidate),
         "candidate_sha256": candidate_hash,

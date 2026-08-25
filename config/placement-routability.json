@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "method": "pad-center minimum-spanning-tree and normalized congestion comparison",
+  "limits": "This is a relative placement metric, not a substitute for critical-net trial routing, impedance review, planes, DRC or SI analysis.",
+  "exclude_from_airwire_score": ["GND", "SHIELD"],
+  "weights": {
+    "default": 1,
+    "nets": {
+      "USB_DP_RAW": 8,
+      "USB_DM_RAW": 8,
+      "USB_DP_ESD": 8,
+      "USB_DM_ESD": 8,
+      "USB_DP": 8,
+      "USB_DM": 8,
+      "3V3": 6,
+      "USB_VBUS_RAW": 5,
+      "USB_5V": 5,
+      "SWDIO": 3,
+      "SWCLK": 3
+    }
+  },
+  "critical_groups": {
+    "usb_data_chain": ["USB_DP_RAW", "USB_DM_RAW", "USB_DP_ESD", "USB_DM_ESD", "USB_DP", "USB_DM"],
+    "usb_power_and_3v3": ["USB_VBUS_RAW", "USB_5V", "3V3"],
+    "target_debug": ["SWDIO", "SWCLK"]
+  },
+  "hard_no_regression_groups": ["usb_data_chain", "usb_power_and_3v3"],
+  "checkpoint": {
+    "require_baseline_comparison": true,
+    "require_critical_probe_receipts": true,
+    "require_unchanged_board_outline": true,
+    "critical_probe_groups": ["usb_data_chain", "usb_power_and_3v3", "ground_return"],
+    "critical_probe_components": {
+      "usb_data_chain": ["raw_fanout", "protected_pair", "endpoint_escape"],
+      "usb_power_and_3v3": ["usb_vbus_raw_escape", "usb_5v_distribution", "3v3_main_trunk"],
+      "ground_return": ["local_plane_access"]
+    }
+  }
+}

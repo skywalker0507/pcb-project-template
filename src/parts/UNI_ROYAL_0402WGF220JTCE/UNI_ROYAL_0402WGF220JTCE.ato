@@ -1,0 +1,19 @@
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component UNI_ROYAL_0402WGF220JTCE_package:
+    """22Ω (22R0) ±1%"""
+
+    # This trait marks this file as auto-generated
+    # If you want to manually change it, remove the trait
+    trait is_auto_generated<system="ato_part", source="easyeda:C25092", date="2026-08-11T06:07:59.724316+00:00", checksum="b21ee484b3f262d663f01194ca894ebb0d7fd9fc0c5b7a91d4b3c99e5641239f">
+
+    trait is_atomic_part<manufacturer="UNI-ROYAL", partnumber="0402WGF220JTCE", footprint="R0402.kicad_mod", symbol="0402WGF220JTCE.kicad_sym">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C25092", manufacturer="UNI-ROYAL", partno="0402WGF220JTCE">
+    trait has_designator_prefix<prefix="R">
+
+    # pins
+    pin 2
+    pin 1
