@@ -33,7 +33,6 @@ atopile_build = load("atopile_build_template", "scripts/build_atopile_isolated.p
 jlc_check = load("jlc_check_template", "scripts/check_jlcpcb_release.py")
 dfm_candidate = load("dfm_candidate_template", "scripts/prepare_jlcpcb_dfm_candidate.py")
 snapshot = load("snapshot_template", "scripts/create_release_snapshot.py")
-houtini_job = load("houtini_job_template", "scripts/create_houtini_job.py")
 easyeda_contract = load("easyeda_kirouting_contract_template", "scripts/easyeda_kirouting_contract.py")
 easyeda_writeback = load("easyeda_writeback_template", "scripts/apply_easyeda_route_plan.py")
 design_policy = load("design_policy_template", "scripts/design_policy.py")
@@ -298,7 +297,6 @@ class FlowTemplateTests(unittest.TestCase):
             "tscircuit": {"package_version": "old"},
             "kicad_routing_tools": {"commit": "KRT"},
             "freerouting": {"sha256": "FREE"},
-            "houtini_lm": {"commit": "HOUTINI"},
             "konnect": {"binary_sha256": "KONNECT"},
         }
         refreshed = toolchain_receipt.merge_receipt(
@@ -311,7 +309,7 @@ class FlowTemplateTests(unittest.TestCase):
         self.assertEqual(refreshed["mode"], "manual")
         self.assertNotIn("tscircuit", refreshed)
         self.assertEqual(refreshed["atopile"]["version"], "0.15.7")
-        for key in ("kicad_routing_tools", "freerouting", "houtini_lm", "konnect"):
+        for key in ("kicad_routing_tools", "freerouting", "konnect"):
             self.assertEqual(refreshed[key], existing[key])
             self.assertIn(key, refreshed["recording"]["preserved_unchecked_sections"])
 
@@ -571,6 +569,24 @@ class FlowTemplateTests(unittest.TestCase):
         self.assertTrue(result["success"], result["problems"])
         self.assertEqual(result["freerouting"]["entrypoint"], "scripts/run_freerouting_headless.py")
 
+    def test_unused_model_delegate_is_not_a_template_dependency(self) -> None:
+        searched = "\n".join(
+            (ROOT / path).read_text(encoding="utf-8")
+            for path in (
+                "config/ai-tool-policy.json", "config/toolchain-policy.json",
+                "scripts/init_project.py", "scripts/check_pcb_environment.py",
+                "scripts/record_toolchain_receipt.py",
+            )
+        ).lower()
+        self.assertNotIn("houtini", searched)
+
+    def test_freerouting_is_lab_only_not_a_standard_environment_requirement(self) -> None:
+        policy = json.loads((ROOT / "config/tool-entrypoints.json").read_text(encoding="utf-8"))
+        self.assertIn("freerouting", policy["optional_capabilities"]["alternate_router_lab"])
+        environment = (ROOT / "scripts/check_pcb_environment.py").read_text(encoding="utf-8")
+        self.assertIn('"freerouting-lab"', environment)
+        self.assertIn('required=False', environment)
+
     def test_existing_script_search_finds_freerouting_wrapper(self) -> None:
         result = script_search.search(["freerouting"], limit=3)
         self.assertIn("scripts/run_freerouting_headless.py", [item["path"] for item in result["results"]])
@@ -624,6 +640,13 @@ class FlowTemplateTests(unittest.TestCase):
         text = (ROOT / "scripts/build_electrical.py").read_text(encoding="utf-8")
         self.assertIn("reviewed_inputs_mutated_during_build", text)
         self.assertIn('post_status["source_sha256"] != status["source_sha256"]', text)
+
+    def test_electrical_navigation_plans_before_compiling(self) -> None:
+        text = (ROOT / "scripts/stage_doctor.py").read_text(encoding="utf-8")
+        self.assertIn("pcbctl.py build --plan --backend atopile", text)
+        build_text = (ROOT / "scripts/build_electrical.py").read_text(encoding="utf-8")
+        self.assertIn("duplicate_verified_electrical_build", build_text)
+        self.assertIn("--force-rebuild", build_text)
 
     def test_physical_environment_requires_easyeda_bridge(self) -> None:
         text = (ROOT / "scripts/check_pcb_environment.py").read_text(encoding="utf-8")
@@ -789,29 +812,6 @@ class FlowTemplateTests(unittest.TestCase):
             value = json.loads(stage.read_text(encoding="utf-8"))
             self.assertEqual((value["project"], value["stage"], value["status"]), ("new-project", "requirements", "not_started"))
             self.assertFalse(value["completion_verified"])
-
-    def test_houtini_job_rejects_small_receipt_without_calling_model(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            receipt = root / "receipt.log"
-            receipt.write_text("short", encoding="utf-8")
-            policy_path = root / "policy.json"
-            policy_path.write_text(json.dumps({
-                "schema": 1, "enabled": True, "max_paths": 1,
-                "minimum_total_input_bytes": 100, "allowed_suffixes": [".log"],
-                "forbidden_suffixes": [], "delegate": {},
-            }), encoding="utf-8")
-            original_root = houtini_job.ROOT
-            try:
-                houtini_job.ROOT = root
-                # This unit test exercises the receipt-size gate, independently
-                # of whichever workflow stage the developer currently has open.
-                with mock.patch.object(houtini_job, "require_tool", return_value={}):
-                    result = houtini_job.create_job([receipt], "test", "test", policy_path, root / "out")
-            finally:
-                houtini_job.ROOT = original_root
-            self.assertFalse(result["eligible"])
-            self.assertEqual(result["reason"], "input_below_delegation_threshold")
 
     def test_policy_hash_changes_when_inputs_change(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

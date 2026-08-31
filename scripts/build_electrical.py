@@ -17,6 +17,15 @@ from electrical_backend import DEFAULT_CONFIG, ROOT, read_config, selected_backe
 TOOLCHAIN_RECEIPT = ROOT / "build/00-shared/evidence/toolchain/toolchain-resolved.json"
 
 
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest().upper()
+
+
+def canonical_sha256(payload: dict[str, object]) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest().upper()
+
+
 def production_toolchain(name: str, status: dict[str, object]) -> tuple[dict[str, object], str] | None:
     if status.get("status") != "primary":
         return None
@@ -35,6 +44,86 @@ def production_toolchain(name: str, status: dict[str, object]) -> tuple[dict[str
     return payload, hashlib.sha256(TOOLCHAIN_RECEIPT.read_bytes()).hexdigest().upper()
 
 
+def build_input_manifest(
+    name: str,
+    backend: dict[str, object],
+    status: dict[str, object],
+    build_name: str,
+    toolchain: tuple[dict[str, object], str] | None,
+) -> dict[str, object]:
+    """Describe every reviewed or local producer input needed to reuse a build."""
+    driver = workspace_path(str(backend["driver"]), "Backend driver")
+    dependency_paths = [Path(__file__).resolve(), ROOT / "scripts/electrical_backend.py", driver]
+    if name == "atopile":
+        dependency_paths.append(ROOT / "ato.yaml")
+    dependencies = [
+        {"path": relative(path), "sha256": sha256(path)}
+        for path in sorted(set(dependency_paths), key=lambda item: relative(item))
+    ]
+    core: dict[str, object] = {
+        "schema": 1,
+        "backend": name,
+        "build": build_name,
+        "backend_config": {
+            key: backend.get(key)
+            for key in sorted(backend)
+        },
+        "contract": {
+            "source_sha256": status["source_sha256"],
+            "config_sha256": status["config_sha256"],
+        },
+        "producer_dependencies": dependencies,
+        "toolchain": None,
+    }
+    if toolchain:
+        payload, receipt_hash = toolchain
+        identity = payload.get(name)
+        core["toolchain"] = {
+            "receipt": relative(TOOLCHAIN_RECEIPT),
+            "receipt_sha256": receipt_hash,
+            "identity": identity,
+        }
+    return {**core, "fingerprint": canonical_sha256(core)}
+
+
+def find_matching_build(build_input: dict[str, object]) -> dict[str, object] | None:
+    """Return a matching receipt only while its exact candidate still exists."""
+    evidence = ROOT / "build/03-electrical/evidence"
+    if not evidence.is_dir():
+        return None
+    expected = build_input.get("fingerprint")
+    for directory in sorted((item for item in evidence.iterdir() if item.is_dir()), reverse=True):
+        receipt = directory / "electrical-build.json"
+        if not receipt.is_file():
+            continue
+        try:
+            payload = json.loads(receipt.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        recorded = payload.get("build_input")
+        if payload.get("success") is not True or not isinstance(recorded, dict):
+            continue
+        if recorded.get("fingerprint") != expected:
+            continue
+        candidate_value = payload.get("candidate_board")
+        candidate_hash = payload.get("candidate_board_sha256")
+        if not isinstance(candidate_value, str) or not isinstance(candidate_hash, str):
+            continue
+        candidate = Path(candidate_value).resolve()
+        try:
+            candidate.relative_to((ROOT / "build").resolve())
+        except ValueError:
+            continue
+        if not candidate.is_file() or sha256(candidate) != candidate_hash:
+            continue
+        return {
+            "receipt": relative(receipt),
+            "candidate_board": relative(candidate),
+            "candidate_board_sha256": candidate_hash,
+        }
+    return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--backend", help="Configured backend name; defaults to config active")
@@ -42,6 +131,14 @@ def main() -> int:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--receipt", type=Path)
     parser.add_argument("--check", action="store_true", help="Validate backend wiring without invoking a build")
+    parser.add_argument(
+        "--plan", action="store_true",
+        help="Compare exact reviewed and producer inputs with a verified prior build without invoking the compiler",
+    )
+    parser.add_argument(
+        "--force-rebuild", action="store_true",
+        help="Recompile even when an exact verified candidate survives; intended only for reproducibility checks",
+    )
     args = parser.parse_args()
     if not args.build.replace("-", "").replace("_", "").replace(".", "").isalnum():
         raise SystemExit("Build name must contain only letters, numbers, dot, dash, or underscore")
@@ -54,6 +151,42 @@ def main() -> int:
         return 0
 
     toolchain = production_toolchain(name, status)
+    build_input = build_input_manifest(name, backend, status, args.build, toolchain)
+    if args.plan:
+        matching = find_matching_build(build_input)
+        build_required = matching is None
+        print(json.dumps({
+            "success": True,
+            "action": "electrical-build-plan",
+            "backend": name,
+            "build": args.build,
+            "build_required": build_required,
+            "reason": "verified_matching_build" if matching else "no_matching_verified_build",
+            "input_fingerprint": build_input["fingerprint"],
+            "matching_build": matching,
+            "next_action": "build_electrical_candidate" if build_required else "review_or_freeze_matching_candidate",
+            "next_command": (
+                f"py -3.14 scripts/pcbctl.py build --backend {name} --build {args.build}"
+                if build_required else None
+            ),
+        }, separators=(",", ":")))
+        return 0
+
+    matching = find_matching_build(build_input)
+    if matching and not args.force_rebuild:
+        print(json.dumps({
+            "success": False,
+            "error": "duplicate_verified_electrical_build",
+            "backend": name,
+            "build": args.build,
+            "input_fingerprint": build_input["fingerprint"],
+            "matching_build": matching,
+            "next_action": "review_or_freeze_matching_candidate",
+            "next_command": None,
+            "override": "--force-rebuild",
+        }, separators=(",", ":")))
+        return 2
+
     run = None
     if args.output is None and args.receipt is None:
         run = create_run("electrical", "electrical-build")
@@ -127,6 +260,31 @@ def main() -> int:
             "log": relative(log),
         }, separators=(",", ":")))
         return 1
+    post_toolchain = production_toolchain(name, post_status)
+    post_build_input = build_input_manifest(name, backend, post_status, args.build, post_toolchain)
+    if post_build_input["fingerprint"] != build_input["fingerprint"]:
+        payload["success"] = False
+        payload["failure"] = {
+            "class": "electrical_build_inputs_mutated_during_build",
+            "input_fingerprint_before": build_input["fingerprint"],
+            "input_fingerprint_after": post_build_input["fingerprint"],
+            "next": "Review producer, project configuration, or toolchain changes, then rerun the build.",
+        }
+        receipt.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if run:
+            finish_run(
+                run, False,
+                artifacts={"receipt": relative(receipt), "log": relative(log)},
+                metrics={"failure_class": payload["failure"]["class"]},
+            )
+        print(json.dumps({
+            "success": False,
+            "backend": name,
+            "failure": payload["failure"],
+            "receipt": relative(receipt),
+            "log": relative(log),
+        }, separators=(",", ":")))
+        return 1
     if toolchain:
         toolchain_payload, toolchain_hash = toolchain
         expected_version = toolchain_payload[name]["version"]
@@ -142,6 +300,18 @@ def main() -> int:
             "backend": name,
             "compiler_version": expected_version,
         }
+    candidate_value = payload.get("candidate_board")
+    if not isinstance(candidate_value, str):
+        raise SystemExit("Backend receipt has no candidate_board")
+    candidate_board = Path(candidate_value).resolve()
+    try:
+        candidate_board.relative_to((ROOT / "build").resolve())
+    except ValueError as exc:
+        raise SystemExit("Backend candidate_board must stay under build/") from exc
+    if not candidate_board.is_file():
+        raise SystemExit(f"Backend candidate_board is unavailable: {candidate_board}")
+    payload["candidate_board_sha256"] = sha256(candidate_board)
+    payload["build_input"] = build_input
     payload["contract"] = post_status
     receipt.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if run:

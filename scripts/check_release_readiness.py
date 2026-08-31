@@ -15,7 +15,7 @@ from engine_runtime import activate
 
 activate()
 
-from pcb_template_engine.manufacturing import evaluate_pre_export  # noqa: E402
+from pcb_template_engine.manufacturing import evaluate_cost_policy, evaluate_pre_export  # noqa: E402
 from design_policy import (  # noqa: E402
     DEFAULT_OUTPUT as DESIGN_POLICY_OUTPUT,
     MANUFACTURING_REGISTRY_ARTIFACT,
@@ -220,6 +220,19 @@ def build_receipt(board: Path) -> dict[str, Any]:
         )
 
     registry_hash = str(registry.get("registry_sha256")) if registry_current and registry else None
+    cost_policy = evaluate_cost_policy(registry) if registry_current and registry else None
+    checks["manufacturing_cost_policy"] = {
+        "pass": bool(cost_policy and cost_policy.get("success") is True),
+        "selected_surcharge_drivers": list((cost_policy or {}).get("selected_surcharge_drivers", [])),
+        "failed_rules": list((cost_policy or {}).get("failed_rules", [])),
+    }
+    if cost_policy and cost_policy.get("success") is not True:
+        add_blocker(
+            blockers, "manufacturing_cost_policy_unreviewed", "manufacturing",
+            "review_manufacturing_cost_drivers",
+            detail=cost_policy.get("failed_rules", []),
+            command="py -3.14 scripts/pcbctl.py release check-cost-policy",
+        )
     special = evaluate_pre_export(registry) if registry_current and registry else None
     checks["special_processes"] = {
         "pass": bool(special and special.get("success") is True),

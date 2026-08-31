@@ -154,6 +154,7 @@ def compile_policy(project_root: Path, inputs: Mapping[str, Path]) -> dict[str, 
             "gerber_file_patterns": manufacturing_rules.get("gerber_file_patterns", {}),
             "gerber_rules": manufacturing_rules.get("gerber_rules", []),
             "special_processes": profile.get("special_processes", {}),
+            "cost_review": profile.get("cost_review", {}),
         },
         "routing": {
             "krt": {

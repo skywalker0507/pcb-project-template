@@ -35,8 +35,13 @@ The machine-readable stage checklist is authoritative for completion evidence an
 
 After a functional board checkpoint, run `py -3.14 scripts/pcbctl.py verify`.
 Local copper candidates use quick DRC-delta/connectivity checks instead of the
-whole pipeline. After electrical source changes, run `py -3.14 scripts/pcbctl.py build`: this creates only an
-isolated electrical candidate and cannot audit or export a stale reviewed board.
+whole pipeline. Before compiling, run `py -3.14 scripts/pcbctl.py build --plan`;
+it compares reviewed source, backend configuration, producer code, toolchain
+identity, and the surviving candidate hash. Build only when it reports
+`build_required: true`. The build creates only an isolated electrical candidate
+and cannot audit or export a stale reviewed board. A direct duplicate build is
+rejected before compiler startup; `--force-rebuild` is reserved for an explicit
+compiler reproducibility check.
 Run `review_electrical_candidate.py --receipt <electrical-build.json> --output
 <new-review-directory>` to generate independent candidate DRC and render
 evidence, then create the immutable release-lane electrical freeze bundle.
@@ -73,7 +78,7 @@ record those confirmations before finalizing the packet; their policy change
 would otherwise make a newly created physical review stale.
 
 Before physical/routing/release work, run `py -3.14 scripts/compile_design_policy.py` when its policy inputs changed.
-KRT, FreeRouting candidates and export require a fresh policy with the relevant
+KRT candidates and export require a fresh policy with the relevant
 capability. Release additionally requires `review_pass=true` from
 `record_physical_review.py`, bound to both the board SHA and policy SHA.
 
@@ -95,9 +100,8 @@ passing critical route probes.
   not represented by deterministic scripts;
 - EasyEDA Pro: optional compatibility import, secondary DRC/JLC review, and
   ordering assistance;
-- Houtini-LM: optional bounded, non-authoritative text work; never a default failure action;
 - KRT: guarded candidate copper, followed by independent audit;
-- FreeRouting: headless DSN-to-SES candidate artifact only. Import its SES into
+- FreeRouting: uninstalled lab-only headless DSN-to-SES comparison. Import its SES into
   a separate KiCad candidate board, then run `krt_candidate_audit.py`; a
   successful FreeRouting process is never routing acceptance;
 - deterministic Python: orchestration, compact receipts and release gates.
@@ -113,6 +117,22 @@ Close live KiCad projects before direct file edits, then rerun the pipeline.
 - Release preparation: one aggregated readiness pass. Resolve its complete
   blocker set without repeatedly invoking the pipeline.
 - Production release: one guarded full pipeline after readiness passes.
+
+Run `pcbctl verify workflow` at a functional checkpoint, after repeated route
+rejection, or before changing the process itself. The full report is written to
+`build/00-shared/workflow-profile.json`; stdout stays a small index. It profiles
+metadata and compact receipts, not boards, images or logs. Its recommendations
+are advisory and cannot relax validation gates.
+
+One bounded edit batch gets one quick audit. Reuse an existing hash-bound
+checkpoint receipt for handoff or diagnosis when its dependency manifest is
+fresh. Do not rerun the same whole-board tier merely to recreate a receipt in a
+new directory.
+
+`pcbctl verify --reuse-checkpoint <passing-pipeline-summary.json>` is the only
+supported execution shortcut. It is checkpoint-only and verifies the exact
+board/baseline plus conservative producer dependencies. Release and electrical
+builds cannot use it.
 
 `status` and `session_boot` never execute DRC or start routing. They only read a
 fresh compact readiness receipt; if it is missing or stale, their sole next

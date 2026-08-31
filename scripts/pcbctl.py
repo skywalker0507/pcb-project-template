@@ -55,6 +55,8 @@ SUBCOMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
         "pre-route": ("scripts/summarize_kicad_drc.py", "--mode", "pre-route"),
         "footprint-equivalence": ("scripts/check_kicad_footprint_equivalence.py",),
         "drc-review": ("scripts/record_kicad_drc_review.py",),
+        "workflow": ("scripts/profile_workflow.py",),
+        "template": ("scripts/run_template_checks.py",),
     },
     "route": {
         "run": ("scripts/krt_flow.py", "route"),
@@ -70,7 +72,10 @@ SUBCOMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
     "release": {
         "prepare-dfm": ("scripts/prepare_jlcpcb_dfm_candidate.py",),
         "record-dfm": ("scripts/record_manufacturing_dfm.py",),
+        "import-dfm-result": ("scripts/import_manufacturing_dfm_result.py",),
         "check-manufacturing": ("scripts/check_manufacturing_registry.py",),
+        "check-cost-policy": ("scripts/check_manufacturing_registry.py", "--phase", "cost"),
+        "review-quote": ("scripts/review_manufacturing_quote.py",),
         "check-gerber": ("scripts/check_manufacturing_registry.py", "--phase", "gerber"),
         "confirm-process": ("scripts/confirm_special_process.py",),
     },
@@ -96,8 +101,8 @@ def usage() -> str:
         "  physical-start  create | rebase | outline | stack | plane | silkscreen",
         "  place           apply | query | score | semantics | immutability | integrity | render | review | promote",
         "  route           run | start | status | finalize | check | report | history | health | escalate | trace | return-vias | checkpoint-finalize",
-        "  verify          readiness | parity | prepare-review | finalize-review | delta | remaining | pre-route | footprint-equivalence | drc-review",
-        "  release         prepare-dfm (Gerber+BOM+CPL) | record-dfm | confirm-process | check-manufacturing | check-gerber",
+        "  verify          readiness | parity | prepare-review | finalize-review | delta | remaining | pre-route | footprint-equivalence | drc-review | workflow | template",
+        "  release         prepare-dfm | import-dfm-result | record-dfm (legacy) | check-cost-policy | review-quote | confirm-process | check-manufacturing | check-gerber",
     ])
     return "\n".join(lines)
 

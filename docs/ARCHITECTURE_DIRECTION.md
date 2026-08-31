@@ -27,7 +27,7 @@ LLMs are narrow-interface operators, never design or release authorities.
 5. KiCad is the primary physical backend and native atopile physical
    interchange. EasyEDA Pro is an optional compatibility, JLC DFM, and ordering
    capability; it is not a second physical authority.
-6. KiCadRoutingTools is a GUI-independent routing engine; FreeRouting is secondary.
+6. KiCadRoutingTools is the sole production routing engine; FreeRouting is a lab-only comparison adapter.
 7. A generated resolved policy is the executable contract consumed by routing,
    DFM checks, handoffs, and release guards.
 8. The independently versioned `template-engine/` package owns reusable policy
@@ -35,7 +35,7 @@ LLMs are narrow-interface operators, never design or release authorities.
    engine through a version/API/source-digest contract.
 
 No generated artifact supersedes its reviewed input. EasyEDA, KiCad, KRT, and
-FreeRouting may not become electrical authorities. A changed input invalidates
+any lab router may not become electrical authorities. A changed input invalidates
 the resolved-policy receipt and all dependent evidence.
 
 ## Target pipeline
@@ -62,10 +62,9 @@ electrical-backend checks placement/critical-net checks  KRT/DFM/KiCad rules
                          AND review_pass -> manufacturing export
 ```
 
-Long text is a separate path: deterministic scripts retain logs on disk and
-may create a Houtini job only when the delegation policy permits it. The
-sidekick returns a bounded JSON draft; it has no authority over any gate.
-Normal sessions begin from the single `session_boot` receipt, not from
+Deterministic scripts retain logs on disk and return compact receipts; the
+production template has no second-model log-delegation dependency. Normal
+sessions begin from the single `session_boot` receipt, not from
 `stage_doctor`, `CURRENT.json`, a full board, or a long log. Stage doctor and
 the detailed workflow documents are loaded only for diagnosis.
 
@@ -131,14 +130,14 @@ machine or another set of transition configuration.
 
 - Stage checklists, stage guard coverage for candidate routing/export, compact
   session boot, bounded handoffs, SHA-bound DRC baseline and release audit.
-- Candidate-only KRT/FreeRouting paths and a compact candidate diff.
+- Candidate-only KRT routing and a compact candidate diff; FreeRouting remains an explicit lab comparison.
 - Reviewed fabrication-value recording via `apply_reviewed_fab_values.py`;
   unreviewed values cannot authorize real KRT routing.
-- Houtini large-text eligibility jobs: short receipts are not delegated; jobs
-  use Flash, disabled thinking, and bounded JSON output.
 - A pinned project-neutral template-engine package with thin project adapters.
 - A design-policy-derived manufacturing registry covering required copper
   layers, outline/drill artifacts, geometric keepouts and special processes.
+- Reviewed manufacturing cost drivers plus a live-quote mapper that rejects
+  unrequested or opaque surcharge lines without hard-coding vendor prices.
 
 ## Explicit non-goals
 

@@ -4,16 +4,16 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from artifact_store import config as artifact_config, create_run, finish_run, publish_stage_artifact, relative
-from ai_tool_policy import allowed_tools
-from create_houtini_job import create_job
 from electrical_backend import read_config as read_electrical_config, selected_backend as selected_electrical_backend
 from pcb_policy import load_acceptance, require_no_prohibited_evidence
 from release_inputs import adopted_routing_board as resolve_adopted_routing_board, fresh_release_readiness, resolve_release_input
@@ -31,7 +31,80 @@ def last_json(output: str) -> dict[str, object] | None:
     return None
 
 
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest().upper()
+
+
+def checkpoint_dependencies(board: Path, baseline: Path | None, config_path: Path) -> dict[str, str]:
+    """Conservatively bind reusable checkpoint evidence to all local producers and policies."""
+    paths = [board.resolve(), config_path.resolve()]
+    if baseline is not None:
+        paths.append(baseline.resolve())
+    paths.extend(sorted((ROOT / "scripts").glob("*.py")))
+    paths.extend(sorted((ROOT / "config").glob("*.json")))
+    paths.extend(sorted((ROOT / "template-engine/src").rglob("*.py")))
+    for optional in (ROOT / "template-engine/pyproject.toml", ROOT / "build/00-shared/evidence/toolchain/toolchain-resolved.json"):
+        if optional.is_file():
+            paths.append(optional)
+    unique: dict[str, str] = {}
+    for path in paths:
+        resolved = path.resolve()
+        if resolved.is_file():
+            try:
+                key = relative(resolved)
+            except ValueError:
+                key = str(resolved)
+            unique[key] = sha256(resolved)
+    return dict(sorted(unique.items()))
+
+
+def dependencies_fresh(dependencies: object) -> bool:
+    if not isinstance(dependencies, dict) or not dependencies:
+        return False
+    for value, expected in dependencies.items():
+        path = (ROOT / str(value)).resolve()
+        if not path.is_file() or sha256(path) != str(expected).upper():
+            return False
+    return True
+
+
+def reusable_checkpoint(receipt_path: Path, board: Path, baseline: Path | None) -> dict[str, object] | None:
+    try:
+        receipt = json.loads(receipt_path.resolve().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(receipt, dict) or receipt.get("kind") != "pcb_pipeline_summary" or receipt.get("success") is not True:
+        return None
+    requested = receipt.get("requested")
+    if not isinstance(requested, dict) or requested.get("tier") != "checkpoint":
+        return None
+    if receipt.get("board_sha256") != sha256(board):
+        return None
+    expected_baseline = sha256(baseline) if baseline is not None else None
+    if receipt.get("baseline_board_sha256") != expected_baseline:
+        return None
+    manifest_value = receipt.get("producer_dependency_manifest")
+    manifest_hash = receipt.get("producer_dependency_manifest_sha256")
+    if not isinstance(manifest_value, str) or not isinstance(manifest_hash, str):
+        return None
+    manifest_path = (ROOT / manifest_value).resolve()
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if sha256(manifest_path) != manifest_hash.upper() or not isinstance(manifest, dict):
+        return None
+    if manifest.get("kind") != "pcb_pipeline_dependencies" or not dependencies_fresh(manifest.get("dependencies")):
+        return None
+    return receipt
+
+
 def run_step(name: str, command: list[str], log_dir: Path) -> dict[str, object]:
+    started = time.perf_counter()
     result = subprocess.run(
         command,
         cwd=ROOT,
@@ -52,8 +125,40 @@ def run_step(name: str, command: list[str], log_dir: Path) -> dict[str, object]:
         "exit_code": result.returncode,
         "log": str(log.resolve()),
         "log_bytes": log.stat().st_size,
+        "duration_ms": round((time.perf_counter() - started) * 1000),
         "data": last_json(result.stdout),
         "tail": lines[-1][:500] if lines else "",
+    }
+
+
+def stdout_index(summary: dict[str, object]) -> dict[str, object]:
+    failed = summary.get("failed_step")
+    run = summary.get("run") if isinstance(summary.get("run"), dict) else {}
+    metrics = summary.get("context_metrics") if isinstance(summary.get("context_metrics"), dict) else {}
+    requested = summary.get("requested") if isinstance(summary.get("requested"), dict) else {}
+    artifacts = summary.get("artifacts") if isinstance(summary.get("artifacts"), dict) else {}
+    failed_data = failed.get("data") if isinstance(failed, dict) and isinstance(failed.get("data"), dict) else {}
+    detail = {
+        key: failed_data[key]
+        for key in ("error", "reason", "baseline_pass", "release_pass", "next_action", "next_command")
+        if key in failed_data
+    }
+    if isinstance(failed_data.get("failures"), list):
+        detail["failures"] = failed_data["failures"][:8]
+    if not detail and isinstance(failed, dict) and failed.get("tail"):
+        detail["tail"] = str(failed["tail"])[:240]
+    return {
+        "success": summary.get("success"),
+        "release_pass": summary.get("release_pass"),
+        "tier": requested.get("tier"),
+        "board_sha256": summary.get("board_sha256"),
+        "passed_step_count": len(summary.get("passed_steps") or []),
+        "failed_step": failed.get("name") if isinstance(failed, dict) else None,
+        "failed_step_detail": detail or None,
+        "duration_ms": metrics.get("duration_ms"),
+        "pipeline_summary": artifacts.get("pipeline_summary"),
+        "run_id": run.get("run_id"),
+        "reused": summary.get("reused", False),
     }
 
 
@@ -68,6 +173,7 @@ def adopted_routing_board() -> Path:
 
 
 def main() -> int:
+    pipeline_started = time.perf_counter()
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=ROOT / "config/pcb-flow.json")
     parser.add_argument("--build", action="store_true", help="Run the selected isolated electrical backend first.")
@@ -85,6 +191,7 @@ def main() -> int:
     )
     parser.add_argument("--run-id", help="Optional stable artifact run id; defaults to a UTC timestamp and operation.")
     parser.add_argument("--log-dir", type=Path, help="Compatibility override; defaults inside the run tmp lane.")
+    parser.add_argument("--reuse-checkpoint", type=Path, help="Reuse an exact passing checkpoint receipt only when every bound dependency is unchanged.")
     args = parser.parse_args()
     if args.build and args.export:
         raise SystemExit("A source build creates an unreviewed candidate; review it before a separate export attempt")
@@ -92,6 +199,8 @@ def main() -> int:
         args.tier = "release"
     if args.baseline_board and (args.build or args.export or args.tier != "checkpoint"):
         raise SystemExit("--baseline-board is only valid for checkpoint verification")
+    if args.reuse_checkpoint and (args.build or args.export or args.tier != "checkpoint"):
+        raise SystemExit("--reuse-checkpoint is valid only for checkpoint verification")
 
     config = json.loads(args.config.read_text(encoding="utf-8"))
     project = config["project"]
@@ -121,26 +230,12 @@ def main() -> int:
     manufacturing_config = config["manufacturing"]
     stage = str(current_stage().get("stage"))
     operation = "electrical-build" if args.build else "release-export" if args.export else "pcb-audit"
-    run = create_run(stage, operation, args.run_id)
-    log_dir = args.log_dir.resolve() if args.log_dir else run.tmp / "logs"
-    evidence_drc = run.evidence / "drc" / "kicad-cli-drc.rpt"
-    evidence_audit = run.evidence / "final-routing-audit.json"
-    context_output = run.tmp / "context" / "pcb-context.json"
-    pipeline_summary = run.evidence / "pipeline-summary.json"
-    package_audit = run.evidence / "jlcpcb-package-audit.json"
-    manufacturing_gate = run.evidence / "manufacturing-gate.json"
-    manufacturing_registry_validation = run.evidence / "manufacturing-registry-validation.json"
-    gerber_rules_gate = run.evidence / "manufacturing-registry-gerber.json"
-    footprint_equivalence = run.evidence / "footprint-equivalence.json"
-    physical_integrity = run.evidence / "physical-integrity.json"
-    special_process_gate = run.evidence / "manufacturing-registry-pre-export.json"
-
     acceptance_path = ROOT / config.get("acceptance", "config/pcb-acceptance.json")
     release_rules = load_acceptance(acceptance_path, "release", {
         "release_pass", "board_sha256_match", "drc_zero_unconnected", "manufacturing_profile_selected",
         "electrical_freeze_pass", "jlc_dfm_pass", "dfm_order_profile_match",
         "final_electrical_parity_pass", "physical_integrity_pass", "critical_footprint_rule_areas_pass", "manufacturing_registry_pass", "gerber_rules_pass",
-        "special_manufacturing_processes_confirmed",
+        "manufacturing_cost_policy_pass", "special_manufacturing_processes_confirmed",
     })
     require_no_prohibited_evidence(release_rules, {"matching_release_audit"})
     board_path = selected_board
@@ -150,6 +245,38 @@ def main() -> int:
     baseline_board_path = args.baseline_board.resolve() if args.baseline_board else None
     if baseline_board_path and not baseline_board_path.is_file():
         raise SystemExit(f"Baseline board not found: {baseline_board_path}")
+    if args.reuse_checkpoint:
+        reused = reusable_checkpoint(args.reuse_checkpoint, board_path, baseline_board_path)
+        if reused is None:
+            print(json.dumps({
+                "success": False, "error": "checkpoint_receipt_missing_stale_or_mismatched",
+                "receipt": str(args.reuse_checkpoint.resolve()),
+            }, separators=(",", ":")))
+            return 2
+        reused_index = dict(reused)
+        reused_index["reused"] = True
+        reused_index["context_metrics"] = {**(reused.get("context_metrics") or {}), "duration_ms": 0}
+        print(json.dumps(stdout_index(reused_index), ensure_ascii=False, separators=(",", ":")))
+        return 0
+
+    # Create a run only after all read-only preflight and reuse decisions. This
+    # prevents status checks and exact checkpoint reuse from leaving abandoned
+    # in-progress artifacts behind.
+    run = create_run(stage, operation, args.run_id)
+    log_dir = args.log_dir.resolve() if args.log_dir else run.tmp / "logs"
+    evidence_drc = run.evidence / "drc" / "kicad-cli-drc.rpt"
+    evidence_audit = run.evidence / "final-routing-audit.json"
+    context_output = run.tmp / "context" / "pcb-context.json"
+    pipeline_summary = run.evidence / "pipeline-summary.json"
+    package_audit = run.evidence / "jlcpcb-package-audit.json"
+    manufacturing_gate = run.evidence / "manufacturing-gate.json"
+    manufacturing_registry_validation = run.evidence / "manufacturing-registry-validation.json"
+    manufacturing_cost_policy = run.evidence / "manufacturing-cost-policy.json"
+    gerber_rules_gate = run.evidence / "manufacturing-registry-gerber.json"
+    footprint_equivalence = run.evidence / "footprint-equivalence.json"
+    physical_integrity = run.evidence / "physical-integrity.json"
+    special_process_gate = run.evidence / "manufacturing-registry-pre-export.json"
+    checkpoint_dependency_manifest = run.evidence / "checkpoint-dependencies.json"
 
     commands: list[tuple[str, list[str]]] = []
     resolved_release_inputs: dict[str, dict[str, str | None]] = {}
@@ -245,6 +372,14 @@ def main() -> int:
                 manufacturing_gate_command.extend(["--easyeda-drc", str(ROOT / gate_receipts["easyeda_drc"])])
             commands.extend([
                 (
+                    "manufacturing-cost-policy",
+                    [
+                        sys.executable, "scripts/check_manufacturing_registry.py",
+                        "--phase", "cost",
+                        "--output", str(manufacturing_cost_policy),
+                    ],
+                ),
+                (
                     "manufacturing-registry-pre-export",
                     [
                         sys.executable, "scripts/check_manufacturing_registry.py",
@@ -269,6 +404,7 @@ def main() -> int:
                         "--assembly-parts", str(ROOT / manufacturing_config["assembly_parts"]),
                         "--acceptance", str(acceptance_path),
                         "--registry-pre-export", str(special_process_gate),
+                        "--cost-policy", str(manufacturing_cost_policy),
                         "--gerber-rules-output", str(gerber_rules_gate),
                         "--footprint-equivalence", str(footprint_equivalence),
                         "--physical-integrity", str(physical_integrity),
@@ -312,18 +448,19 @@ def main() -> int:
         and isinstance(gate_result, dict) and gate_result.get("manufacturing_gate_pass") is True
         and isinstance(package_result, dict) and package_result.get("success") is True
     )
-    delegation = None
-    if failed and "houtini" in allowed_tools():
-        delegation = create_job(
-            [Path(str(failed["log"]))],
-            "pipeline_failure",
-            f"The deterministic pipeline stopped at {failed['name']} with exit code {failed['exit_code']}.",
-            output_dir=run.evidence / "delegation",
-            job_name=f"pipeline-{failed['name']}",
-        )
-
+    checkpoint_dependency_manifest_value = None
+    checkpoint_dependency_manifest_hash = None
+    if args.tier == "checkpoint" and not args.build:
+        checkpoint_dependency_manifest.write_text(json.dumps({
+            "schema": 1,
+            "kind": "pcb_pipeline_dependencies",
+            "dependencies": checkpoint_dependencies(board_path, baseline_board_path, args.config),
+        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        checkpoint_dependency_manifest_value = relative(checkpoint_dependency_manifest)
+        checkpoint_dependency_manifest_hash = sha256(checkpoint_dependency_manifest)
     summary: dict[str, object] = {
         "schema": 2,
+        "kind": "pcb_pipeline_summary",
         "success": success,
         "run": {key: relative(Path(value)) if key in {"tmp", "evidence", "release", "manifest"} else value for key, value in run.as_dict().items()},
         "requested": {
@@ -338,6 +475,9 @@ def main() -> int:
         "acceptance": {"path": relative(acceptance_path), "release_requires": release_rules.get("requires", [])},
         "resolved_release_inputs": resolved_release_inputs,
         "board_sha256": audit.get("board_sha256") if isinstance(audit, dict) else None,
+        "baseline_board_sha256": sha256(baseline_board_path) if baseline_board_path else None,
+        "producer_dependency_manifest": checkpoint_dependency_manifest_value,
+        "producer_dependency_manifest_sha256": checkpoint_dependency_manifest_hash,
         "in1_track_segments": audit.get("in1_non_ground_segments") if isinstance(audit, dict) else None,
         "drc_categories": (
             audit.get("new_violation_types", {}) if checkpoint_delta
@@ -362,15 +502,17 @@ def main() -> int:
             "footprint_equivalence": relative(footprint_equivalence) if footprint_equivalence.is_file() else None,
             "physical_integrity": relative(physical_integrity) if physical_integrity.is_file() else None,
             "manufacturing_registry_pre_export": relative(special_process_gate) if special_process_gate.is_file() else None,
+            "checkpoint_dependencies": checkpoint_dependency_manifest_value,
             "logs": relative(log_dir),
         },
         "context_metrics": {
             "pcb_context_bytes": context_output.stat().st_size if context_output.is_file() else 0,
             "pipeline_log_bytes": sum(int(item.get("log_bytes", 0)) for item in steps),
+            "duration_ms": round((time.perf_counter() - pipeline_started) * 1000),
+            "step_durations_ms": {str(item["name"]): int(item.get("duration_ms", 0)) for item in steps},
             "stdout_contract": "compact_json_only",
             "full_pcb_may_enter_llm_context": False,
         },
-        "delegation": delegation,
     }
     pipeline_summary.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
@@ -421,6 +563,7 @@ def main() -> int:
         release_artifacts["stage_result"] = relative(run.release / "stage-result.json")
 
     summary["release_artifacts"] = release_artifacts
+    summary["artifacts"]["pipeline_summary"] = relative(pipeline_summary)
     pipeline_summary.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     finish_run(
         run,
@@ -428,7 +571,7 @@ def main() -> int:
         artifacts={**summary["artifacts"], "pipeline_summary": relative(pipeline_summary), **release_artifacts},
         metrics=summary["context_metrics"],
     )
-    print(json.dumps(summary, ensure_ascii=False, separators=(",", ":")))
+    print(json.dumps(stdout_index(summary), ensure_ascii=False, separators=(",", ":")))
     return 0 if success else 1
 
 

@@ -8,9 +8,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import sys
 from typing import Any
 import zipfile
@@ -298,6 +300,125 @@ def _preserved(path: Path, preserved: list[Path]) -> bool:
     return any(resolved == item or item in resolved.parents or resolved in item.parents for item in preserved)
 
 
+def protected_reference_text() -> str:
+    """Return normalized text from authoritative pointers that may reference tmp runs."""
+    paths = [
+        CURRENT_INDEX,
+        STAGE_RESULTS_INDEX,
+        *list((ROOT / "config").rglob("*.json")),
+        *list((ROOT / "handoff").rglob("*")),
+        *list((ROOT / "build").glob("*/CURRENT.json")),
+        *list((ROOT / "build").glob("*/INPUTS.json")),
+        *list((ROOT / "build").glob("*/tmp/*CURRENT.json")),
+        *list((ROOT / "build/00-shared/krt-async").glob("*.json")),
+        *list((ROOT / "manufacturing").rglob("manifest.json")),
+    ]
+    chunks: list[str] = []
+    seen: set[Path] = set()
+    for path in paths:
+        resolved = path.resolve()
+        if resolved in seen or not resolved.is_file():
+            continue
+        seen.add(resolved)
+        try:
+            chunks.append(resolved.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+    return "\n".join(chunks).replace("\\", "/").lower()
+
+
+def is_referenced_build_path(path: Path, references: str) -> bool:
+    value = relative(path).replace("\\", "/").lower().rstrip("/")
+    return bool(value and value in references)
+
+
+def remove_tree_writable(path: Path) -> None:
+    """Remove an already archived tree, retrying Windows read-only entries once."""
+    def retry_readonly(function, target, _excinfo) -> None:
+        os.chmod(target, stat.S_IWRITE)
+        function(target)
+
+    shutil.rmtree(path, onexc=retry_readonly)
+
+
+def retention_sidecar(archive: Path) -> Path:
+    return archive.with_suffix(".manifest.json")
+
+
+def pending_retention_archive(settings: dict[str, Any]) -> tuple[Path, dict[str, Any]] | None:
+    archive_root = ROOT / str((settings.get("legacy") or {}).get("archive_root", "build/00-legacy"))
+    if not archive_root.is_dir():
+        return None
+    archives = sorted(archive_root.glob("retention-*.zip"), key=lambda item: item.stat().st_mtime, reverse=True)
+    for archive in archives:
+        sidecar = retention_sidecar(archive)
+        if sidecar.is_file():
+            try:
+                status = read_json(sidecar)
+            except (OSError, json.JSONDecodeError):
+                status = {}
+            if status.get("cleanup_complete") is True:
+                continue
+        with zipfile.ZipFile(archive, "r") as bundle:
+            corrupt = bundle.testzip()
+            if corrupt is not None:
+                raise SystemExit(f"Pending retention archive is corrupt: {archive}: {corrupt}")
+            try:
+                manifest = json.loads(bundle.read("retention-manifest.json"))
+            except (KeyError, json.JSONDecodeError) as exc:
+                raise SystemExit(f"Pending retention archive lacks a valid manifest: {archive}: {exc}") from exc
+        if not isinstance(manifest, dict) or manifest.get("kind") != "expired_tmp_archive":
+            raise SystemExit(f"Pending retention archive has the wrong kind: {archive}")
+        return archive, manifest
+    return None
+
+
+def resume_retention_cleanup(settings: dict[str, Any], archive: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+    """Finish deletion from a verified archive manifest without creating another archive."""
+    allowed_parents = {
+        (stage_directory(stage, settings) / str((settings.get("lanes") or {}).get("tmp", "tmp"))).resolve()
+        for stage in (settings.get("stages") or {})
+    }
+    references = protected_reference_text()
+    removed = 0
+    already_missing = 0
+    protected: list[Path] = []
+    runs = manifest.get("runs", [])
+    if not isinstance(runs, list):
+        raise SystemExit(f"Pending retention archive has an invalid run list: {archive}")
+    for item in runs:
+        if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+            raise SystemExit(f"Pending retention archive contains an invalid run record: {archive}")
+        path = require_under(ROOT / item["path"], ROOT / "build", "Archived tmp run")
+        if path.parent.resolve() not in allowed_parents:
+            raise SystemExit(f"Pending retention archive targets a non-tmp run: {path}")
+        if not path.exists():
+            already_missing += 1
+            continue
+        if is_referenced_build_path(path, references):
+            protected.append(path)
+            continue
+        remove_tree_writable(path)
+        removed += 1
+    sidecar = retention_sidecar(archive)
+    result = {
+        **manifest,
+        "archive": relative(archive),
+        "archive_sha256": sha256(archive),
+        "cleanup_complete": True,
+        "cleanup_removed_runs": removed,
+        "cleanup_already_missing_runs": already_missing,
+        "cleanup_protected_runs": [relative(path) for path in protected],
+    }
+    sidecar.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return {
+        "success": True, "applied": True, "resumed": True,
+        "archive": relative(archive), "run_count": len(runs),
+        "removed_run_count": removed, "already_missing_run_count": already_missing,
+        "protected_run_count": len(protected),
+    }
+
+
 def archive_legacy(settings: dict[str, Any], *, apply: bool) -> dict[str, Any]:
     legacy = settings.get("legacy") or {}
     archive_root = require_under(ROOT / str(legacy.get("archive_root", "build/00-legacy")), ROOT / "build", "Legacy archive")
@@ -459,6 +580,16 @@ def register_release(
 
 def prune_tmp(settings: dict[str, Any], *, apply: bool) -> dict[str, Any]:
     """Archive expired disposable runs; never touch evidence or release lanes."""
+    pending = pending_retention_archive(settings)
+    if pending is not None:
+        if apply:
+            return resume_retention_cleanup(settings, *pending)
+        archive, manifest = pending
+        return {
+            "success": True, "applied": False, "pending_cleanup": True,
+            "archive": relative(archive), "run_count": len(manifest.get("runs", [])),
+            "next": "rerun prune --apply to resume verified archived cleanup",
+        }
     max_age = float((settings.get("retention") or {}).get("tmp_max_age_hours", 24))
     cutoff = datetime.now(timezone.utc).timestamp() - max_age * 3600
     current_tmp: Path | None = None
@@ -467,20 +598,33 @@ def prune_tmp(settings: dict[str, Any], *, apply: bool) -> dict[str, Any]:
             current_tmp = Path(json.loads(CURRENT_INDEX.read_text(encoding="utf-8")).get("tmp", "")).resolve()
         except (json.JSONDecodeError, OSError):
             current_tmp = None
+    references = protected_reference_text()
     candidates: list[Path] = []
+    protected: list[Path] = []
     for stage in (settings.get("stages") or {}):
         tmp_root = stage_directory(stage, settings) / str((settings.get("lanes") or {}).get("tmp", "tmp"))
         if not tmp_root.is_dir():
             continue
         for run_dir in tmp_root.iterdir():
-            if run_dir.is_dir() and run_dir.resolve() != current_tmp and run_dir.stat().st_mtime < cutoff:
-                candidates.append(run_dir.resolve())
+            if not run_dir.is_dir() or run_dir.stat().st_mtime >= cutoff:
+                continue
+            resolved = run_dir.resolve()
+            if resolved == current_tmp or is_referenced_build_path(resolved, references):
+                protected.append(resolved)
+                continue
+            candidates.append(resolved)
     preview = [{
         "path": relative(path),
         "bytes": sum(item.stat().st_size for item in path.rglob("*") if item.is_file()),
     } for path in sorted(candidates)]
     if not apply or not candidates:
-        return {"success": True, "applied": apply, "run_count": len(candidates), "bytes": sum(item["bytes"] for item in preview), "preview": preview[:20], "truncated": len(preview) > 20}
+        return {
+            "success": True, "applied": apply, "run_count": len(candidates),
+            "protected_run_count": len(protected),
+            "protected_preview": [relative(path) for path in sorted(protected)[:20]],
+            "bytes": sum(item["bytes"] for item in preview),
+            "preview": preview[:20], "truncated": len(preview) > 20,
+        }
     archive_root = ROOT / str((settings.get("legacy") or {}).get("archive_root", "build/00-legacy"))
     archive_root.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -500,11 +644,24 @@ def prune_tmp(settings: dict[str, Any], *, apply: bool) -> dict[str, Any]:
         if corrupt is not None:
             archive.unlink(missing_ok=True)
             raise SystemExit(f"Retention archive verification failed: {corrupt}")
+    sidecar = retention_sidecar(archive)
+    sidecar.write_text(json.dumps({
+        **manifest, "archive": relative(archive), "archive_sha256": sha256(archive),
+        "cleanup_complete": False,
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     for run_dir in candidates:
-        shutil.rmtree(run_dir)
-    sidecar = archive.with_suffix(".manifest.json")
-    sidecar.write_text(json.dumps({**manifest, "archive": relative(archive), "archive_sha256": sha256(archive)}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return {"success": True, "applied": True, "archive": relative(archive), "run_count": len(candidates), "bytes": sum(item["bytes"] for item in preview)}
+        remove_tree_writable(run_dir)
+    sidecar.write_text(json.dumps({
+        **manifest, "archive": relative(archive), "archive_sha256": sha256(archive),
+        "cleanup_complete": True, "cleanup_removed_runs": len(candidates),
+        "cleanup_already_missing_runs": 0, "cleanup_protected_runs": [],
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return {
+        "success": True, "applied": True, "archive": relative(archive),
+        "run_count": len(candidates), "protected_run_count": len(protected),
+        "protected_preview": [relative(path) for path in sorted(protected)[:20]],
+        "bytes": sum(item["bytes"] for item in preview),
+    }
 
 
 def prune_checkpoint_runs(settings: dict[str, Any], *, apply: bool) -> dict[str, Any]:
@@ -512,6 +669,9 @@ def prune_checkpoint_runs(settings: dict[str, Any], *, apply: bool) -> dict[str,
     retention = settings.get("retention") or {}
     keep_success = int(retention.get("keep_successful_evidence_runs_per_stage", 5))
     keep_failed = int(retention.get("keep_failed_evidence_runs_per_stage", 3))
+    keep_stale = int(retention.get("keep_stale_in_progress_runs_per_stage", 1))
+    stale_hours = float(retention.get("stale_in_progress_max_age_hours", 24))
+    stale_cutoff = datetime.now(timezone.utc).timestamp() - stale_hours * 3600
     protected_text = ""
     protected_paths = [
         CURRENT_INDEX,
@@ -531,7 +691,7 @@ def prune_checkpoint_runs(settings: dict[str, Any], *, apply: bool) -> dict[str,
         evidence_root = stage_root / str((settings.get("lanes") or {}).get("evidence", "evidence"))
         tmp_root = stage_root / str((settings.get("lanes") or {}).get("tmp", "tmp"))
         release_root = stage_root / str((settings.get("lanes") or {}).get("release", "release"))
-        groups: dict[tuple[str, bool], list[tuple[float, str, Path]]] = {}
+        groups: dict[tuple[str, str], list[tuple[float, str, Path]]] = {}
         if not evidence_root.is_dir():
             continue
         for manifest in evidence_root.glob("*/run.json"):
@@ -540,20 +700,27 @@ def prune_checkpoint_runs(settings: dict[str, Any], *, apply: bool) -> dict[str,
             except (OSError, json.JSONDecodeError):
                 continue
             run_id = str(record.get("run_id", manifest.parent.name))
-            if record.get("status") not in {"complete", "failed"} or run_id in protected_text:
-                continue
-            release_dir = release_root / run_id
-            if release_dir.is_dir() and any(release_dir.iterdir()):
-                continue
             updated = record.get("updated_at")
             try:
                 timestamp = datetime.fromisoformat(str(updated)).timestamp()
             except ValueError:
                 timestamp = manifest.stat().st_mtime
-            group = (str(record.get("operation", "unknown")), record.get("success") is True)
+            status = record.get("status")
+            if run_id in protected_text:
+                continue
+            if status in {"complete", "failed"}:
+                outcome = "success" if status == "complete" and record.get("success") is True else "failed"
+            elif status == "in_progress" and timestamp < stale_cutoff:
+                outcome = "stale"
+            else:
+                continue
+            release_dir = release_root / run_id
+            if release_dir.is_dir() and any(release_dir.iterdir()):
+                continue
+            group = (str(record.get("operation", "unknown")), outcome)
             groups.setdefault(group, []).append((timestamp, run_id, manifest.parent))
-        for (_, successful), rows in groups.items():
-            keep = keep_success if successful else keep_failed
+        for (_, outcome), rows in groups.items():
+            keep = keep_success if outcome == "success" else keep_failed if outcome == "failed" else keep_stale
             rows.sort(reverse=True)
             for _, run_id, evidence_dir in rows[keep:]:
                 paths = [evidence_dir]

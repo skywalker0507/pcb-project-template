@@ -28,7 +28,6 @@ from artifact_store import create_run, finish_run, relative
 from pcb_policy import load_acceptance, reviewed_routing_rules
 from design_policy import require_policy
 from stage_policy import require_operation
-from create_houtini_job import create_job
 
 
 DEFAULT_CONFIG = Path("config/kicad-routing-tools.json")
@@ -758,6 +757,51 @@ def concise_audit(audit: dict[str, Any] | None, max_items: int) -> dict[str, Any
         "phase_ms": audit.get("phase_ms"),
         "drc_categories": bounded(categories, max_items),
         "report": audit.get("report"),
+    }
+
+
+def route_stdout_index(receipt: dict[str, Any]) -> dict[str, Any]:
+    """Keep default route output small; the report command exposes bounded detail."""
+    router = receipt.get("router") if isinstance(receipt.get("router"), dict) else {}
+    failed_single = router.get("failed_single") if isinstance(router.get("failed_single"), dict) else {}
+    audit = receipt.get("audit") if isinstance(receipt.get("audit"), dict) else {}
+    guardrails = receipt.get("guardrails") if isinstance(receipt.get("guardrails"), dict) else {}
+    warnings = receipt.get("quality_warnings")
+    warning_count = warnings.get("count") if isinstance(warnings, dict) else len(warnings or [])
+    return {
+        "success": receipt.get("success"),
+        "route_ok": receipt.get("route_ok"),
+        "outcome_class": receipt.get("outcome_class"),
+        "structural_failure": receipt.get("structural_failure"),
+        "route_area": receipt.get("route_area"),
+        "strategy_class": receipt.get("strategy_class"),
+        "attempt_number": receipt.get("attempt_number"),
+        "family_attempt_number": receipt.get("family_attempt_number"),
+        "run_id": receipt.get("run_id"),
+        "router": {
+            "routed_single": router.get("routed_single"),
+            "failed_single_count": failed_single.get("count"),
+            "failed_multipoint_count": router.get("failed_multipoint_count"),
+            "multipoint_pads_connected": router.get("multipoint_pads_connected"),
+            "multipoint_pads_total": router.get("multipoint_pads_total"),
+            "vias_reported": router.get("vias_reported"),
+            "time_s": router.get("time_s"),
+        },
+        "audit": {
+            "baseline_pass": audit.get("baseline_pass"),
+            "unconnected": audit.get("unconnected"),
+            "unconnected_delta": audit.get("unconnected_delta"),
+            "new_violation_count": audit.get("new_violation_count"),
+        } if audit else None,
+        "guardrails_pass": all(value is not False for value in (
+            guardrails.get("input_preserved"),
+            guardrails.get("project_rules_preserved"),
+            guardrails.get("copper_scope_preserved"),
+        )),
+        "quality_warning_count": warning_count,
+        "phase_ms": receipt.get("phase_ms"),
+        "output": receipt.get("output"),
+        "report": receipt.get("report"),
     }
 
 
@@ -1577,14 +1621,6 @@ def command_route(args: argparse.Namespace) -> int:
         "log": str(log_path),
     }
     report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    delegation = None
-    if not accepted and bool(config.get("attempt_policy", {}).get("failure_delegation", False)):
-        delegation = create_job(
-            [log_path], "krt_candidate_failure",
-            "This is an isolated candidate-routing failure. Classify router diagnostics only; do not make routing or release decisions.",
-            output_dir=run.evidence / "delegation",
-            job_name=f"krt-{run_id}",
-        )
     receipt = {
         "success": accepted,
         "route_ok": route_ok,
@@ -1642,7 +1678,6 @@ def command_route(args: argparse.Namespace) -> int:
         "copper_scope": copper_scope,
         "routing_geometry": concise_routing_geometry(routing_geometry, max_items),
         "quality_warnings": quality_warnings,
-        "delegation": delegation,
     }
     history_path.parent.mkdir(parents=True, exist_ok=True)
     history_record = {
@@ -1698,7 +1733,7 @@ def command_route(args: argparse.Namespace) -> int:
     receipt["output"] = relative(output) if output.is_file() else str(output)
     receipt["log"] = relative(log_path)
     receipt["report"] = relative(report_path)
-    print(compact(receipt))
+    print(compact(route_stdout_index(receipt)))
     return 0 if accepted else 2
 
 

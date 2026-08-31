@@ -11,10 +11,9 @@ receipt can reject it safely.
 | Electrical source and connectivity | atopile | Sole production electrical authority | electrical build, contract validation, candidate review, and immutable release-lane freeze bundle |
 | Primary placement/physical editing | KiCad GUI/Konnect | Must use a writable candidate created from the immutable freeze; no schematic authority | save candidate and independent pipeline audit |
 | Optional compatibility/manufacturing review | EasyEDA Pro bridge/API | One-way reviewed import only; never a second physical authority | import parity and EasyEDA receipt when explicitly selected |
-| Large text/log classification | Houtini-LM | One path-based call, 800 tokens; no PCB judgment | Codex verifies cited lines |
 | Bounded net routing | KiCadRoutingTools | GUI-independent engine; explicit nets, reviewed rules, separate candidate, two identical attempts maximum | independent KiCad candidate audit and physical review |
 | Placement/routing visual review | KiCad visual bundle + structured reviewer receipt | Local: one cropped copper view for an explicit trigger; checkpoint: F/B copper; release: four exact-board views | SHA match, bounded findings, explicit verdict; never replaces DRC or parity |
-| Non-critical leftover bulk routing | FreeRouting | Critical/power/high-speed work frozen; real ignored DSN classes required | import to separate candidate and independent audit |
+| Lab-only alternate routing comparison | FreeRouting | Explicit experiment only; not installed or checked by the production path | import to separate candidate and independent audit |
 | DRC, release and export | Final electrical parity, KiCad CLI, JLC DFM, and project scripts | No natural-language approval or regenerated baseline | SHA-bound gate receipts, package checks, and `release_pass=true` |
 
 ## Artifact lanes
@@ -66,3 +65,12 @@ rejects a missing wrapper, a FreeRouting wrapper without
 FreeRouting JAR. Diagnostic experiments must still go through the wrapper;
 only the existing environment and receipt scripts may query binary versions or
 hash files directly.
+
+Before ordering, run `pcbctl release check-cost-policy`, then audit the live
+vendor quote with `pcbctl release review-quote`. The first command validates
+stable engineering intent; the second maps volatile fee lines to that intent.
+Neither command treats a historical price as a fabrication capability.
+Generate one hash-bound DFM work packet and use only its `upload/` files for
+external PCB/SMT DFM and quoting. Import the reviewed external result with
+`pcbctl release import-dfm-result`; details and schemas are in
+`docs/MANUFACTURING_EXTERNAL_REVIEW.md`.

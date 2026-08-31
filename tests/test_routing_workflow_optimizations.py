@@ -30,11 +30,20 @@ pcbctl = load("pcbctl_optimizations", "scripts/pcbctl.py")
 release_inputs = load("release_inputs_optimizations", "scripts/release_inputs.py")
 release_readiness = load("release_readiness_optimizations", "scripts/check_release_readiness.py")
 pipeline = load("pipeline_board_selection_optimizations", "scripts/run_pcb_pipeline.py")
+krt_flow = load("krt_flow_stdout_optimizations", "scripts/krt_flow.py")
+trace_plan = load("trace_plan_stdout_optimizations", "scripts/apply_kicad_trace_plan.py")
 release_review = load("release_review_prepare_optimizations", "scripts/prepare_release_review.py")
 process_confirmation = load("process_confirmation_optimizations", "scripts/confirm_special_process.py")
 
 
 class RoutingWorkflowOptimizationTests(unittest.TestCase):
+    def test_checkpoint_reuse_is_decided_before_artifact_run_creation(self) -> None:
+        source = (ROOT / "scripts/run_pcb_pipeline.py").read_text(encoding="utf-8")
+        main_source = source[source.index("def main()") :]
+        reuse_branch = main_source.index("if args.reuse_checkpoint:")
+        run_creation = main_source.index("run = create_run(")
+        self.assertLess(reuse_branch, run_creation)
+
     def test_corridor_bbox_includes_width_and_clearance(self) -> None:
         self.assertEqual(
             geometry.corridor_bbox([1.0, 4.0, 3.0, 2.0], 0.2, 0.3),
@@ -251,6 +260,71 @@ class RoutingWorkflowOptimizationTests(unittest.TestCase):
             with mock.patch.object(pipeline, "ROOT", root):
                 self.assertEqual(pipeline.adopted_routing_board(), board.resolve())
 
+    def test_pipeline_stdout_is_an_index_not_full_receipt(self) -> None:
+        summary = {
+            "success": True, "release_pass": False, "board_sha256": "A" * 64,
+            "requested": {"tier": "checkpoint"}, "passed_steps": ["drc", "connectivity"],
+            "run": {"run_id": "test"},
+            "artifacts": {"pipeline_summary": "build/summary.json", "bulk": "x" * 10000},
+            "context_metrics": {"duration_ms": 1234}, "failed_step": None,
+        }
+        result = pipeline.stdout_index(summary)
+        self.assertEqual(result["passed_step_count"], 2)
+        self.assertEqual(result["duration_ms"], 1234)
+        self.assertNotIn("artifacts", result)
+
+    def test_checkpoint_reuse_fails_closed_after_producer_change(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            board = root / "board.kicad_pcb"
+            producer = root / "scripts/audit.py"
+            receipt_path = root / "pipeline-summary.json"
+            manifest_path = root / "checkpoint-dependencies.json"
+            producer.parent.mkdir()
+            board.write_text("board", encoding="utf-8")
+            producer.write_text("producer", encoding="utf-8")
+            manifest_path.write_text(json.dumps({
+                "schema": 1, "kind": "pcb_pipeline_dependencies",
+                "dependencies": {
+                    "scripts/audit.py": hashlib.sha256(producer.read_bytes()).hexdigest().upper(),
+                },
+            }), encoding="utf-8")
+            receipt_path.write_text(json.dumps({
+                "schema": 2, "kind": "pcb_pipeline_summary", "success": True,
+                "board_sha256": hashlib.sha256(board.read_bytes()).hexdigest().upper(),
+                "baseline_board_sha256": None,
+                "requested": {"tier": "checkpoint"},
+                "producer_dependency_manifest": "checkpoint-dependencies.json",
+                "producer_dependency_manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest().upper(),
+            }), encoding="utf-8")
+            with mock.patch.object(pipeline, "ROOT", root):
+                self.assertIsNotNone(pipeline.reusable_checkpoint(receipt_path, board, None))
+                producer.write_text("changed", encoding="utf-8")
+                self.assertIsNone(pipeline.reusable_checkpoint(receipt_path, board, None))
+
+    def test_route_stdout_omits_bulk_geometry(self) -> None:
+        value = krt_flow.route_stdout_index({
+            "success": True, "route_ok": True, "outcome_class": "accepted",
+            "router": {"routed_single": 2, "failed_single": {"count": 0}},
+            "audit": {"baseline_pass": True, "new_violation_count": 0},
+            "guardrails": {"input_preserved": True, "project_rules_preserved": True, "copper_scope_preserved": True},
+            "quality_warnings": [], "routing_geometry": {"bulk": "x" * 10000},
+        })
+        self.assertTrue(value["guardrails_pass"])
+        self.assertEqual(value["router"]["routed_single"], 2)
+        self.assertNotIn("routing_geometry", value)
+
+    def test_trace_stdout_omits_full_connectivity_receipt(self) -> None:
+        value = trace_plan.trace_stdout_index({
+            "success": True, "accepted": True, "nets": ["GPIO1"],
+            "geometry_preflight": {"success": True, "bulk": "x" * 10000},
+            "net_binding": {"success": True},
+            "connectivity": {"success": True, "details": "x" * 10000},
+            "audit": {"success": True, "unconnected_delta": 0, "new_violation_count": 0},
+        }, ROOT / "build/receipt.json")
+        self.assertTrue(value["connectivity_pass"])
+        self.assertNotIn("connectivity", value)
+
     def test_new_commands_remain_under_existing_surface(self) -> None:
         self.assertEqual(
             pcbctl.command_argv("verify", ["remaining", "--board", "candidate.kicad_pcb"])[1:4],
@@ -271,6 +345,14 @@ class RoutingWorkflowOptimizationTests(unittest.TestCase):
         self.assertEqual(
             pcbctl.command_argv("verify", ["finalize-review", "--packet", "packet.json"])[1],
             "scripts/finalize_release_review.py",
+        )
+        self.assertEqual(
+            pcbctl.command_argv("verify", ["workflow"])[1],
+            "scripts/profile_workflow.py",
+        )
+        self.assertEqual(
+            pcbctl.command_argv("verify", ["template"])[1],
+            "scripts/run_template_checks.py",
         )
         self.assertEqual(
             pcbctl.command_argv("release", ["confirm-process", "--process", "filled_vias"])[1],

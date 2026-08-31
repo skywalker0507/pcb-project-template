@@ -16,6 +16,7 @@ activate()
 from pcb_template_engine import API_VERSION, __version__  # noqa: E402
 from pcb_template_engine.manufacturing import (  # noqa: E402
     evaluate_gerbers,
+    evaluate_cost_policy,
     evaluate_pre_export,
     validate_registry,
 )
@@ -59,7 +60,7 @@ def source_identity(args: argparse.Namespace) -> tuple[str, str, str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--phase", choices=("validate", "pre_export", "gerber"), default="validate")
+    parser.add_argument("--phase", choices=("validate", "cost", "pre_export", "gerber"), default="validate")
     parser.add_argument("--registry", type=Path, default=MANUFACTURING_REGISTRY_ARTIFACT)
     parser.add_argument("--design-policy", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--gerber-dir", type=Path)
@@ -82,6 +83,8 @@ def main() -> int:
             "registry_sha256": registry["registry_sha256"],
             "rule_count": len(registry.get("rules", [])),
         }
+    elif args.phase == "cost":
+        receipt = evaluate_cost_policy(registry)
     elif args.phase == "pre_export":
         receipt = evaluate_pre_export(registry)
     else:

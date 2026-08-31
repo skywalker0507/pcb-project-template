@@ -9,16 +9,9 @@
     "release": ["kicad_cli"]
   },
   "optional_tools": {
-    "houtini": ["requirements", "electrical", "physical", "routing", "release"],
     "freerouting": ["routing"],
     "easyeda_pro_optional": ["physical", "routing", "release"],
     "tscircuit_experimental": ["electrical"]
-  },
-  "houtini": {
-    "role": "Bounded text classification and extraction only; never PCB judgment.",
-    "max_calls_per_failure_class": 1,
-    "require_path_input": true,
-    "require_line_evidence": true
   },
   "krt": {
     "role": "Isolated targeted routing candidates and pre-promotion critical route probes only; never modifies the active board.",
@@ -27,7 +20,7 @@
     "require_independent_drc": true
   },
   "freerouting": {
-    "role": "Bulk routing of explicitly non-critical leftovers after critical copper is frozen.",
+    "role": "Explicit lab-only comparison router for non-critical leftovers; it is not installed, checked, or invoked by the production path.",
     "max_profiles": 3,
     "max_attempts_per_profile": 2,
     "require_ignored_net_classes": true,

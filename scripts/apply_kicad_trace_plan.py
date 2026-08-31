@@ -1071,6 +1071,33 @@ def applied_net_binding_report(inserted: list[tuple[object, str, str, int]]) -> 
     }
 
 
+def trace_stdout_index(receipt: dict[str, object], evidence: Path) -> dict[str, object]:
+    audit = receipt.get("audit") if isinstance(receipt.get("audit"), dict) else {}
+    connectivity = receipt.get("connectivity") if isinstance(receipt.get("connectivity"), dict) else None
+    return {
+        "success": receipt.get("success"),
+        "accepted": receipt.get("accepted"),
+        "critical_probe": receipt.get("critical_probe"),
+        "route_area": receipt.get("route_area"),
+        "profile": receipt.get("profile"),
+        "nets": receipt.get("nets"),
+        "segment_count": receipt.get("segment_count"),
+        "via_count": receipt.get("via_count"),
+        "removed_segment_count": receipt.get("removed_segment_count"),
+        "removed_via_count": receipt.get("removed_via_count"),
+        "candidate_sha256": receipt.get("candidate_sha256"),
+        "geometry_preflight_pass": (receipt.get("geometry_preflight") or {}).get("success") if isinstance(receipt.get("geometry_preflight"), dict) else None,
+        "net_binding_pass": (receipt.get("net_binding") or {}).get("success") if isinstance(receipt.get("net_binding"), dict) else None,
+        "connectivity_pass": connectivity.get("success") if connectivity is not None else None,
+        "audit": {
+            "success": audit.get("success"),
+            "unconnected_delta": audit.get("unconnected_delta"),
+            "new_violation_count": audit.get("new_violation_count"),
+        } if audit else None,
+        "receipt": relative(evidence),
+    }
+
+
 def main() -> int:
     # Re-enter KiCad Python before parsing plans, copying candidates, or
     # creating artifact runs so the outer interpreter has no side effects.
@@ -1288,7 +1315,7 @@ def main() -> int:
     evidence = run.evidence / "kicad-trace-plan.json"
     evidence.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     finish_run(run, accepted, artifacts={"receipt": relative(evidence), "plan": relative(plan_path), "geometry_preflight": relative(geometry_preflight_path), "net_binding": relative(net_binding_path)}, metrics={"segments": len(plan["segments"]), "vias": len(plan["vias"]), "accepted": accepted})
-    print(json.dumps({**receipt, "receipt": relative(evidence)}, separators=(",", ":")))
+    print(json.dumps(trace_stdout_index(receipt, evidence), separators=(",", ":")))
     return 0 if accepted else 2
 
 

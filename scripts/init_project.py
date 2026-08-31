@@ -105,7 +105,6 @@ def configure_project(project_name: str, distro: str, force: bool, with_konnect:
     root_windows = str(ROOT)
     root_wsl = windows_to_wsl(ROOT)
     node = shutil.which("node") or r"C:\Program Files\nodejs\node.exe"
-    houtini = ROOT / "tools/houtini-lm/dist/index.js"
     tscircuit_enabled = "true" if electrical_backend == "tscircuit" else "false"
     config = f'''[mcp_servers.atopile]
 type = "stdio"
@@ -126,27 +125,6 @@ env_vars = ["PCB_PYTHON", "BUN_BINARY"]
 startup_timeout_sec = 30
 tool_timeout_sec = 300
 
-[mcp_servers.houtini-lm]
-type = "stdio"
-command = '{node}'
-args = ['{houtini}']
-cwd = '{root_windows}'
-enabled = true
-enabled_tools = ["delegate"]
-env_vars = ["HOUTINI_LM_API_KEY", "DEEPSEEK_API_KEY"]
-startup_timeout_sec = 30
-tool_timeout_sec = 300
-
-[mcp_servers.houtini-lm.env]
-HOUTINI_LM_ENDPOINT_URL = "https://api.deepseek.com"
-HOUTINI_LM_PROVIDER = "deepseek"
-HOUTINI_LM_MODEL = "deepseek-v4-flash"
-HOUTINI_LM_ORCHESTRATOR = "codex"
-HOUTINI_LM_DEEPSEEK_THINKING = "disabled"
-HOUTINI_LM_AUTO_MAX_TOKENS = "800"
-HOUTINI_LM_MAX_INPUT_CHARS = "24000"
-HOUTINI_LM_RESPONSE_METADATA = "none"
-HOUTINI_LM_ALLOWED_ROOTS = '{root_windows}'
 '''
     if with_konnect:
         konnect = ROOT / "tools/konnect/konnect.exe"

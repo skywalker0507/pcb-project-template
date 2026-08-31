@@ -1,12 +1,12 @@
 {
   "schema": 1,
   "package": "pcb_template_engine",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "api_version": 1,
   "source": {
     "type": "path",
     "path": "template-engine",
-    "sha256": "8544C8D20F2C48CA9D98093818D8B3BA6F51BB6148EFE9E59D146D0F8529431E"
+    "sha256": "86DBE8A2D24F0DDBAF6D26DC9CCDEDAD872D265D3CFDBDA15AA1CCF3E4BA7FF2"
   },
   "boundary": {
     "engine_owns": ["policy_compilation", "manufacturing_registry_compilation", "manufacturing_rule_evaluation"],

@@ -13,9 +13,11 @@ sys.path.insert(0, str(ROOT / "template-engine/src"))
 from pcb_template_engine import API_VERSION, __version__
 from pcb_template_engine.manufacturing import (
     compile_registry,
+    evaluate_cost_policy,
     evaluate_dfm_observation,
     evaluate_gerbers,
     evaluate_pre_export,
+    evaluate_quote_observation,
     validate_registry,
 )
 from pcb_template_engine.project import activate, source_digest
@@ -47,6 +49,22 @@ class TemplateEngineRegistryTests(unittest.TestCase):
                     "selected_outcome": None,
                     "evidence": None,
                 }},
+                "cost_review": {
+                    "status": "reviewed",
+                    "pricing_model": "live_quote_only",
+                    "currency": "CNY",
+                    "drivers": [{
+                        "id": "filled_vias_cost", "selection": "epoxy filled", "selected": True,
+                        "decision": "required", "cost_risk": "quote_required",
+                        "reason": "geometry requires filling", "evidence": ["review.json"],
+                        "lower_cost_alternative": "move vias", "quote_aliases": ["Via filling"],
+                    }, {
+                        "id": "kelvin_test", "selection": "four wire", "selected": False,
+                        "decision": "not_required", "cost_risk": "quote_required",
+                        "reason": "no Kelvin requirement", "evidence": [],
+                        "lower_cost_alternative": "normal e-test", "quote_aliases": ["Four wire test"],
+                    }],
+                },
             },
         }
 
@@ -55,6 +73,28 @@ class TemplateEngineRegistryTests(unittest.TestCase):
             self.policy(), engine_version=__version__, engine_api_version=API_VERSION,
             parser={"package": "gerbonara", "version": "1.6.3"},
         )
+
+    def quote(self, *, status: str, label: str, amount: float, selection: str | None = None) -> dict[str, object]:
+        return {
+            "schema": 2,
+            "kind": "manufacturing_quote_observation",
+            "source": {"provider": "demo", "channel": "test"},
+            "observed_at": "2026-08-27T12:00:00+08:00",
+            "currency": "CNY",
+            "quantity": 5,
+            "total": amount,
+            "breakdown_scope": "complete",
+            "work_packet_content_sha256": "B" * 64,
+            "artifacts": {
+                role: {"sha256": character * 64}
+                for role, character in (("board", "1"), ("gerber_zip", "2"), ("bom", "3"), ("cpl", "4"))
+            },
+            "order_parameters": {
+                "surface_finish": "ENIG", "solder_mask_color": "black", "assembly_service": "smt",
+            },
+            "approval": {"status": status, "reviewer": "tester" if status == "accepted" else None},
+            "line_items": [{"label": label, "category": "surcharge", "selection": selection, "amount": amount}],
+        }
 
     def test_engine_contract_verifies_source_lock(self) -> None:
         contract = ROOT / "config/template-engine.json"
@@ -84,6 +124,40 @@ class TemplateEngineRegistryTests(unittest.TestCase):
         result = evaluate_pre_export(self.registry())
         self.assertFalse(result["success"])
         self.assertEqual(result["pending"], ["filled_vias"])
+
+    def test_cost_policy_accepts_justified_selection_and_rejects_unselected_quote_line(self) -> None:
+        policy = evaluate_cost_policy(self.registry())
+        self.assertTrue(policy["success"])
+        self.assertEqual(policy["selected_surcharge_drivers"], ["filled_vias_cost"])
+        quote = evaluate_quote_observation(
+            self.registry(), self.quote(status="accepted", label="Four wire test", amount=100),
+        )
+        self.assertFalse(quote["success"])
+        self.assertEqual(quote["unexpected_lines"], ["Four wire test"])
+
+    def test_quote_review_requires_explicit_approval(self) -> None:
+        quote = evaluate_quote_observation(self.registry(), self.quote(
+            status="pending", label="Via filling", selection="epoxy filled and capped", amount=80,
+        ))
+        self.assertFalse(quote["success"])
+        self.assertFalse(quote["approval_pass"])
+
+    def test_quote_review_accepts_exact_bound_live_quote(self) -> None:
+        quote = evaluate_quote_observation(self.registry(), self.quote(
+            status="accepted", label="Via filling", selection="epoxy filled and capped", amount=80,
+        ))
+        self.assertTrue(quote["success"], quote)
+        self.assertTrue(quote["binding_pass"])
+
+    def test_quote_review_accepts_base_cost_and_rejects_unreconciled_total(self) -> None:
+        observation = self.quote(status="accepted", label="PCB base", amount=20)
+        observation["line_items"][0]["category"] = "fabrication_base"
+        quote = evaluate_quote_observation(self.registry(), observation)
+        self.assertTrue(quote["success"], quote)
+        observation["total"] = 21
+        mismatch = evaluate_quote_observation(self.registry(), observation)
+        self.assertFalse(mismatch["success"])
+        self.assertIn("quote_line_items_do_not_reconcile_to_total", mismatch["binding_problems"])
 
     def test_dfm_scope_requires_order_parameters_and_all_modules(self) -> None:
         mismatch = evaluate_dfm_observation(self.registry(), {

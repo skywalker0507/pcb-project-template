@@ -41,6 +41,7 @@
     "release_review_prepare": "scripts/prepare_release_review.py",
     "release_review_finalize": "scripts/finalize_release_review.py",
     "manufacturing_dfm_receipt": "scripts/record_manufacturing_dfm.py",
+    "manufacturing_dfm_import": "scripts/import_manufacturing_dfm_result.py",
     "pcb_pipeline": "scripts/run_pcb_pipeline.py",
     "pcb_context": "scripts/query_pcb_context.py",
     "krt": "scripts/krt_flow.py",
@@ -51,6 +52,7 @@
     "kicad_drc_review": "scripts/record_kicad_drc_review.py",
     "jlcpcb_dfm_candidate": "scripts/prepare_jlcpcb_dfm_candidate.py",
     "manufacturing_registry": "scripts/check_manufacturing_registry.py",
+    "manufacturing_quote_review": "scripts/review_manufacturing_quote.py",
     "smt_hole_proximity": "scripts/check_smt_hole_proximity.py",
     "special_process_confirmation": "scripts/confirm_special_process.py",
     "kicad_keepout": "scripts/apply_kicad_keepout_plan.py",
@@ -65,8 +67,9 @@
     "candidate_audit": "scripts/krt_candidate_audit.py",
     "placement_immutability": "scripts/check_kicad_placement_immutability.py",
     "konnect": "scripts/start_konnect_mcp.py",
-    "houtini_gate": "scripts/create_houtini_job.py",
     "artifact_store": "scripts/artifact_store.py",
+    "workflow_profile": "scripts/profile_workflow.py",
+    "template_checks": "scripts/run_template_checks.py",
     "environment": "scripts/check_pcb_environment.py",
     "script_search": "scripts/find_existing_script.py"
   },
@@ -75,12 +78,12 @@
     "electrical": ["script_search", "electrical_build", "electrical_freeze", "kicad_parity_manifest", "pcb_pipeline", "artifact_store"],
     "physical": ["script_search", "kicad_physical_candidate", "kicad_placement", "kicad_placement_semantics", "kicad_placement_routability", "kicad_physical_promotion", "kicad_stack", "kicad_plane", "kicad_drc_summary", "kicad_footprint_equivalence", "pcb_visual_bundle", "pcb_visual_review", "pcb_pipeline", "pcb_context", "konnect", "artifact_store"],
     "routing": ["script_search", "routing_task_classifier", "krt", "krt_checkpoint", "routing_checkpoint_finalize", "routing_escalation", "kicad_trace_plan", "return_via_summary", "kicad_drc_summary", "kicad_footprint_equivalence", "pcb_visual_bundle", "pcb_visual_review", "candidate_audit", "placement_immutability", "pcb_pipeline", "pcb_context", "konnect", "artifact_store"],
-    "release": ["script_search", "template_engine", "release_readiness", "release_review_prepare", "release_review_finalize", "final_electrical_parity_refresh", "final_electrical_parity", "manufacturing_gates", "manufacturing_dfm_receipt", "manufacturing_registry", "smt_hole_proximity", "special_process_confirmation", "jlcpcb_dfm_candidate", "kicad_keepout", "kicad_placement_semantics", "kicad_drc_summary", "kicad_footprint_equivalence", "kicad_drc_review", "pcb_visual_bundle", "pcb_visual_review", "pcb_pipeline", "pcb_context", "artifact_store"]
+    "release": ["script_search", "template_engine", "release_readiness", "release_review_prepare", "release_review_finalize", "final_electrical_parity_refresh", "final_electrical_parity", "manufacturing_gates", "manufacturing_dfm_receipt", "manufacturing_dfm_import", "manufacturing_registry", "manufacturing_quote_review", "smt_hole_proximity", "special_process_confirmation", "jlcpcb_dfm_candidate", "kicad_keepout", "kicad_placement_semantics", "kicad_drc_summary", "kicad_footprint_equivalence", "kicad_drc_review", "pcb_visual_bundle", "pcb_visual_review", "pcb_pipeline", "pcb_context", "artifact_store"]
   },
   "optional_capabilities": {
     "easyeda": ["easyeda_bridge", "easyeda_import_package", "easyeda_capture", "easyeda_import_parity", "easyeda_import_paste_repair", "easyeda_kirouting_bridge", "easyeda_writeback"],
-    "alternate_router": ["freerouting", "krt_reroute_input"],
-    "delegation": ["houtini_gate"]
+    "alternate_router_lab": ["freerouting", "krt_reroute_input"],
+    "process_optimization": ["workflow_profile", "template_checks"]
   },
   "freerouting": {
     "required_flags": ["--gui.enabled=false"],

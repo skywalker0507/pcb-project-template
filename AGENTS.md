@@ -4,28 +4,27 @@ This repository has one production path:
 
 `requirements -> electrical -> physical -> routing -> release`
 
-Reviewed requirements and `.ato` are electrical authority. KiCad is physical
-authority and validator. KRT creates candidates; integrations are optional.
+Reviewed requirements/`.ato` are electrical authority; KiCad is physical
+authority/validator. KRT creates candidates; integrations are optional.
 
 ## Start and command surface
 
-Run `py -3.14 scripts/session_boot.py` once per session. Follow its
-`next_command`, read only its compact `read_now` workset, and open
-`read_if_needed` only after a relevant failure.
+Run `py -3.14 scripts/session_boot.py` once per session. Follow `next_command`,
+read only `read_now`, and open `read_if_needed` only after a related failure.
 
 Use only these default commands:
 
 `status / build / freeze / physical-start / place / route / verify / release`
 
-Dispatch them with `py -3.14 scripts/pcbctl.py <command>`. Optional scripts are
-listed in `config/tool-entrypoints.json` but stay outside default context.
+Dispatch with `py -3.14 scripts/pcbctl.py <command>`; run `pcbctl build --plan`
+before compiling. Keep optional entrypoints outside default context.
 
 ## Hard invariants
 
 - Physical work consumes an immutable passing electrical-freeze bundle. Any
   connectivity, identity, part, footprint or net-name change returns to `.ato`.
-- Preserve reviewed parts, designators, nets and intentional physical work.
-  Never invent fabrication, clearance, width or impedance values.
+- Preserve reviewed parts, designators, nets and physical work. Never invent
+  fabrication, clearance, width or impedance values.
 - Never put a complete PCB, schematic, DSN or SES file in model context. Use
   deterministic tools, compact receipts and bounded geometry queries.
 - Router success is candidate evidence. Release requires exact-board DRC,
@@ -39,8 +38,8 @@ listed in `config/tool-entrypoints.json` but stay outside default context.
 ## Validation tiers
 
 - `quick`: after local copper edits, run candidate checks, DRC delta and
-  connectivity. Render a baseline-bound crop only for critical, awkward or
-  uncertain edits; derive its extent from changed copper.
+  connectivity. Render a changed-copper crop only for critical, awkward or
+  uncertain edits.
 - `checkpoint`: after a functional block or placement checkpoint, run full DRC
   and connectivity. If footprints moved, also run placement semantics and
   routability comparison. Review whole-board copper views.
@@ -50,26 +49,31 @@ listed in `config/tool-entrypoints.json` but stay outside default context.
 Do not rerun placement semantics when footprints did not move. Do not render
 3D or run the release pipeline after every trace.
 
+At a functional checkpoint, after two related rejections, or before a third
+same-board full verification, run `pcbctl verify workflow`. Finish the bounded
+quick batch first, then remove reported repetition. It is metadata-only and
+cannot relax gates. Template changes use `pcbctl verify template`; logs stay on
+disk.
+
 ## Placement and routing contract
 
-Physical-start must pass footprint/rule-area integrity. Placement
-follows function, not alignment. After moves recheck decoupling, power loops,
-protection, termination, antenna keepouts and connector access. Before routing,
-own release debt and compare airwires, congestion and critical probes. Route
-critical power, return and high-speed paths first; batch low-risk nets.
+Physical-start must pass footprint/rule-area integrity. Place by function, not
+alignment. After moves recheck decoupling, power loops, protection,
+termination, antenna keepouts and connector access. Before routing, own release
+debt and compare airwires, congestion and critical probes. Route critical
+power, return and high-speed paths first; batch low-risk nets.
 
 Classify nets before KRT. Use bounded trace plans for short two-endpoint links;
 reserve KRT for path search or low-risk batches. Copper preflight is
 rejection-only; exact DRC and connectivity remain authoritative.
 
-Route several related low-risk nets per candidate and audit once per block.
-Run long KRT work through `pcbctl route start/status/finalize`; observation must
-not restart or revalidate routing.
+Route related low-risk nets per candidate and audit once per block. Run long
+KRT work through `pcbctl route start/status/finalize`; observation must not
+restart or revalidate it.
 At zero unconnected items and a passing checkpoint review, run
 `pcbctl route checkpoint-finalize` to bind receipts and refresh state.
-Every route attempt names a stable `--route-area`; changing its net subset must
-not reset the area's escalation budget. It also names a structural
-`--strategy-class`; numeric tuning alone is not a distinct strategy.
+Every attempt names stable `--route-area` and structural `--strategy-class`;
+changing nets or numeric tuning does not reset escalation or define a strategy.
 Dry-run emits the work packet. Three rejected area candidates require
 diagnosis; this never authorizes a footprint move.
 `--route-bbox-mm` scopes obstacle identity and the reference corridor;
@@ -81,9 +85,7 @@ failures, record an escalation and review routing order/corridors first. A
 footprint move requires two distinct failed strategies plus an improved
 routability comparison, passing placement semantics and critical route probes.
 
-Keep large logs and candidates in `tmp`, compact receipts in `evidence`, and
-immutable passing artifacts in `release`. Every accepted stage result must
-publish its adopted artifact there and update the stage-local `CURRENT.json`;
-handoffs must not point at an adopted artifact still living only in `tmp`.
-Create handoffs only at meaningful checkpoints. Continue bounded work without
-expanding it into full-stage completion.
+Keep logs/candidates in `tmp`, compact receipts in `evidence`, and passing
+artifacts in `release`. Accepted results update stage `CURRENT.json`; handoffs
+cannot adopt `tmp`. Create handoffs only at meaningful checkpoints; continue
+bounded work without expanding it to full-stage completion.

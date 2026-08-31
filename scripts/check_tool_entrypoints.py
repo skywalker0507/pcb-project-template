@@ -40,8 +40,8 @@ def audit(root: Path = ROOT, policy_path: Path = DEFAULT_POLICY) -> dict[str, An
                 problems.append(f"direct_freerouting_invocation:{script.relative_to(root).as_posix()}")
 
     optional = policy.get("optional_capabilities") or {}
-    if "freerouting" not in (optional.get("alternate_router") or []):
-        problems.append("freerouting_must_be_registered_as_optional_alternate_router")
+    if "freerouting" not in (optional.get("alternate_router_lab") or []):
+        problems.append("freerouting_must_be_registered_as_lab_only_alternate_router")
     default_stage_tools = {
         tool for tools in (policy.get("stage_capabilities") or {}).values() for tool in tools
     }
@@ -64,9 +64,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-root", type=Path, default=ROOT)
     parser.add_argument("--policy", type=Path, default=DEFAULT_POLICY)
+    parser.add_argument("--verbose", action="store_true", help="Print the complete audited entrypoint map.")
     args = parser.parse_args()
     result = audit(args.project_root.resolve(), args.policy.resolve())
-    print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+    output = result if args.verbose else {
+        "success": result.get("success"),
+        "entrypoint_count": len(result.get("entrypoints") or {}),
+        "problem_count": len(result.get("problems") or []),
+        "problems": result.get("problems") or [],
+    }
+    print(json.dumps(output, ensure_ascii=False, separators=(",", ":")))
     return 0 if result["success"] else 1
 
 

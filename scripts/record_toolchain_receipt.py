@@ -60,7 +60,7 @@ def merge_receipt(
     receipt["schema"] = 2
     refreshed = ["electrical_backend", str((update.get("electrical_backend") or {}).get("active", ""))]
     if not electrical_only:
-        refreshed.extend(name for name in ("houtini_lm", "kicad_routing_tools", "freerouting", "konnect") if name in update)
+        refreshed.extend(name for name in ("kicad_routing_tools", "freerouting", "konnect") if name in update)
     refreshed = [name for name in refreshed if name]
     prior_section_times = existing.get("section_recorded_at")
     section_times = dict(prior_section_times) if electrical_only and isinstance(prior_section_times, dict) else {}
@@ -72,7 +72,7 @@ def merge_receipt(
         "refreshed_sections": refreshed,
         "recorded_at": recorded_at,
         "preserved_unchecked_sections": sorted(
-            name for name in ("houtini_lm", "kicad_routing_tools", "freerouting", "konnect")
+            name for name in ("kicad_routing_tools", "freerouting", "konnect")
             if electrical_only and name in receipt
         ),
     }
@@ -90,11 +90,10 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    houtini = ROOT / "tools/houtini-lm"
     krt = ROOT / "tools/KiCadRoutingTools"
     jar = ROOT / "tools/freerouting/freerouting-latest.jar"
     krt_python = ROOT / ".venv-routingtools/Scripts/python.exe"
-    missing = [str(path) for path in (houtini / ".git", krt / ".git", jar, krt_python) if not path.exists()]
+    missing = [str(path) for path in (krt / ".git", krt_python) if not path.exists()]
     if missing and not args.electrical_only:
         raise SystemExit("Cannot record an incomplete local toolchain:\n" + "\n".join(missing))
 
@@ -125,11 +124,9 @@ def main() -> int:
     else:
         raise SystemExit(f"No receipt strategy is configured for electrical backend: {active_backend}")
     if not args.electrical_only:
-        update.update({
-            "houtini_lm": {"commit": output(["git", "-C", str(houtini), "rev-parse", "HEAD"]), "version": json.loads((houtini / "package.json").read_text(encoding="utf-8"))["version"]},
-            "kicad_routing_tools": {"commit": output(["git", "-C", str(krt), "rev-parse", "HEAD"])},
-            "freerouting": {"sha256": sha256(jar)},
-        })
+        update["kicad_routing_tools"] = {"commit": output(["git", "-C", str(krt), "rev-parse", "HEAD"])}
+        if jar.is_file():
+            update["freerouting"] = {"sha256": sha256(jar), "scope": "optional_lab_only"}
         konnect = ROOT / "tools/konnect/konnect.exe"
         if args.without_konnect:
             update["konnect"] = {"disabled": True}

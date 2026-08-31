@@ -30,6 +30,8 @@
   "retention": {
     "keep_successful_evidence_runs_per_stage": 5,
     "keep_failed_evidence_runs_per_stage": 3,
+    "keep_stale_in_progress_runs_per_stage": 1,
+    "stale_in_progress_max_age_hours": 24,
     "tmp_max_age_hours": 24,
     "release_is_immutable": true,
     "archive_instead_of_delete": true,

@@ -228,7 +228,7 @@ def receipt() -> dict[str, object]:
         next_command = "py -3.14 scripts/validate_requirements.py" if blockers else "py -3.14 scripts/validate_requirements.py --require-reviewed"
     else:
         actions: dict[str, tuple[str, str | None, list[str]]] = {
-            "electrical": ("build_or_freeze_electrical", "py -3.14 scripts/pcbctl.py build --backend atopile", []),
+            "electrical": ("plan_build_or_freeze_electrical", "py -3.14 scripts/pcbctl.py build --plan --backend atopile", []),
             "physical": physical_navigation(physical_candidate_exists, []),
             "routing": routing_checkpoint_navigation(stage, routing_board, routing_board_hash),
             "release": release_navigation(stage, routing_board),

@@ -14,5 +14,10 @@ project command surface and pass explicit project paths into this package.
 Release orchestration, current-evidence pointers and readiness caching remain
 in the consuming project adapter because they bind project boards and artifact
 locations. Reusable policy compilation and manufacturing-rule evaluation remain
-here. This boundary keeps the engine project-independent while still allowing
+here, including stable cost-driver validation and live-quote mapping. The
+0.3 contract also requires exact manufacturing work-packet bindings, complete
+quote reconciliation, and reviewed order-parameter parity. Vendor collection
+adapters and opaque external reports remain project-owned.
+The engine never embeds vendor prices; observations and approvals remain in the
+project. This boundary keeps the engine project-independent while still allowing
 the project to aggregate blockers before expensive tool execution.

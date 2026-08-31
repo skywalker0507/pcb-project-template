@@ -18,7 +18,7 @@ always-loaded MCP schema context.
 | Move/rotate/place footprints while KiCad is open | Konnect | Native KiCad 10 IPC with undo/redo |
 | Add or inspect explicit tracks and vias | Konnect | Small, direct MCP operations |
 | Generate a bounded batch-routing candidate | KRT | Scriptable router with candidate-file isolation |
-| Whole-board fallback routing | Project FreeRouting wrapper | Headless, logged and audited |
+| Experimental alternate-router comparison | Project FreeRouting wrapper | Lab-only, headless, logged and audited; not a production dependency |
 | DRC and fabrication approval | Deterministic project scripts | Stable receipts and reviewed baselines |
 
 Konnect's `route_trace` and `route_pad_to_pad` tools create caller-specified

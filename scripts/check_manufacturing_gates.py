@@ -62,7 +62,7 @@ def main() -> int:
     freeze, _ = load_release_freeze(freeze_path, args.freeze_root)
     final_parity = receipt(args.final_electrical_parity.resolve(), "final_electrical_parity", "final_electrical_parity_pass")
     jlc_dfm = receipt(
-        args.jlc_dfm.resolve(), "manufacturing_dfm", "dfm_pass", {2}, require_pass=False,
+        args.jlc_dfm.resolve(), "manufacturing_dfm", "dfm_pass", {2, 3}, require_pass=False,
     )
     design_policy = require_policy("release", args.design_policy.resolve())
     try:

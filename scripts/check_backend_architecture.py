@@ -78,6 +78,7 @@ def audit() -> dict[str, object]:
     required_release = {
         "electrical_freeze_pass", "final_electrical_parity_pass", "jlc_dfm_pass", "dfm_order_profile_match",
         "manufacturing_registry_pass", "gerber_rules_pass",
+        "manufacturing_cost_policy_pass",
         "critical_footprint_rule_areas_pass",
         "physical_integrity_pass",
         "special_manufacturing_processes_confirmed",

@@ -31,6 +31,7 @@ DEFAULT_MANUFACTURING_GATE = ROOT / "build/07-release/evidence/manual/manufactur
 DEFAULT_ASSEMBLY_PARTS = ROOT / "config/jlcpcb-parts.json"
 DEFAULT_MANUFACTURING_REGISTRY = ROOT / "build/00-shared/evidence/design-policy/manufacturing-registry.json"
 DEFAULT_REGISTRY_PRE_EXPORT = ROOT / "build/07-release/evidence/manual/manufacturing-registry-pre-export.json"
+DEFAULT_COST_POLICY = ROOT / "build/07-release/evidence/manual/manufacturing-cost-policy.json"
 DEFAULT_GERBER_RULES = ROOT / "build/07-release/evidence/manual/manufacturing-registry-gerber.json"
 DEFAULT_FOOTPRINT_EQUIVALENCE = ROOT / "build/07-release/evidence/manual/footprint-equivalence.json"
 DEFAULT_PHYSICAL_INTEGRITY = ROOT / "build/07-release/evidence/manual/physical-integrity.json"
@@ -175,6 +176,20 @@ def require_registry_pre_export(
     return gate, registry
 
 
+def require_cost_policy(gate_path: Path, registry: dict[str, object], policy: dict[str, object]) -> dict[str, object]:
+    try:
+        gate = json.loads(gate_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Manufacturing cost-policy receipt is unavailable or invalid: {exc}") from exc
+    if not isinstance(gate, dict) or gate.get("kind") != "manufacturing_cost_policy_gate":
+        raise SystemExit("Manufacturing cost-policy receipt kind mismatch")
+    if gate.get("success") is not True or gate.get("manufacturing_cost_policy_pass") is not True:
+        raise SystemExit("Manufacturing cost policy did not pass")
+    if gate.get("registry_sha256") != registry.get("registry_sha256") or gate.get("policy_sha256") != policy.get("policy_sha256"):
+        raise SystemExit("Manufacturing cost-policy receipt is stale")
+    return gate
+
+
 def require_passing_physical_review(board: Path, review_path: Path, policy: dict[str, object]) -> dict[str, object]:
     try:
         review = json.loads(review_path.read_text(encoding="utf-8"))
@@ -206,6 +221,7 @@ def main() -> int:
     parser.add_argument("--assembly-parts", type=Path, default=DEFAULT_ASSEMBLY_PARTS)
     parser.add_argument("--manufacturing-registry", type=Path, default=DEFAULT_MANUFACTURING_REGISTRY)
     parser.add_argument("--registry-pre-export", type=Path, default=DEFAULT_REGISTRY_PRE_EXPORT)
+    parser.add_argument("--cost-policy", type=Path, default=DEFAULT_COST_POLICY)
     parser.add_argument("--gerber-rules-output", type=Path, default=DEFAULT_GERBER_RULES)
     parser.add_argument("--footprint-equivalence", type=Path, default=DEFAULT_FOOTPRINT_EQUIVALENCE)
     parser.add_argument("--physical-integrity", type=Path, default=DEFAULT_PHYSICAL_INTEGRITY)
@@ -250,6 +266,7 @@ def main() -> int:
     registry_pre_export, manufacturing_registry = require_registry_pre_export(
         args.registry_pre_export.resolve(), args.manufacturing_registry.resolve(), design_policy,
     )
+    cost_policy = require_cost_policy(args.cost_policy.resolve(), manufacturing_registry, design_policy)
     output = args.output.resolve()
     expected_parent = (ROOT / "manufacturing/jlcpcb").resolve()
     if expected_parent not in output.parents:
@@ -393,6 +410,8 @@ def main() -> int:
                 "manufacturing_registry_sha256": manufacturing_registry["registry_sha256"],
                 "registry_pre_export": str(args.registry_pre_export.resolve()),
                 "special_manufacturing_processes_confirmed": registry_pre_export["special_manufacturing_processes_confirmed"],
+                "manufacturing_cost_policy": str(args.cost_policy.resolve()),
+                "manufacturing_cost_policy_pass": cost_policy["manufacturing_cost_policy_pass"],
                 "gerber_rules_gate": str(args.gerber_rules_output.resolve()),
                 "manufacturing_registry_pass": gerber_gate["manufacturing_registry_pass"],
                 "gerber_rules_pass": gerber_gate["gerber_rules_pass"],

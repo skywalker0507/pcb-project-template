@@ -81,7 +81,7 @@ def main() -> int:
     add(checks, "project:resolved-toolchain", resolved_path.is_file(), str(resolved_path))
     mcp_configured = (root / ".codex/config.toml").is_file() or (root / ".codex/pcb-mcp.fragment.toml").is_file()
     add(checks, "project:mcp-config", mcp_configured, ".codex/config.toml or merge fragment")
-    physical_bridge_required = current_stage == "physical" and active_physical == "easyeda_pro"
+    physical_bridge_required = current_stage in {"physical", "routing"} and active_physical == "easyeda_pro"
     physical_bridge_configured = (
         isinstance(active_physical_config, dict)
         and active_physical_config.get("status") in {"ready", "available"}
@@ -141,7 +141,7 @@ def main() -> int:
         add(checks, "wsl-atopile", False, "WSL unavailable", required=active_backend == "atopile")
 
     node = shutil.which("node")
-    add(checks, "node", bool(node), node or "not found")
+    add(checks, "node", bool(node), node or "not found", required=False)
     easyeda_integration_path = root / "config/easyeda-integration.json"
     easyeda_integration = json.loads(easyeda_integration_path.read_text(encoding="utf-8")) if easyeda_integration_path.is_file() else {}
     api_bridge_config = easyeda_integration.get("api_bridge", {})
@@ -173,21 +173,14 @@ def main() -> int:
     kirouting_tool = root / str(kirouting_config.get("tool", "tools/eext-kirouting-integration"))
     kirouting_ok, kirouting_head = git_head(kirouting_tool, root)
     expected_kirouting = kirouting_config.get("required_commit")
-    add(checks, "easyeda-kirouting-commit", kirouting_ok and kirouting_head == expected_kirouting, f"expected={expected_kirouting};actual={kirouting_head}", required=current_stage == "routing")
+    easyeda_routing_required = current_stage == "routing" and active_physical == "easyeda_pro"
+    add(checks, "easyeda-kirouting-commit", kirouting_ok and kirouting_head == expected_kirouting, f"expected={expected_kirouting};actual={kirouting_head}", required=easyeda_routing_required)
     easyeda_bridge_python = root / ".venv-easyeda-bridge/Scripts/python.exe"
-    add(checks, "easyeda-kirouting-python", easyeda_bridge_python.is_file(), str(easyeda_bridge_python), required=current_stage == "routing")
+    add(checks, "easyeda-kirouting-python", easyeda_bridge_python.is_file(), str(easyeda_bridge_python), required=easyeda_routing_required)
     bun = shutil.which("bun")
     tscircuit_root = root / "tscircuit"
     add(checks, "bun", bool(bun), bun or "not found", required=active_backend == "tscircuit")
     add(checks, "tscircuit-lockfile", (tscircuit_root / "bun.lock").is_file(), str(tscircuit_root / "bun.lock"), required=active_backend == "tscircuit")
-    houtini = root / "tools/houtini-lm"
-    houtini_ok, houtini_head = git_head(houtini, root)
-    expected_houtini = resolved.get("houtini_lm", {}).get("commit")
-    add(checks, "houtini-commit", houtini_ok and houtini_head == expected_houtini, f"expected={expected_houtini};actual={houtini_head}")
-    add(checks, "houtini-build", (houtini / "dist/index.js").is_file(), str(houtini / "dist/index.js"))
-    key_present = bool(os.environ.get("HOUTINI_LM_API_KEY") or os.environ.get("DEEPSEEK_API_KEY"))
-    add(checks, "houtini-key", key_present, "present" if key_present else "missing", required=False)
-
     krt_repo = root / "tools/KiCadRoutingTools"
     krt_python = root / ".venv-routingtools/Scripts/python.exe"
     add(checks, "krt-repository", krt_repo.is_dir(), str(krt_repo))
@@ -197,12 +190,12 @@ def main() -> int:
     add(checks, "krt-commit", krt_ok and krt_head == expected_krt, f"expected={expected_krt};actual={krt_head}")
 
     java = shutil.which("java")
-    add(checks, "java", bool(java), java or "not found")
+    add(checks, "java", bool(java), java or "not found", required=False)
     freerouting_resolved = resolved.get("freerouting", {})
     freerouting = root / "tools/freerouting/freerouting-latest.jar"
     freerouting_hash = hashlib.sha256(freerouting.read_bytes()).hexdigest() if freerouting.is_file() else "missing"
     expected_freerouting_hash = str(freerouting_resolved.get("sha256", "")).lower()
-    add(checks, "freerouting", freerouting_hash.lower() == expected_freerouting_hash, f"expected={freerouting_resolved.get('sha256')};actual={freerouting_hash}")
+    add(checks, "freerouting-lab", freerouting_hash.lower() == expected_freerouting_hash, f"expected={freerouting_resolved.get('sha256')};actual={freerouting_hash}", required=False)
 
     konnect_resolved = resolved.get("konnect")
     konnect_disabled = isinstance(konnect_resolved, dict) and konnect_resolved.get("disabled") is True
@@ -224,10 +217,6 @@ def main() -> int:
     if tier == "deep" and (root / "scripts/krt_flow.py").is_file():
         ok, output = run([sys.executable, "scripts/krt_flow.py", "check"], root, 120)
         add(checks, "krt-check", ok, output[-300:])
-    if tier == "deep" and (houtini / "package.json").is_file():
-        npm = ["cmd.exe", "/d", "/s", "/c", "npm", "test"] if os.name == "nt" else ["npm", "test"]
-        ok, output = run(npm, houtini, 180)
-        add(checks, "houtini-tests", ok, output[-300:])
     if tier == "deep" and active_backend == "atopile" and wsl and (root / "ato.yaml").is_file():
         ok, output = run([
             sys.executable, "scripts/build_electrical.py", "--backend", "atopile", "--build", "default",
@@ -247,8 +236,7 @@ def main() -> int:
             "project:config/electrical-backend.json", "project:config/backend-architecture.json", "project:config/physical-backend.json", "project:config/manufacturing-backend.json", "project:active-electrical-source", "project:config/pcb-flow.json", "project:config/kicad-routing-tools.json",
             "project:config/easyeda-integration.json", "project:config/toolchain-policy.json", "project:config/template-engine.json", "project:config/manufacturing-rules.json", "project:config/board-stack.json", "project:config/pcb-acceptance.json", "project:config/requirements.json",
             "project:handoff/stages/CURRENT_STAGE.json", "project:resolved-toolchain", "project:mcp-config",
-            "kicad-cli", "git", "python", "node", "houtini-commit",
-            "houtini-build", "krt-repository", "krt-python", "krt-commit", "java", "freerouting",
+            "kicad-cli", "git", "python", "krt-repository", "krt-python", "krt-commit",
         },
         "deep": {item["name"] for item in checks if item["required"]},
     }
@@ -257,19 +245,19 @@ def main() -> int:
         required_by_tier["standard"].add("gerbonara")
         required_by_tier["deep"].add("gerbonara")
     if physical_bridge_required:
-        required_by_tier["standard"].update({"easyeda-bridge", "easyeda-api-skill-commit", "easyeda-format-converter"})
-        required_by_tier["deep"].update({"easyeda-bridge", "easyeda-api-skill-commit", "easyeda-format-converter"})
+        required_by_tier["standard"].update({"node", "easyeda-bridge", "easyeda-api-skill-commit", "easyeda-format-converter"})
+        required_by_tier["deep"].update({"node", "easyeda-bridge", "easyeda-api-skill-commit", "easyeda-format-converter"})
     if active_physical == "kicad" and current_stage in {"physical", "routing"}:
         required_by_tier["standard"].update({"konnect", "konnect-ipc-address"})
         required_by_tier["deep"].update({"konnect", "konnect-ipc-address"})
-    if current_stage == "routing":
+    if easyeda_routing_required:
         required_by_tier["standard"].update({"easyeda-api-skill-commit", "easyeda-kirouting-commit", "easyeda-kirouting-python"})
         required_by_tier["deep"].update({"easyeda-api-skill-commit", "easyeda-kirouting-commit", "easyeda-kirouting-python"})
     for item in checks:
         item["required"] = item["name"] in required_by_tier[tier]
     if active_backend == "tscircuit":
         for item in checks:
-            if item["name"] in {"bun", "tscircuit-lockfile"}:
+            if item["name"] in {"node", "bun", "tscircuit-lockfile"}:
                 item["required"] = tier in {"standard", "deep"}
     elif active_backend == "atopile":
         for item in checks:
@@ -292,18 +280,14 @@ def main() -> int:
         suggestions.append(f"Install atopile manually in WSL {args.distro}, then verify: wsl.exe -d {args.distro} -- bash -lc 'ato --version'")
     if active_backend == "tscircuit" and ("bun" in names or "tscircuit-lockfile" in names):
         suggestions.append("Install Bun natively, then run bun install in tscircuit/ to restore the locked tscircuit toolchain.")
-    if "houtini-commit" in names and not houtini_ok:
-        suggestions.append("Clone the configured Houtini fork to tools/houtini-lm.")
-    if "houtini-build" in names:
-        suggestions.append("Run npm ci and npm run build in tools/houtini-lm.")
     if "krt-repository" in names:
         suggestions.append("Clone the configured KRT fork to tools/KiCadRoutingTools and check out codex/repository-support.")
     if "krt-commit" in names and krt_ok and expected_krt:
         suggestions.append("Check out the KRT commit recorded in build/00-shared/evidence/toolchain/toolchain-resolved.json, or record a receipt for the reviewed local commit.")
     if "krt-python" in names:
         suggestions.append("Create .venv-routingtools, install tools/KiCadRoutingTools/requirements.txt, then run its build_router.py manually.")
-    if "freerouting" in names:
-        suggestions.append("Download the reviewed FreeRouting JAR manually to tools/freerouting/freerouting-latest.jar.")
+    if "freerouting-lab" in names:
+        suggestions.append("FreeRouting is an optional lab comparison only; install its reviewed JAR only before an explicit experiment.")
     if "konnect" in names:
         suggestions.append("Download Konnect manually to tools/konnect/konnect.exe, or disable it with init_project.py --no-konnect.")
     # Windows consoles can still use a legacy code page; JSON escapes keep this

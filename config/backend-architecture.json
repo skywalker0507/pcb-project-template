@@ -16,7 +16,8 @@
   "routing_engine": {
     "active": "kicad_routing_tools",
     "config": "config/kicad-routing-tools.json",
-    "secondary": ["freerouting"],
+    "secondary": [],
+    "experimental_optional": ["freerouting"],
     "independent_of_gui_backend": true
   },
   "validation_backend": {

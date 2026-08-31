@@ -33,6 +33,7 @@ The Agent-facing command surface is intentionally limited to eight commands:
 
 ```powershell
 py -3.14 scripts/pcbctl.py status
+py -3.14 scripts/pcbctl.py build --plan
 py -3.14 scripts/pcbctl.py build
 py -3.14 scripts/pcbctl.py freeze
 py -3.14 scripts/pcbctl.py physical-start
@@ -45,6 +46,8 @@ py -3.14 scripts/pcbctl.py release
 These are thin dispatchers. Common physical and routing operations are grouped
 under stable subcommands, for example `pcbctl.py place score`, `place
 semantics`, `place render`, `place promote`, `route run` and `route escalate`.
+An exact surviving electrical candidate blocks a duplicate build; use
+`build --force-rebuild` only for an intentional compiler reproducibility check.
 Advanced operations remain in `config/tool-entrypoints.json`; use them only
 when no default subcommand expresses the reviewed operation.
 
@@ -145,6 +148,36 @@ it cannot substitute for PCB/SMT DFM.
 Do not run placement semantics when footprints did not move. Do not run the
 full pipeline or render four views after each trace.
 
+At functional checkpoints, or after repeated candidate rejection, run the
+metadata-only workflow profiler:
+
+```powershell
+py -3.14 scripts/pcbctl.py verify workflow
+```
+
+It reads compact receipts, run timestamps and file metadata only. It never
+opens PCB/image/log contents, and reports candidate churn, repeated same-board
+pipeline runs, slow operation families and retention pressure. Do not run it
+after every trace. A fresh hash-bound checkpoint receipt should be reused for
+handoff and diagnosis while its dependencies are unchanged; release gates are
+always rerun after any bound dependency changes.
+
+For an unchanged local checkpoint, explicit reuse is available:
+
+```powershell
+py -3.14 scripts/pcbctl.py verify --tier checkpoint --board <board> `
+  --baseline-board <baseline> --reuse-checkpoint <passing-pipeline-summary.json>
+```
+
+Reuse fails closed unless board/baseline SHA, every project script and JSON
+policy, template-engine source and the recorded toolchain receipt are unchanged.
+It is forbidden for release and electrical builds.
+
+When changing the template implementation itself, use `pcbctl verify template`.
+It captures unit-test and static-check output under
+`build/00-shared/template-checks/` and prints only one compact result. This is
+developer regression evidence, not a PCB checkpoint or production gate.
+
 Placement is judged by function before appearance. `placement-semantics.json`
 protects decoupling, switch-mode power loops, connector-side ESD,
 receiver-side termination, antenna keepouts and connector access.
@@ -183,6 +216,9 @@ py -3.14 scripts/pcbctl.py route finalize --run-id <id>
 
 `status` only observes the existing process. `finalize` reads its compact
 receipt and never launches or revalidates the route a second time.
+Route and explicit-trace commands print only acceptance, failure-family and
+audit indexes; use `pcbctl route report --path <krt-report.json>` for bounded
+diagnostic detail. Full geometry and logs remain on disk.
 
 Use KRT `--dry-run` as the routing work packet. It returns classification,
 batch advice, route-area health and stopping conditions without artifacts.
@@ -249,14 +285,24 @@ py -3.14 scripts/artifact_store.py checkpoint-prune
 Both prune commands are previews unless `--apply` is explicitly supplied.
 Applied pruning creates and verifies a recoverable zip before removing the
 selected run directories, and never archives a release or active reference.
+Reference protection includes stage/global CURRENT pointers, release INPUTS,
+DFM work-packet pointers, asynchronous routing state and manufacturing
+manifests. This protection is checked before an archive is created.
 
 ## Optional capabilities
 
 EasyEDA Pro remains useful for explicit compatibility/JLC review. FreeRouting
-remains an alternate leftover-net experiment. Experimental electrical backends
-and Houtini text classification also remain available. They are not part of
+remains an uninstalled lab-only leftover-net comparison. Experimental electrical backends
+also remain available. They are not part of
 the default stage capabilities, are never electrical or physical authorities,
 and cannot relax release gates.
+
+Manufacturing cost is reviewed in two layers. The project-owned cost drivers in
+`config/manufacturing-profile.json` explain every selected surcharge-risk
+process and its lower-cost alternative. After uploading the package, copy the
+live quote into a compact JSON observation and run `pcbctl release review-quote`;
+unexpected options such as an unrequested four-wire resistance test fail before
+ordering. Prices are never embedded in the template because vendor pricing is volatile.
 
 Key paths:
 
@@ -267,6 +313,9 @@ Key paths:
 - `template-engine/`: independently versioned project-neutral engine package;
 - `config/template-engine.json`: project-to-engine version and source lock;
 - `config/manufacturing-rules.json`: reviewed project Gerber rule source;
+- `docs/MANUFACTURING_COST_REVIEW.md`: stable cost-driver and live-quote review;
+- `docs/MANUFACTURING_EXTERNAL_REVIEW.md`: one SHA-bound DFM/quote work packet,
+  structured external-result import, and order-time evidence rules;
 - `handoff/stages/CURRENT_STAGE.json`: stage state;
 - `build/WORKSET.json`: compact current-session context;
 - `build/STAGE_RESULTS.json`: one compact index of accepted stage outputs;
