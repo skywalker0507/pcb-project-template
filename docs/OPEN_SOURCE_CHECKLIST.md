@@ -1,6 +1,6 @@
 # Pre-publication checklist
 
-**Status:** preparatory branch only. Keeping a GitHub repository private while preparing it is intentional. The maintainer must explicitly decide when to change visibility.
+**Status: BLOCKED for publishing the original repository.** Full-history audit found a separate hardware-development lineage; read [Git history and provenance audit](OSS_HISTORY_AUDIT_2026-10-21.md). The safest publication path is a new, clean-snapshot repository.\n\n**Previous status:** preparatory branch only. Keeping a GitHub repository private while preparing it is intentional. The maintainer must explicitly decide when to change visibility.
 
 ## Before changing visibility
 
