@@ -1,0 +1,37 @@
+name: Source hygiene and unit tests
+
+on:
+  push:
+    branches: [main, "chore/oss-readiness"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile Python sources
+        run: python -m compileall -q scripts tests
+      - name: Source and release hygiene
+        run: python scripts/check_open_source_ready.py
+      - name: Validate deliberate draft requirements
+        run: python scripts/validate_requirements.py
+      - name: Run isolated unit tests
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+
+# These checks do not install KiCad, atopile, Konnect, FreeRouting, Houtini-LM
+# or third-party model APIs. Passing CI is NOT manufacturing approval.

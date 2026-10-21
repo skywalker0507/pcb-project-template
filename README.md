@@ -1,5 +1,14 @@
 # AI PCB project template
 
+**Codex-oriented, reproducible atopile + KiCad workflow with explicit human review gates.**
+
+This repository is a **template and tooling workflow**, not a finished PCB design or a guarantee of manufacturability. The core is Python-based, with optional external MCP, autorouting and EDA tools. It keeps electrical and physical design authorities distinct, records SHA-linked policy evidence and blocks release when required reviews are missing.
+
+**Start here:** [Quick start](docs/QUICKSTART.md) · [Architecture](docs/ARCHITECTURE_DIRECTION.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Third-party licenses](docs/THIRD_PARTY.md) · [Pre-publication checklist](docs/OPEN_SOURCE_CHECKLIST.md)
+
+**License:** MIT for original content in this repository, subject to maintainer provenance review; external tools retain their own terms.
+
+
 Token-efficient, reproducible atopile and KiCad project template for Codex.
 It combines:
 

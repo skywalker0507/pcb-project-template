@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
+import re
+import shlex
 from pathlib import Path
 import shutil
 import subprocess
@@ -70,6 +72,15 @@ def ensure_stage_bootstrap(project_name: str) -> Path:
 
 
 def configure_project(project_name: str, distro: str, force: bool, with_konnect: bool, layers: int) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", project_name):
+        raise SystemExit("Project name must be 1-64 ASCII letters, digits, dots, underscores or hyphens.")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", distro):
+        raise SystemExit("WSL distribution name contains unsupported characters.")
+    # The generated TOML currently uses literal single-quoted paths.
+    # Fail explicitly rather than producing malformed configuration.
+    for value in (str(ROOT), str(shutil.which("node") or "")):
+        if "'" in value or "\\n" in value or "\\r" in value:
+            raise SystemExit("Project/tool path contains characters unsupported by generated TOML.")
     flow_path = ROOT / "config/pcb-flow.json"
     flow = json.loads(flow_path.read_text(encoding="utf-8"))
     flow["project"]["name"] = project_name
@@ -86,7 +97,7 @@ def configure_project(project_name: str, distro: str, force: bool, with_konnect:
     config = f'''[mcp_servers.atopile]
 type = "stdio"
 command = 'C:\\Windows\\System32\\wsl.exe'
-args = ['-d', '{distro}', '--', 'bash', '-lc', 'cd {root_wsl} && exec ./scripts/start-atopile-mcp-wsl.sh']
+args = ['-d', '{distro}', '--', 'bash', '-lc', {json.dumps('cd ' + shlex.quote(root_wsl) + ' && exec ./scripts/start-atopile-mcp-wsl.sh')}]
 cwd = '{root_windows}'
 enabled = true
 startup_timeout_sec = 30

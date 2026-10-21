@@ -13,3 +13,18 @@ __pycache__/
 *.kicad_prl
 *.kicad_pcb.lck
 *-backups/
+# Local secrets, credentials and transient state
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.key
+*.keystore
+handoff/stages/CURRENT_STAGE.json
+*.log
+.DS_Store
+.idea/
+.vscode/
+tools/
