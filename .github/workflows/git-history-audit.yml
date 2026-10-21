@@ -1,0 +1,38 @@
+name: Full Git history audit (private)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "scripts/git_history_audit.py"
+      - ".github/workflows/git-history-audit.yml"
+  push:
+    branches: ["chore/oss-readiness"]
+    paths:
+      - "scripts/git_history_audit.py"
+      - ".github/workflows/git-history-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  history-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch every branch, tag and pull-request ref
+        shell: bash
+        run: |
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*' '+refs/pull/*/head:refs/remotes/origin/audit-pull/*/head' '+refs/pull/*/merge:refs/remotes/origin/audit-pull/*/merge'
+      - name: Audit all reachable Git blobs without exposing values
+        run: python scripts/git_history_audit.py --fail-on-high
+      - name: Upload private audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: git-history-audit
+          path: build/audit/git-history-audit.json
+          retention-days: 7
