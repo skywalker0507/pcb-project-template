@@ -31,7 +31,7 @@ class ElectricalBuildPlanTests(unittest.TestCase):
         status = electrical_build.validate_backend(config, name, backend)
         # CI has no installed EDA compiler, so provide a resolved receipt
         # fixture instead of depending on machine-local build evidence.
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
             receipt = Path(directory) / "toolchain-resolved.json"
             receipt.write_text(json.dumps({
                 "electrical_backend": {"active": name},
