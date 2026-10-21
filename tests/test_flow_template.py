@@ -429,6 +429,9 @@ class FlowTemplateTests(unittest.TestCase):
             frozen_manifest.write_text("{}", encoding="utf-8")
             source_manifest.write_text("{}", encoding="utf-8")
             digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest().upper()
+            # Generate the local policy fixture; fresh CI checkouts have no
+            # pre-existing generated manufacturing registry under build/.
+            design_policy.write_policy()
             registry = json.loads((ROOT / "build/00-shared/evidence/design-policy/manufacturing-registry.json").read_text(encoding="utf-8"))
             freeze_path = bundle / "electrical-freeze.json"
             freeze = {

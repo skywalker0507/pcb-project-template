@@ -29,11 +29,19 @@ class ElectricalBuildPlanTests(unittest.TestCase):
         config = electrical_build.read_config(electrical_build.DEFAULT_CONFIG)
         name, backend = electrical_build.selected_backend(config)
         status = electrical_build.validate_backend(config, name, backend)
-        toolchain = electrical_build.production_toolchain(name, status)
-
-        first = electrical_build.build_input_manifest(name, backend, status, "default", toolchain)
-        second = electrical_build.build_input_manifest(name, backend, status, "default", toolchain)
-        alternate = electrical_build.build_input_manifest(name, backend, status, "alternate", toolchain)
+        # CI has no installed EDA compiler, so provide a resolved receipt
+        # fixture instead of depending on machine-local build evidence.
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "toolchain-resolved.json"
+            receipt.write_text(json.dumps({
+                "electrical_backend": {"active": name},
+                name: {"version": "test-compiler-1.0"},
+            }), encoding="utf-8")
+            with mock.patch.object(electrical_build, "TOOLCHAIN_RECEIPT", receipt):
+                toolchain = electrical_build.production_toolchain(name, status)
+                first = electrical_build.build_input_manifest(name, backend, status, "default", toolchain)
+                second = electrical_build.build_input_manifest(name, backend, status, "default", toolchain)
+                alternate = electrical_build.build_input_manifest(name, backend, status, "alternate", toolchain)
 
         self.assertEqual(first["fingerprint"], second["fingerprint"])
         self.assertNotEqual(first["fingerprint"], alternate["fingerprint"])
