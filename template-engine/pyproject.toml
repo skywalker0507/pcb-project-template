@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pcb-template-engine"
+version = "0.3.0"
+description = "Project-independent policy and manufacturing gates for AI PCB templates"
+requires-python = ">=3.14"
+dependencies = []
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

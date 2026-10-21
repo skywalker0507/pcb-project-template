@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "default_tier": "quick",
+  "tiers": {
+    "quick": {
+      "when": "each isolated local copper candidate",
+      "required_checks": ["candidate_integrity", "drc_delta", "connectivity"],
+      "placement_semantics": "only_if_footprints_moved",
+      "visual": "one_cropped_copper_view_if_critical_awkward_or_uncertain",
+      "full_pipeline": false
+    },
+    "checkpoint": {
+      "when": "placement checkpoint or completed functional routing block",
+      "required_checks": ["physical_integrity", "full_drc", "connectivity", "electrical_parity_if_identity_changed"],
+      "placement_semantics": "required_if_footprints_moved",
+      "placement_routability": "required_if_footprints_moved",
+      "visual": "whole_board_front_and_back_copper",
+      "full_pipeline": false
+    },
+    "release": {
+      "when": "manufacturing release candidate",
+      "required_checks": ["release_readiness", "release_review_packet", "explicit_visual_assessment", "full_pipeline", "full_drc", "connectivity", "final_electrical_parity", "manufacturing_registry", "manufacturing_gates"],
+      "placement_semantics": "required_exact_board",
+      "visual": "four_view_exact_board",
+      "full_pipeline": true
+    }
+  },
+  "visual_triggers": {
+    "local_required_when_any": [
+      "critical_net_changed",
+      "new_or_moved_via",
+      "clearance_delta",
+      "route_marked_awkward",
+      "reviewer_uncertain"
+    ],
+    "checkpoint_required_when_any": [
+      "footprint_moved",
+      "functional_block_completed",
+      "routing_corridor_changed"
+    ]
+  }
+}

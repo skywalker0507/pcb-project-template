@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": {
-    "requires": ["release_pass", "board_sha256_match", "drc_zero_unconnected", "manufacturing_profile_selected", "review_pass", "review_receipt_matches_policy"],
+    "requires": ["release_pass", "board_sha256_match", "drc_zero_unconnected", "manufacturing_profile_selected", "review_pass", "review_receipt_matches_policy", "visual_review_pass", "electrical_freeze_pass", "final_electrical_parity_pass", "jlc_dfm_pass", "dfm_order_profile_match", "physical_integrity_pass", "critical_footprint_rule_areas_pass", "manufacturing_registry_pass", "manufacturing_cost_policy_pass", "gerber_rules_pass", "special_manufacturing_processes_confirmed"],
     "prohibits": ["route_ok_as_release_evidence", "stale_audit_receipt"]
   },
   "routing_candidate": {

@@ -17,6 +17,17 @@ def read_object(path: Path, label: str) -> dict[str, object]:
     return data
 
 
+def configured_board(root: Path, flow_path: Path | None = None) -> Path:
+    """Return the single project board selected by the existing PCB flow config."""
+    flow = read_object(flow_path or root / "config/pcb-flow.json", "PCB flow")
+    project = flow.get("project")
+    value = project.get("board") if isinstance(project, dict) else None
+    if not isinstance(value, str) or not value.strip():
+        raise SystemExit("PCB flow does not select project.board")
+    board = Path(value)
+    return board.resolve() if board.is_absolute() else (root / board).resolve()
+
+
 def load_acceptance(path: Path, section: str, required_rules: set[str]) -> dict[str, object]:
     policy = read_object(path, "Acceptance policy")
     rules = policy.get(section)

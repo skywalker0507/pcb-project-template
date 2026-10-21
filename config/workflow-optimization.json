@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "objective_priority": [
+    "accuracy_and_quality",
+    "token_efficiency",
+    "elapsed_time"
+  ],
+  "profile_frequency": {
+    "run_at": [
+      "functional_checkpoint",
+      "after_two_rejected_candidates_in_one_route_area",
+      "before_process_refactoring"
+    ],
+    "do_not_run_after_every_copper_edit": true
+  },
+  "thresholds": {
+    "tmp_bytes_warning": 134217728,
+    "recent_route_rejection_rate_warning": 0.35,
+    "same_board_tier_repeat_warning": 3,
+    "operation_failure_rate_warning": 0.5,
+    "operation_failure_rate_minimum_runs": 5,
+    "operation_failure_rate_overrides": {
+      "krt-critical-probe": 0.7,
+      "kicad-trace-critical-probe": 0.7
+    },
+    "stale_in_progress_sample_allowance_per_operation": 1
+  },
+  "execution_rules": {
+    "one_local_edit_batch_one_quick_audit": true,
+    "reuse_hash_bound_receipts_when_dependencies_are_fresh": true,
+    "release_gates_are_never_reused_after_dependency_change": true,
+    "full_logs_remain_outside_agent_context": true,
+    "process_review_does_not_interrupt_a_passing_bounded_batch": true
+  },
+  "implemented_mitigations": {
+    "repeated_full_board_verification": {
+      "status": "implemented",
+      "command": "pcbctl verify --reuse-checkpoint <passing-pipeline-summary.json>",
+      "guard": "exact board, baseline, policy, producer, and toolchain hashes must match"
+    }
+  }
+}

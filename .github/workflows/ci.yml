@@ -1,0 +1,37 @@
+name: Basic checks
+
+on:
+  push:
+    branches: [main, "chore/publish-latest"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Compile project Python sources
+        run: python -m compileall -q scripts tests template-engine/src
+      - name: Run existing template regression checks
+        run: python scripts/run_template_checks.py
+      - name: Show test failures
+        if: failure()
+        run: |
+          echo "=== unit-tests.log (last 120 lines) ==="
+          tail -n 120 build/00-shared/template-checks/logs/unit-tests.log || true
+      - name: Upload test details on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: template-regression-logs
+          path: build/00-shared/template-checks/
+          retention-days: 7

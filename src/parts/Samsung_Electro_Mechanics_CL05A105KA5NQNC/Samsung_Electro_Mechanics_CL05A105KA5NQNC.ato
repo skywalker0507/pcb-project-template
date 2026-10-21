@@ -1,0 +1,19 @@
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component Samsung_Electro_Mechanics_CL05A105KA5NQNC_package:
+    """1uF (105) ±10% 25V"""
+
+    # This trait marks this file as auto-generated
+    # If you want to manually change it, remove the trait
+    trait is_auto_generated<system="ato_part", source="easyeda:C52923", date="2026-08-11T06:18:28.973238+00:00", checksum="689a4a2442d17dedfbad825abe065b616a732b6ca58ef0b03f0938462a9b4c4d">
+
+    trait is_atomic_part<manufacturer="Samsung Electro-Mechanics", partnumber="CL05A105KA5NQNC", footprint="C0402.kicad_mod", symbol="CL05A105KA5NQNC.kicad_sym">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C52923", manufacturer="Samsung Electro-Mechanics", partno="CL05A105KA5NQNC">
+    trait has_designator_prefix<prefix="C">
+
+    # pins
+    pin 1
+    pin 2

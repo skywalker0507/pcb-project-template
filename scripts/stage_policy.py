@@ -34,6 +34,6 @@ def require_operation(operation: str, path: Path = STAGE_PATH) -> dict[str, obje
         raise SystemExit(json.dumps({
             "success": False, "error": "stage_operation_forbidden", "operation": operation,
             "stage": stage["stage"], "allowed_stages": sorted(allowed),
-            "next": "Run python scripts/stage_doctor.py; do not bypass the stage guard.",
+            "next": "Run py -3.14 scripts/stage_doctor.py; do not bypass the stage guard.",
         }, separators=(",", ":")))
     return stage

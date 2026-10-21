@@ -1,0 +1,31 @@
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component Texas_Instruments_TMUX1574PWR_package:
+    # This trait marks this file as auto-generated
+    # If you want to manually change it, remove the trait
+    trait is_auto_generated<system="ato_part", source="easyeda:C2673443", date="2026-08-11T06:26:38.140626+00:00", checksum="c1482db8f6288953da03c2ec6c309663f718b6a72ee6a4bf639a1dc9681803fc">
+
+    trait is_atomic_part<manufacturer="Texas Instruments", partnumber="TMUX1574PWR", footprint="TSSOP-16_L5.0-W4.4-P0.65-LS6.4-BL.kicad_mod", symbol="TMUX1574PWR.kicad_sym">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C2673443", manufacturer="Texas Instruments", partno="TMUX1574PWR">
+    trait has_designator_prefix<prefix="U">
+
+    # pins
+    signal D1 ~ pin 4
+    signal D2 ~ pin 7
+    signal D3 ~ pin 9
+    signal D4 ~ pin 12
+    signal GND ~ pin 8
+    signal S1A ~ pin 2
+    signal S1B ~ pin 3
+    signal S2A ~ pin 5
+    signal S2B ~ pin 6
+    signal S3A ~ pin 11
+    signal S3B ~ pin 10
+    signal S4A ~ pin 14
+    signal S4B ~ pin 13
+    signal SEL ~ pin 1
+    signal VDD ~ pin 16
+    signal nEN ~ pin 15

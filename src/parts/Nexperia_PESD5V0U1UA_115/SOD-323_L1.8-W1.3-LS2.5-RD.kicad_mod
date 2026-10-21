@@ -1,0 +1,126 @@
+(footprint "Nexperia_PESD5V0U1UA_115:SOD-323_L1.8-W1.3-LS2.5-RD"
+	(version 20241229)
+	(generator "faebryk_convert")
+	(generator_version "v5")
+	(layer "F.Cu")
+	(tedit "5DC5F6A4")
+	(uuid "516fa5a9-53ba-4cec-ac9e-7fe9ac7a4b92")
+	(property "Reference" "REF**"
+		(at 0 -4)
+		(layer "F.SilkS")
+		(uuid "3a7ea1a3-4233-4b94-b1d8-395fc48612f7")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Value" "SOD-323_L1.8-W1.3-LS2.5-RD"
+		(at 0 4)
+		(layer "F.Fab")
+		(uuid "73338332-f264-4b2e-be10-9e14be3aed1b")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(attr smd)
+	(fp_circle
+		(center -1.23 0.65)
+		(end -1.2 0.65)
+		(stroke
+			(width 0.06)
+			(type solid)
+		)
+		(layer "F.Fab")
+		(locked no)
+		(uuid "86e46cd9-2173-4a31-8905-d7b8d098ae64")
+	)
+	(fp_line
+		(start 0.9 0.73)
+		(end 0.9 0.52)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "6515d7e1-49cd-43a3-bb11-4d33cf0199a7")
+	)
+	(fp_line
+		(start 0.9 -0.73)
+		(end 0.9 -0.53)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "129de6a6-5f6e-4e70-8f00-e0538de78e2e")
+	)
+	(fp_line
+		(start -0.85 -0.73)
+		(end 0.9 -0.73)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "fd18a693-4dc4-444d-93b7-247b9ac8f515")
+	)
+	(fp_line
+		(start -0.85 0.73)
+		(end 0.9 0.73)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "129262be-0ab4-416b-8af5-cecb19d8aeeb")
+	)
+	(fp_line
+		(start -0.44 -0.73)
+		(end -0.44 0.73)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "c1a2f73b-156a-4869-99e8-2c55cee16db7")
+	)
+	(pad "1" smd rect
+		(at -1.17 0 0)
+		(size 1 0.7)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "b01b1bd2-6a7e-45e1-a1a7-19bde0c1bef1")
+	)
+	(pad "2" smd rect
+		(at 1.17 0 0)
+		(size 1 0.7)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "b407411d-91b2-4e0a-9f4d-f090dd8cdf57")
+	)
+	(model "${KIPRJMOD}/../../../build/cache/parts/easyeda/C139614/SOD-323_L1.8-W1.3-LS2.5-RD.step"
+		(offset
+			(xyz 0 0 -0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 0)
+		)
+	)
+	(embedded_fonts no)
+)

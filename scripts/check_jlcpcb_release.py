@@ -38,20 +38,18 @@ def csv_rows(path: Path, required: set[str]) -> tuple[int, list[str]]:
     return len(rows), problems
 
 
-def package_report(package: Path, stack_path: Path) -> dict[str, object]:
-    stack = read_json(stack_path, "Board stack")
-    profile = (stack.get("profiles") or {}).get(stack.get("active"))
-    if not isinstance(profile, dict) or not isinstance(profile.get("copper_layers"), list):
-        raise SystemExit("Board stack has no active copper-layer profile")
-    expected_layers = [str(layer) for layer in profile["copper_layers"]]
-    gerber = package / "gerber"
+def package_report(package: Path, stack_path: Path, gerber_rules_path: Path | None = None) -> dict[str, object]:
+    # stack_path remains in the compatibility API, but Gerber layer/file rules
+    # are exclusively compiled into and evaluated by the manufacturing registry.
+    _ = stack_path
     assembly = package / "assembly"
-    gerber_files = sorted(path for path in gerber.glob("*") if path.is_file()) if gerber.is_dir() else []
-    names = [path.name.lower() for path in gerber_files]
-    layer_tokens = {layer: layer.replace(".", "_").lower() for layer in expected_layers}
-    missing_copper = [layer for layer, token in layer_tokens.items() if not any(token in name for name in names)]
-    has_outline = any("edge_cuts" in name for name in names)
-    has_drill = any(path.suffix.lower() == ".drl" for path in gerber_files)
+    gerber_rules = read_json(gerber_rules_path, "Manufacturing registry Gerber receipt") if gerber_rules_path and gerber_rules_path.is_file() else {}
+    gerber_registry_ok = bool(
+        gerber_rules.get("kind") == "manufacturing_registry_gerber_gate"
+        and gerber_rules.get("success") is True
+        and gerber_rules.get("manufacturing_registry_pass") is True
+        and gerber_rules.get("gerber_rules_pass") is True
+    )
     bom = assembly / "BOM_JLCPCB.csv"
     cpl = assembly / "CPL_JLCPCB.csv"
     bom_rows, bom_problems = csv_rows(bom, {"Comment", "Designator", "Footprint", "LCSC Part #"})
@@ -61,10 +59,8 @@ def package_report(package: Path, stack_path: Path) -> dict[str, object]:
     match = validation.get("bom_cpl_designators_match")
     match_ok = isinstance(match, dict) and not match.get("missing_from_cpl") and not match.get("extra_in_cpl")
     checks = {
-        "gerber_files_present": bool(gerber_files),
-        "copper_layers_present": not missing_copper,
-        "board_outline_present": has_outline,
-        "drill_present": has_drill,
+        "gerber_files_present": gerber_registry_ok,
+        "manufacturing_registry_gerber_pass": gerber_registry_ok,
         "bom_columns_valid": not bom_problems,
         "cpl_columns_valid": not cpl_problems,
         "bom_cpl_designators_match": match_ok,
@@ -77,9 +73,12 @@ def package_report(package: Path, stack_path: Path) -> dict[str, object]:
         "checks": checks,
         "failures": failures,
         "details": {
-            "expected_copper_layers": expected_layers,
-            "missing_copper_layers": missing_copper,
-            "gerber_file_count": len(gerber_files),
+            "gerber_registry_receipt": str(gerber_rules_path.resolve()) if gerber_rules_path else None,
+            "gerber_registry_sha256": gerber_rules.get("registry_sha256"),
+            "gerber_rule_results": [
+                {"id": item.get("id"), "kind": item.get("kind"), "pass": item.get("pass")}
+                for item in gerber_rules.get("rules", []) if isinstance(item, dict)
+            ],
             "bom_rows": bom_rows,
             "cpl_rows": cpl_rows,
             "problems": bom_problems + cpl_problems,
@@ -96,9 +95,13 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--package", type=Path, required=True, help="JLCPCB export directory")
     parser.add_argument("--board-stack", type=Path, default=DEFAULT_STACK)
+    parser.add_argument("--gerber-rules", type=Path, help="Passing manufacturing registry Gerber receipt")
     parser.add_argument("--output", type=Path, help="Optional JSON receipt path")
     args = parser.parse_args()
-    report = package_report(args.package.resolve(), args.board_stack.resolve())
+    report = package_report(
+        args.package.resolve(), args.board_stack.resolve(),
+        args.gerber_rules.resolve() if args.gerber_rules else None,
+    )
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

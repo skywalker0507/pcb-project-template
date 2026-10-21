@@ -1,7 +1,8 @@
 # Konnect integration boundary
 
-Konnect is the default live KiCad MCP backend and replaces the older
-KiCAD-MCP-Server integration. It does not replace KiCadRoutingTools (KRT).
+Konnect is the primary bounded live KiCad MCP backend and replaces the older
+KiCAD-MCP-Server integration. KiCad is the physical authority; Konnect does not
+replace KiCadRoutingTools (KRT) or deterministic project verification.
 
 ## Why it replaces KiCAD-MCP-Server
 
@@ -17,7 +18,7 @@ always-loaded MCP schema context.
 | Move/rotate/place footprints while KiCad is open | Konnect | Native KiCad 10 IPC with undo/redo |
 | Add or inspect explicit tracks and vias | Konnect | Small, direct MCP operations |
 | Generate a bounded batch-routing candidate | KRT | Scriptable router with candidate-file isolation |
-| Whole-board fallback routing | Project FreeRouting wrapper | Headless, logged and audited |
+| Experimental alternate-router comparison | Project FreeRouting wrapper | Lab-only, headless, logged and audited; not a production dependency |
 | DRC and fabrication approval | Deterministic project scripts | Stable receipts and reviewed baselines |
 
 Konnect's `route_trace` and `route_pad_to_pad` tools create caller-specified
@@ -27,7 +28,7 @@ longer exposes the required DSN/SES round trip through `kicad-cli`.
 
 ## Project policy
 
-- atopile is the schematic and electrical-design authority; do not use
+- Reviewed atopile source is the electrical authority; do not use
   Konnect to edit generated schematics or instantiate reference circuits;
 - use Konnect only with the intended board open in KiCad and the KiCad API
   enabled;
@@ -36,6 +37,24 @@ longer exposes the required DSN/SES round trip through `kicad-cli`.
 - run `python scripts/run_pcb_pipeline.py` after live edits;
 - DRC success does not waive return-path, impedance, mechanical or fabrication
   review.
+
+## KiCad fallback handoff
+
+atopile produces an isolated KiCad PCB candidate, which becomes physical input
+only after electrical validation, candidate review, and promotion into an
+immutable release-lane electrical freeze bundle. EasyEDA import must pass
+parity first, and final electrical parity must pass after edits. Use Konnect only for an intentional
+KiCad fallback/reference operation with the intended board open.
+
+Before an import, run independent review evidence:
+
+```text
+python scripts/review_electrical_candidate.py --receipt <electrical-build.json> --output <new-review-directory>
+```
+
+The command fails on any DRC violation or unconnected item, renders the candidate
+for visual inspection, and always leaves `release_ready=false`. Do not suppress
+or baseline candidate warnings merely to make this command pass.
 
 The generated MCP command uses `scripts/start_konnect_mcp.py`. On a new PC it
 creates only Konnect's `~/.konnect/.installed` marker, preventing Konnect's

@@ -1,0 +1,18 @@
+import has_designator_prefix
+import is_atomic_part
+
+component JST_B8B_XH_A_package:
+    """Manually reviewed connector atomic part."""
+
+    trait is_atomic_part<manufacturer="JST", partnumber="B8B-XH-A (LF)(SN)", footprint="JST_XH_B8B-XH-A_1x08_P2.50mm_Vertical.kicad_mod", symbol="Conn_01x08.kicad_sym">
+    trait has_designator_prefix<prefix="J">
+
+    # Physical pin numbers are the electrical contract.
+    pin 1
+    pin 2
+    pin 3
+    pin 4
+    pin 5
+    pin 6
+    pin 7
+    pin 8

@@ -1,63 +1,91 @@
 # Codex instructions for AI PCB projects
 
-This repository uses atopile as the electrical design authority and KiCad for
-physical PCB design. The installed compiler and manufacturer data take
-precedence over examples or model guesses.
+This repository has one production path:
 
-## Required workflow
+`requirements -> electrical -> physical -> routing -> release`
 
-1. Run `python scripts/session_boot.py`, then read only the cited stage rules, acceptance, and board-stack records before design work.
-2. Validate `config/requirements.json`, then translate its interfaces, rails, constraints and blocks.
-3. Search atopile packages and inspect standard-library interfaces before use.
-4. Validate changed `.ato` sources and build after meaningful changes.
-5. Preserve picked parts, net names, designators and manual KiCad layout.
-6. Run `python scripts/run_pcb_pipeline.py` after source or layout changes.
-7. Run DRC and inspect rendered copper before manufacturing export.
-8. After an intentional export, run `check_jlcpcb_release.py`; create a release snapshot only from a matching `release_pass=true` audit.
+Reviewed requirements/`.ato` are electrical authority; KiCad is physical
+authority/validator. KRT creates candidates; integrations are optional.
 
-Use `python scripts/check_pcb_environment.py --tier minimal` to begin requirements work; use `--tier standard` before normal design work and `--tier deep` only when an atopile build and router capability check are intended.
+## Start and command surface
 
-## Delegation boundary
+Run `py -3.14 scripts/session_boot.py` once per session. Follow `next_command`,
+read only `read_now`, and open `read_if_needed` only after a related failure.
 
-Use project-scoped Houtini-LM only for bounded text-heavy first passes: log
-classification, document extraction, inventories and drafts. Prefer paths,
-400-800 output tokens, `path:line` evidence and explicit unknowns. Never send
-secrets, binary files, PDFs or a complete `.kicad_pcb`.
+Use only these default commands:
 
-Keep electrical architecture, component selection, datasheet interpretation,
-placement, routing, return paths, impedance, DRC waivers and manufacturing
-approval in Codex. Treat delegated output as untrusted until verified.
+`status / build / freeze / physical-start / place / route / verify / release`
 
-Use a Houtini task only when `build/delegated/*-houtini-job.json` says
-`eligible: true`; call it once using that file's `delegate` object without
-loading the listed artifacts into Codex first. If no job exists, do not spend
-tokens deciding whether to delegate: use the compact script receipt instead.
+Dispatch with `py -3.14 scripts/pcbctl.py <command>`; run `pcbctl build --plan`
+before compiling. Keep optional entrypoints outside default context.
 
-## Physical design
+## Hard invariants
 
-Use deterministic scripts before repeated MCP choreography. HPWL and aggregate
-copper length are triage metrics, not acceptance. Never invent numeric widths,
-spacing or impedance, and never regenerate a DRC baseline merely to pass.
+- Physical work consumes an immutable passing electrical-freeze bundle. Any
+  connectivity, identity, part, footprint or net-name change returns to `.ato`.
+- Preserve reviewed parts, designators, nets and physical work. Never invent
+  fabrication, clearance, width or impedance values.
+- Never put a complete PCB, schematic, DSN or SES file in model context. Use
+  deterministic tools, compact receipts and bounded geometry queries.
+- Router success is candidate evidence. Release requires exact-board DRC,
+  connectivity, parity, visual and manufacturing gates.
+- Release Gerbers and DFM scope must match the compiled registry; project rules
+  stay out of engine code.
+- Run `pcbctl verify readiness` before release; export rejects stale or blocked
+  readiness for the adopted board.
+- Never regenerate a baseline to conceal a regression or bypass a guard.
 
-Treat `tools/KiCadRoutingTools` as an updateable project-maintained fork
-checkout. Use
-`scripts/krt_flow.py` and `config/kicad-routing-tools.json`; start with `check`,
-then a profile-scoped dry run, and route only to a separate candidate. Never
-bypass explicit rules, forbidden-layer scans, input hashes or
-`--no-fix-drc-settings`. On older KRT the adapter requires
-`--no-clamp-netclasses`; on newer KRT it omits the clearance ceiling only after
-verifying the configured value equals the KiCad Default netclass. `route_ok` is never release evidence and still requires independent DRC, physical review, and `release_pass=true`.
+## Validation tiers
 
-Konnect replaces KiCAD-MCP-Server and is complementary to KRT. Use it only for
-live KiCad placement, explicit trace/via edits, queries and visual iteration.
-Do not use its schematic-writing or reference-circuit tools: atopile remains
-the electrical authority. Do not use Konnect's natural-language design audits
-as evidence for numeric rules or release approval. Its current `autoroute`
-tool is unavailable on KiCad 10; use the guarded KRT/FreeRouting candidate
-flows and run the deterministic audit afterward.
+- `quick`: after local copper edits, run candidate checks, DRC delta and
+  connectivity. Render a changed-copper crop only for critical, awkward or
+  uncertain edits.
+- `checkpoint`: after a functional block or placement checkpoint, run full DRC
+  and connectivity. If footprints moved, also run placement semantics and
+  routability comparison. Review whole-board copper views.
+- `release`: run the full pipeline, exact-board placement semantics, four-view
+  visual review, parity and manufacturing gates.
 
-At a meaningful stage boundary, run `scripts/create_stage_handoff.py` and keep
-no more than eight open items and next actions.
+Do not rerun placement semantics when footprints did not move. Do not render
+3D or run the release pipeline after every trace.
 
-Use `python scripts/stage_doctor.py` before selecting a workflow command. Do
-not bypass stage guards on routing candidates or manufacturing export.
+At a functional checkpoint, after two related rejections, or before a third
+same-board full verification, run `pcbctl verify workflow`. Finish the bounded
+quick batch first, then remove reported repetition. It is metadata-only and
+cannot relax gates. Template changes use `pcbctl verify template`; logs stay on
+disk.
+
+## Placement and routing contract
+
+Physical-start must pass footprint/rule-area integrity. Place by function, not
+alignment. After moves recheck decoupling, power loops, protection,
+termination, antenna keepouts and connector access. Before routing, own release
+debt and compare airwires, congestion and critical probes. Route critical
+power, return and high-speed paths first; batch low-risk nets.
+
+Classify nets before KRT. Use bounded trace plans for short two-endpoint links;
+reserve KRT for path search or low-risk batches. Copper preflight is
+rejection-only; exact DRC and connectivity remain authoritative.
+
+Route related low-risk nets per candidate and audit once per block. Run long
+KRT work through `pcbctl route start/status/finalize`; observation must not
+restart or revalidate it.
+At zero unconnected items and a passing checkpoint review, run
+`pcbctl route checkpoint-finalize` to bind receipts and refresh state.
+Every attempt names stable `--route-area` and structural `--strategy-class`;
+changing nets or numeric tuning does not reset escalation or define a strategy.
+Dry-run emits the work packet. Three rejected area candidates require
+diagnosis; this never authorizes a footprint move.
+`--route-bbox-mm` scopes obstacle identity and the reference corridor;
+otherwise fingerprint the whole board. Copper excursion triggers local visual
+review, not structural failure or automatic placement return.
+Only no-path or incomplete-connectivity results count as structural failures;
+tool, guardrail and candidate-DRC failures stay in routing. After two structural
+failures, record an escalation and review routing order/corridors first. A
+footprint move requires two distinct failed strategies plus an improved
+routability comparison, passing placement semantics and critical route probes.
+
+Keep logs/candidates in `tmp`, compact receipts in `evidence`, and passing
+artifacts in `release`. Accepted results update stage `CURRENT.json`; handoffs
+cannot adopt `tmp`. Create handoffs only at meaningful checkpoints; continue
+bounded work without expanding it to full-stage completion.

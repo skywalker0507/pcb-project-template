@@ -1,0 +1,38 @@
+{
+  "schema": 2,
+  "gerber_file_patterns": {
+    "F.Cu": "*-F_Cu.gtl",
+    "In1.Cu": "*-In1_Cu.g1",
+    "In2.Cu": "*-In2_Cu.g2",
+    "B.Cu": "*-B_Cu.gbl"
+  },
+  "gerber_rules": [
+    {
+      "id": "board_outline_file",
+      "kind": "package_file_presence",
+      "severity": "error",
+      "pattern": "*-Edge_Cuts.gm1",
+      "minimum_count": 1,
+      "maximum_count": 1
+    },
+    {
+      "id": "plated_or_nonplated_drill_files",
+      "kind": "package_file_presence",
+      "severity": "error",
+      "pattern": "*.drl",
+      "minimum_count": 1
+    },
+    {
+      "id": "u1_antenna_all_copper_keepout",
+      "kind": "copper_keepout",
+      "severity": "error",
+      "coordinate_system": "kicad_board_mm_y_down",
+      "layer_scope": "all_copper",
+      "geometry": {
+        "kind": "board_bbox_mm",
+        "value": [0.0, 0.0, 44.0, 6.05]
+      },
+      "policy": "Any dark copper object whose Gerber bounding box intersects the antenna keepout is a production failure. Bounding-box rejection is conservative and may require exact geometry review only to clear a false positive."
+    }
+  ]
+}

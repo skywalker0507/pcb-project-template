@@ -1,0 +1,77 @@
+"""Two independent seven-line target-connector ESD banks."""
+
+import Net
+import has_designator
+import has_net_name
+
+from "parts/Nexperia_PESD5V0U1UA_115/Nexperia_PESD5V0U1UA_115.ato" import Nexperia_PESD5V0U1UA_115_package
+
+module TargetEsdBanks:
+    gnd = new Net
+    vtref = new Net
+    swdio = new Net
+    swclk = new Net
+    nrst = new Net
+    target_tx = new Net
+    target_rx = new Net
+    boot0 = new Net
+
+    trait gnd.part_of has_net_name<name="GND">
+    trait vtref.part_of has_net_name<name="VTREF">
+    trait swdio.part_of has_net_name<name="SWDIO">
+    trait swclk.part_of has_net_name<name="SWCLK">
+    trait nrst.part_of has_net_name<name="NRST">
+    trait target_tx.part_of has_net_name<name="TARGET_TX">
+    trait target_rx.part_of has_net_name<name="TARGET_RX">
+    trait boot0.part_of has_net_name<name="BOOT0">
+
+    d2 = new Nexperia_PESD5V0U1UA_115_package
+    d3 = new Nexperia_PESD5V0U1UA_115_package
+    d4 = new Nexperia_PESD5V0U1UA_115_package
+    d5 = new Nexperia_PESD5V0U1UA_115_package
+    d6 = new Nexperia_PESD5V0U1UA_115_package
+    d7 = new Nexperia_PESD5V0U1UA_115_package
+    d8 = new Nexperia_PESD5V0U1UA_115_package
+    d9 = new Nexperia_PESD5V0U1UA_115_package
+    d10 = new Nexperia_PESD5V0U1UA_115_package
+    d11 = new Nexperia_PESD5V0U1UA_115_package
+    d12 = new Nexperia_PESD5V0U1UA_115_package
+    d13 = new Nexperia_PESD5V0U1UA_115_package
+    d14 = new Nexperia_PESD5V0U1UA_115_package
+    d15 = new Nexperia_PESD5V0U1UA_115_package
+
+    trait d2 has_designator<designator="D2">
+    trait d3 has_designator<designator="D3">
+    trait d4 has_designator<designator="D4">
+    trait d5 has_designator<designator="D5">
+    trait d6 has_designator<designator="D6">
+    trait d7 has_designator<designator="D7">
+    trait d8 has_designator<designator="D8">
+    trait d9 has_designator<designator="D9">
+    trait d10 has_designator<designator="D10">
+    trait d11 has_designator<designator="D11">
+    trait d12 has_designator<designator="D12">
+    trait d13 has_designator<designator="D13">
+    trait d14 has_designator<designator="D14">
+    trait d15 has_designator<designator="D15">
+
+    # J2 bank: cathode (pin 1/C) to signal, anode (pin 2/A) to GND.
+    d2.C ~ vtref.part_of
+    d3.C ~ swdio.part_of
+    d4.C ~ swclk.part_of
+    d5.C ~ nrst.part_of
+    d6.C ~ target_tx.part_of
+    d7.C ~ target_rx.part_of
+    d8.C ~ boot0.part_of
+
+    # J3 bank is electrically parallel but remains physically independent.
+    d9.C ~ vtref.part_of
+    d10.C ~ swdio.part_of
+    d11.C ~ swclk.part_of
+    d12.C ~ nrst.part_of
+    d13.C ~ target_tx.part_of
+    d14.C ~ target_rx.part_of
+    d15.C ~ boot0.part_of
+
+    for diode in [d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13, d14, d15]:
+        diode.A ~ gnd.part_of

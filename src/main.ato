@@ -1,2 +1,58 @@
+from "power.ato" import PowerBulkCapacitors
+from "usb_input.ato" import UsbInputProtection
+from "controller.ato" import ControllerCore
+from "target_control.ato" import TargetControl
+from "target_esd.ato" import TargetEsdBanks
+from "target_connectors.ato" import TargetConnectors
+from "user_interface.ato" import UserInterface
+from "expansion.ato" import ExpansionHeader
+
 module App:
-    pass
+    power_bulk = new PowerBulkCapacitors
+    usb_input = new UsbInputProtection
+    controller = new ControllerCore
+    target_control = new TargetControl
+    target_esd = new TargetEsdBanks
+    target_connectors = new TargetConnectors
+    user_interface = new UserInterface
+    expansion = new ExpansionHeader
+
+    usb_input.protected_power ~ power_bulk.usb_5v
+    controller.power ~ power_bulk.power_3v3
+    controller.usb_dp.part_of ~ usb_input.usb_dp.part_of
+    controller.usb_dm.part_of ~ usb_input.usb_dm.part_of
+    target_control.probe_power ~ power_bulk.power_3v3
+    target_control.probe_swdio.part_of ~ controller.swdio.part_of
+    target_control.probe_swclk.part_of ~ controller.swclk.part_of
+    target_control.probe_uart_tx.part_of ~ controller.probe_uart_tx.part_of
+    target_control.probe_uart_rx.part_of ~ controller.probe_uart_rx.part_of
+    target_control.nrst_assert.part_of ~ controller.nrst_assert.part_of
+    target_control.boot0_assert.part_of ~ controller.boot0_assert.part_of
+    target_control.target_enable_request.part_of ~ controller.target_enable_request.part_of
+    target_control.vtref_adc.part_of ~ controller.vtref_adc.part_of
+    target_esd.gnd.part_of ~ target_control.probe_power.lv
+    target_esd.vtref.part_of ~ target_control.vtref.part_of
+    target_esd.swdio.part_of ~ target_control.swdio.part_of
+    target_esd.swclk.part_of ~ target_control.swclk.part_of
+    target_esd.nrst.part_of ~ target_control.nrst.part_of
+    target_esd.target_tx.part_of ~ target_control.target_tx.part_of
+    target_esd.target_rx.part_of ~ target_control.target_rx.part_of
+    target_esd.boot0.part_of ~ target_control.boot0.part_of
+    target_connectors.gnd.part_of ~ target_control.probe_power.lv
+    target_connectors.vtref.part_of ~ target_control.vtref.part_of
+    target_connectors.swdio.part_of ~ target_control.swdio.part_of
+    target_connectors.swclk.part_of ~ target_control.swclk.part_of
+    target_connectors.nrst.part_of ~ target_control.nrst.part_of
+    target_connectors.boot0.part_of ~ target_control.boot0.part_of
+    target_connectors.target_tx.part_of ~ target_control.target_tx.part_of
+    target_connectors.target_rx.part_of ~ target_control.target_rx.part_of
+    user_interface.power ~ power_bulk.power_3v3
+    user_interface.reset.part_of ~ controller.esp_en.part_of
+    user_interface.boot.part_of ~ controller.esp_boot.part_of
+    user_interface.status_led.part_of ~ controller.status_led.part_of
+    expansion.power ~ power_bulk.power_3v3
+    expansion.gpio10.part_of ~ controller.exp_gpio10.part_of
+    expansion.gpio11.part_of ~ controller.exp_gpio11.part_of
+    expansion.gpio12.part_of ~ controller.exp_gpio12.part_of
+    expansion.gpio13.part_of ~ controller.exp_gpio13.part_of
+    expansion.gpio14.part_of ~ controller.exp_gpio14.part_of

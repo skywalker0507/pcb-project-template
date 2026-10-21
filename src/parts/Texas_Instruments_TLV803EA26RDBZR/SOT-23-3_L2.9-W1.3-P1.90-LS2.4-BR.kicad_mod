@@ -1,0 +1,143 @@
+(footprint "Texas_Instruments_TLV803EA26RDBZR:SOT-23-3_L2.9-W1.3-P1.90-LS2.4-BR"
+	(version 20241229)
+	(generator "faebryk_convert")
+	(generator_version "v5")
+	(layer "F.Cu")
+	(tedit "5DC5F6A4")
+	(uuid "be97bc59-1389-4252-bfd2-79fd45f772af")
+	(property "Reference" "REF**"
+		(at 0 -4.95)
+		(layer "F.SilkS")
+		(uuid "fef824df-5c7c-479c-b41d-f8501ddb0d47")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Value" "SOT-23-3_L2.9-W1.3-P1.90-LS2.4-BR"
+		(at 0 4.95)
+		(layer "F.Fab")
+		(uuid "bf3021a7-331a-4441-86a2-af796627bbc3")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(attr smd)
+	(fp_circle
+		(center 1.2 1.45)
+		(end 1.23 1.45)
+		(stroke
+			(width 0.06)
+			(type solid)
+		)
+		(layer "F.Fab")
+		(locked no)
+		(uuid "79ba1593-1201-43c2-b8d4-1b3c64913f04")
+	)
+	(fp_circle
+		(center 1.46 1.1)
+		(end 1.56 1.1)
+		(stroke
+			(width 0.2)
+			(type solid)
+		)
+		(layer "Cmts.User")
+		(locked no)
+		(uuid "d729bf39-d353-490a-b68c-bb56fd993508")
+	)
+	(fp_line
+		(start 0.73 -1.53)
+		(end -0.73 -1.53)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "4f6db8bc-8fd6-4499-b3c5-2cb0d04f869d")
+	)
+	(fp_line
+		(start -0.73 -1.53)
+		(end -0.73 -0.49)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "ce66794c-de1b-4a4a-b2d8-8ca5d3df034a")
+	)
+	(fp_line
+		(start 0.73 1.53)
+		(end -0.73 1.53)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "ffaaa90a-bc5c-44d8-bd07-f993e4334810")
+	)
+	(fp_line
+		(start -0.73 1.53)
+		(end -0.73 0.49)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "30ee99fa-486b-481c-80c2-f89fc250a427")
+	)
+	(fp_line
+		(start 0.73 -0.46)
+		(end 0.73 0.46)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "869cb074-9cb2-4ebd-852f-0ce8e3731ab0")
+	)
+	(pad "1" smd rect
+		(at 1 0.95 0)
+		(size 1 0.65)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "61db447e-ff7e-4a60-a6ff-c932f7178789")
+	)
+	(pad "2" smd rect
+		(at 1 -0.95 0)
+		(size 1 0.65)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "6b0cd38c-327e-44c4-90f0-8afc5eb27fd0")
+	)
+	(pad "3" smd rect
+		(at -1 0 0)
+		(size 1 0.65)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "a0aac0d0-fa88-456b-81e8-00160f6425ec")
+	)
+	(model "${KIPRJMOD}/../../../build/cache/parts/easyeda/C2869926/SOT-23-3P_L2.9-W1.3-H1.0-LS2.4-P0.95.step"
+		(offset
+			(xyz 0 0 -0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 180)
+		)
+	)
+	(embedded_fonts no)
+)

@@ -13,6 +13,8 @@ import re
 import subprocess
 import sys
 
+from pcb_policy import configured_board
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_KICAD_CLI = Path(r"C:\Program Files\KiCad\10.0\bin\kicad-cli.exe")
@@ -269,18 +271,18 @@ def main() -> int:
     parser.add_argument(
         "--board",
         type=Path,
-        default=ROOT / "elec/layout/default/default.kicad_pcb",
+        default=configured_board(ROOT),
     )
     parser.add_argument("--kicad-cli", type=Path, default=DEFAULT_KICAD_CLI)
     parser.add_argument(
         "--drc-report",
         type=Path,
-        default=ROOT / "build/reports/final-kicad-cli-drc.rpt",
+        default=ROOT / "build/07-release/evidence/manual/drc/kicad-cli-drc.rpt",
     )
     parser.add_argument(
         "--audit-json",
         type=Path,
-        default=ROOT / "build/reports/final-routing-audit.json",
+        default=ROOT / "build/07-release/evidence/manual/final-routing-audit.json",
     )
     parser.add_argument("--require-in1-ground", action="store_true")
     parser.add_argument(
@@ -375,9 +377,15 @@ def main() -> int:
     missing_required_zones: list[dict[str, str]] = []
     if args.baseline.is_file():
         baseline = json.loads(args.baseline.read_text(encoding="utf-8"))
-        unexpected_violations, missing_baseline_violations = baseline_differences(
+        reviewed_board = baseline.get("reviewed_board_sha256")
+        if reviewed_board is not None and reviewed_board != audit["board_sha256"]:
+            unexpected_violations.append(
+                "baseline|reviewed board SHA does not match the audited board"
+            )
+        baseline_unexpected, missing_baseline_violations = baseline_differences(
             report, categories, baseline,
         )
+        unexpected_violations.extend(baseline_unexpected)
         actual_zones = {
             (item["layer"], item["net"])
             for item in audit["zones"]

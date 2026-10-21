@@ -1,0 +1,67 @@
+{
+  "schema": 1,
+  "root": "build",
+  "shared": "00-shared",
+  "stages": {
+    "requirements": "01-requirements",
+    "parts": "02-parts",
+    "electrical": "03-electrical",
+    "electrical_freeze": "04-electrical-freeze",
+    "physical": "05-placement",
+    "routing": "06-routing",
+    "release": "07-release",
+    "prototype": "08-prototype"
+  },
+  "lanes": {
+    "tmp": "tmp",
+    "evidence": "evidence",
+    "release": "release"
+  },
+  "context_budget": {
+    "max_tool_stdout_chars": 6000,
+    "max_context_slice_bytes": 6000,
+    "max_stage_handoff_bytes": 12000,
+    "max_open_items": 8,
+    "never_read_suffixes": [".kicad_pcb", ".kicad_sch", ".dsn", ".ses"],
+    "large_text_delegation_threshold_bytes": 16384,
+    "max_delegated_output_tokens": 800,
+    "max_delegated_output_chars": 3200
+  },
+  "retention": {
+    "keep_successful_evidence_runs_per_stage": 5,
+    "keep_failed_evidence_runs_per_stage": 3,
+    "keep_stale_in_progress_runs_per_stage": 1,
+    "stale_in_progress_max_age_hours": 24,
+    "tmp_max_age_hours": 24,
+    "release_is_immutable": true,
+    "archive_instead_of_delete": true,
+    "auto_checkpoint_prune_after_stage_publish": true
+  },
+  "legacy": {
+    "archive_root": "build/00-legacy",
+    "compress": true,
+    "release_guard": "manufacturing/releases/rev-a-v346-release/manifest.json",
+    "whole_directories": [
+      "build/generated",
+      "build/candidates",
+      "build/logs",
+      "build/builds",
+      "build/renders",
+      "build/konnect"
+    ],
+    "whole_files": [
+      "build/manifest.json",
+      "build/design-policy-dfm.json",
+      "build/design-policy-kicad-rules.json",
+      "build/design-policy-krt.json",
+      "build/design-policy-resolved.json",
+      "build/toolchain-resolved.json"
+    ],
+    "partial_directories": [
+      "build/reports",
+      "build/reviews",
+      "build/delegated"
+    ],
+    "preserve": []
+  }
+}

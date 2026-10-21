@@ -1,0 +1,41 @@
+{
+  "schema": 2,
+  "kind": "manufacturing_quote_observation",
+  "source": {
+    "provider": "jlc_open_platform_or_live_order_page",
+    "channel": "manual_until_official_api_access_is_approved",
+    "quote_id": null
+  },
+  "observed_at": "YYYY-MM-DDTHH:MM:SS+08:00",
+  "expires_at": null,
+  "currency": "CNY",
+  "quantity": 5,
+  "total": 0,
+  "breakdown_scope": "complete",
+  "work_packet_content_sha256": "COPY_FROM_DFM_WORK_PACKET",
+  "artifacts": {
+    "board": {"sha256": "COPY_FROM_DFM_WORK_PACKET"},
+    "gerber_zip": {"sha256": "COPY_FROM_DFM_WORK_PACKET"},
+    "bom": {"sha256": "COPY_FROM_DFM_WORK_PACKET"},
+    "cpl": {"sha256": "COPY_FROM_DFM_WORK_PACKET"}
+  },
+  "order_parameters": {
+    "surface_finish": "COPY_FROM_DFM_WORK_PACKET",
+    "solder_mask_color": "COPY_FROM_DFM_WORK_PACKET",
+    "assembly_service": "COPY_FROM_DFM_WORK_PACKET",
+    "required_dfm_modules": ["pcb", "smt"]
+  },
+  "approval": {
+    "status": "pending",
+    "reviewer": null,
+    "reason": "Review every fee line and the complete order configuration before accepting."
+  },
+  "line_items": [
+    {
+      "label": "copy the vendor fee label exactly",
+      "category": "surcharge",
+      "selection": "copy the selected option value",
+      "amount": 0
+    }
+  ]
+}

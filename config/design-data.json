@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "revision": "Rev A.1",
+  "authority": "Hardware and firmware interface contract for esp32-s3-remote-flashing-probe Rev A.1.",
+  "controller": {
+    "ref": "U1",
+    "mpn": "ESP32-S3-WROOM-1-N16R8",
+    "reserved": ["GPIO3", "GPIO35", "GPIO36", "GPIO37", "GPIO45", "GPIO46"],
+    "assignments": {
+      "GPIO19": "USB_DM",
+      "GPIO20": "USB_DP",
+      "GPIO4": "NRST_ASSERT",
+      "GPIO7": "BOOT0_ASSERT",
+      "GPIO8": "VTREF_ADC",
+      "GPIO9": "TARGET_ENABLE_REQUEST",
+      "GPIO15": "PROBE_UART_TX",
+      "GPIO16": "PROBE_UART_RX",
+      "GPIO17": "SWDIO",
+      "GPIO18": "SWCLK",
+      "GPIO21": "STATUS_LED",
+      "GPIO10": "EXP_GPIO10",
+      "GPIO11": "EXP_GPIO11",
+      "GPIO12": "EXP_GPIO12",
+      "GPIO13": "EXP_GPIO13",
+      "GPIO14": "EXP_GPIO14"
+    }
+  },
+  "target_signal_mapping": {
+    "TMUX1574": {
+      "S1A": "GPIO17/SWDIO", "S1B": "GND", "S1D": "SWDIO",
+      "S2A": "GPIO18/SWCLK", "S2B": "GND", "S2D": "SWCLK",
+      "S3A": "GPIO15/PROBE_UART_TX", "S3B": "GND", "S3D": "TARGET_RX",
+      "S4A": "GPIO16/PROBE_UART_RX", "S4B": "GND", "S4D": "TARGET_TX"
+    },
+    "direct_controls": {"GPIO4": "NRST via open-drain Q1", "GPIO7": "BOOT0 sourced only from VTREF via Q2/Q3"}
+  },
+  "connectors": {
+    "J2": {"mpn": "TC2050-IDC-NL", "format": "Tag-Connect 10-pin Plug-of-Nails", "pins": {"1": "VTREF", "2": "SWDIO", "3": "GND", "4": "SWCLK", "5": "GND", "6": "TARGET_TX", "7": "BOOT0", "8": "TARGET_RX", "9": "NRST", "10": "GND"}},
+    "J3": {"mpn": "B8B-XH-A (LF)(SN)", "format": "keyed JST-XH 2.5 mm vertical 1x8", "pins": {"1": "GND", "2": "VTREF", "3": "SWDIO", "4": "SWCLK", "5": "NRST", "6": "BOOT0", "7": "TARGET_TX", "8": "TARGET_RX"}},
+    "J4": {"format": "TSW-107-07-L-S", "pins": {"1": "3V3", "2": "GND", "3": "GPIO10", "4": "GPIO11", "5": "GPIO12", "6": "GPIO13", "7": "GPIO14"}}
+  }
+}

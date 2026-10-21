@@ -1,16 +1,23 @@
 {
   "schema": 2,
   "mode": "latest",
-  "atopile": {
-    "package": "atopile"
-  },
-  "houtini_lm": {
-    "repository": "https://github.com/skywalker0507/houtini-lm.git",
-    "ref": "pcb-ai-adapter"
+  "electrical_backends": {
+    "atopile": {
+      "package": "atopile",
+      "runtime": "wsl",
+      "status": "primary"
+    },
+    "tscircuit": {
+      "package": "tscircuit",
+      "runtime": "bun",
+      "lockfile": "tscircuit/bun.lock",
+      "kicad_converter": "circuit-json-to-kicad",
+      "status": "experimental_optional"
+    }
   },
   "kicad_routing_tools": {
     "repository": "https://github.com/skywalker0507/KiCadRoutingTools.git",
-    "ref": "codex/repository-support",
+    "ref": "codex/upstream-main-ai-migration",
     "native_release": "latest"
   },
   "konnect": {
@@ -21,6 +28,12 @@
   "kicad": {
     "major": 10,
     "cli": "C:/Program Files/KiCad/10.0/bin/kicad-cli.exe"
+  },
+  "gerber_parser": {
+    "package": "gerbonara",
+    "version": "1.6.3",
+    "python": "py -3.14",
+    "requirements": "requirements-pcb-tools.txt"
   },
   "freerouting": {
     "latest_release_api": "https://api.github.com/repos/freerouting/freerouting/releases/latest",

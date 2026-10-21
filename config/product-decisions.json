@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "project": "esp32-s3-remote-flashing-probe",
+  "revision": "Rev A.1",
+  "status": "confirmed",
+  "confirmed_at": "2026-08-08",
+  "decisions": {
+    "initial_target_family": "STM32",
+    "future_target_expansion": true,
+    "operating_mode": "Wi-Fi-connected standalone remote programmer; no PC is required during target programming.",
+    "target_power": "The probe must never power the target; the target is self-powered.",
+    "target_connectors": ["J2", "J3"],
+    "board_outline_revision": "Rev A.1 uses a visually and geometrically reviewed 44 mm × 70 mm rectangular four-layer outline with no mounting holes or enclosure constraint. The ESP32-S3 antenna section protrudes beyond the top short edge; USB-C occupies the left portion of the bottom short edge with its documented PCB-edge datum aligned to the outline.",
+    "usb_power_policy": "USB-default-power design with no PD or Type-C current-advertisement detection; worst-case 5 V input current must not exceed 500 mA.",
+    "operating_ambient": "-20 °C through +60 °C.",
+    "target_interface_performance": "Target cables up to 300 mm, SWD up to 4 MHz, and UART up to 3 Mbit/s.",
+    "expansion_policy": "J4 is a trusted internal development header, is not hot-pluggable, and may draw at most 25 mA from probe 3V3.",
+    "manufacturing": "JLCPCB four-layer PCB with SMT assembly; initial prototype quantity 5-10 boards.",
+    "retained_features": ["J4 expansion header", "LED1 power LED", "LED2 status LED", "SW1 reset button", "SW2 boot/provision button"],
+    "firmware_validation": "The user has validated SWD programming with an ATK-DNESP32S3M; firmware implementation is out of PCB scope."
+  },
+  "invariants": [
+    "VTREF is target-provided only and must not be tied to probe 3V3 or USB_5V.",
+    "J2 and J3 are alternative interfaces and only one target may be attached at a time.",
+    "The established J2/J3 signal contract carries STM32 SWD, NRST, BOOT0, and UART signals."
+  ]
+}

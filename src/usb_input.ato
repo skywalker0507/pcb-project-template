@@ -1,0 +1,103 @@
+"""Reviewed Rev A.1 USB-C sink, ESD and protected VBUS slice."""
+
+import ElectricPower
+import Net
+import has_designator
+import has_net_name
+
+from "parts/Global_Connector_Technology_USB4105_GF_A/Global_Connector_Technology_USB4105_GF_A.ato" import Global_Connector_Technology_USB4105_GF_A_package
+from "parts/STMicroelectronics_USBLC6_2P6/STMicroelectronics_USBLC6_2P6.ato" import STMicroelectronics_USBLC6_2P6_package
+from "parts/Littelfuse_1206L075_16WR/Littelfuse_1206L075_16WR.ato" import Littelfuse_1206L075_16WR_package
+from "parts/Littelfuse_SMBJ5_0A/Littelfuse_SMBJ5_0A.ato" import Littelfuse_SMBJ5_0A_package
+from "parts/UNI_ROYAL_0402WGF5101TCE/UNI_ROYAL_0402WGF5101TCE.ato" import UNI_ROYAL_0402WGF5101TCE_package
+from "parts/UNI_ROYAL_0402WGF220JTCE/UNI_ROYAL_0402WGF220JTCE.ato" import UNI_ROYAL_0402WGF220JTCE_package
+from "parts/UNI_ROYAL_0402WGF0000TCE/UNI_ROYAL_0402WGF0000TCE.ato" import UNI_ROYAL_0402WGF0000TCE_package
+
+module UsbInputProtection:
+    protected_power = new ElectricPower
+    assert protected_power.voltage within 4.75V to 5.25V
+
+    raw_vbus = new Net
+    usb_dp_raw = new Net
+    usb_dm_raw = new Net
+    usb_dp_esd = new Net
+    usb_dm_esd = new Net
+    usb_dp = new Net
+    usb_dm = new Net
+    usb_cc1 = new Net
+    usb_cc2 = new Net
+    usb_shield = new Net
+
+    trait protected_power.hv has_net_name<name="USB_5V">
+    trait protected_power.lv has_net_name<name="GND">
+    trait raw_vbus.part_of has_net_name<name="USB_VBUS_RAW">
+    trait usb_dp_raw.part_of has_net_name<name="USB_DP_RAW">
+    trait usb_dm_raw.part_of has_net_name<name="USB_DM_RAW">
+    trait usb_dp_esd.part_of has_net_name<name="USB_DP_ESD">
+    trait usb_dm_esd.part_of has_net_name<name="USB_DM_ESD">
+    trait usb_dp.part_of has_net_name<name="USB_DP">
+    trait usb_dm.part_of has_net_name<name="USB_DM">
+    trait usb_cc1.part_of has_net_name<name="USB_CC1">
+    trait usb_cc2.part_of has_net_name<name="USB_CC2">
+    trait usb_shield.part_of has_net_name<name="USB_SHIELD">
+
+    j1 = new Global_Connector_Technology_USB4105_GF_A_package
+    u2 = new STMicroelectronics_USBLC6_2P6_package
+    f1 = new Littelfuse_1206L075_16WR_package
+    d1 = new Littelfuse_SMBJ5_0A_package
+    r2 = new UNI_ROYAL_0402WGF5101TCE_package
+    r3 = new UNI_ROYAL_0402WGF5101TCE_package
+    r4 = new UNI_ROYAL_0402WGF220JTCE_package
+    r5 = new UNI_ROYAL_0402WGF220JTCE_package
+    r6 = new UNI_ROYAL_0402WGF0000TCE_package
+
+    trait j1 has_designator<designator="J1">
+    trait u2 has_designator<designator="U2">
+    trait f1 has_designator<designator="F1">
+    trait d1 has_designator<designator="D1">
+    trait r2 has_designator<designator="R2">
+    trait r3 has_designator<designator="R3">
+    trait r4 has_designator<designator="R4">
+    trait r5 has_designator<designator="R5">
+    trait r6 has_designator<designator="R6">
+
+    # USB-C device/sink: independent Rd on each CC pin.
+    j1.CC1 ~ usb_cc1.part_of
+    usb_cc1.part_of ~ r2.1
+    r2.2 ~ protected_power.lv
+    j1.CC2 ~ usb_cc2.part_of
+    usb_cc2.part_of ~ r3.1
+    r3.2 ~ protected_power.lv
+    j1.GND ~ protected_power.lv
+    j1.EH ~ usb_shield.part_of
+    usb_shield.part_of ~ r6.1
+    r6.2 ~ protected_power.lv
+
+    # Connector-side VBUS powers the ESD rail before the resettable fuse.
+    j1.VBUS ~ raw_vbus.part_of
+    raw_vbus.part_of ~ u2.VBUS
+    raw_vbus.part_of ~ f1.1
+    f1.2 ~ protected_power.hv
+    u2.GND ~ protected_power.lv
+
+    # SMBJ5.0A physical pin 1 is cathode; pin 2 is anode.
+    d1.1 ~ protected_power.hv
+    d1.2 ~ protected_power.lv
+
+    # USBLC6 verified flow-through map: channel 1 is pins 6 -> 1 and
+    # channel 2 is pins 4 -> 3.  The two matched protection channels are
+    # electrically interchangeable; assign D+ to channel 1 and D- to channel
+    # 2 so the protected pair can turn toward U1 without a crossover.
+    j1.DP1 ~ j1.DP2
+    j1.DP1 ~ usb_dp_raw.part_of
+    usb_dp_raw.part_of ~ u2.I_O1_CONNECTOR
+    u2.I_O1_PROTECTED ~ usb_dp_esd.part_of
+    usb_dp_esd.part_of ~ r4.1
+    r4.2 ~ usb_dp.part_of
+
+    j1.DN1 ~ j1.DN2
+    j1.DN1 ~ usb_dm_raw.part_of
+    usb_dm_raw.part_of ~ u2.I_O2_CONNECTOR
+    u2.I_O2_PROTECTED ~ usb_dm_esd.part_of
+    usb_dm_esd.part_of ~ r5.1
+    r5.2 ~ usb_dm.part_of

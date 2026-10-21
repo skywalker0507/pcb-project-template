@@ -1,0 +1,19 @@
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component Samsung_Electro_Mechanics_CL31A226KAHNNNE_package:
+    """22uF (226) ±10% 25V"""
+
+    # This trait marks this file as auto-generated
+    # If you want to manually change it, remove the trait
+    trait is_auto_generated<system="ato_part", source="easyeda:C12891", date="2026-08-11T07:25:08.102626+00:00", checksum="c0cf0fd9879c27aa434703ab857f2ed6cdc9dcd6278df425921a2f67a24fa6dd">
+
+    trait is_atomic_part<manufacturer="Samsung Electro-Mechanics", partnumber="CL31A226KAHNNNE", footprint="C1206.kicad_mod", symbol="CL31A226KAHNNNE.kicad_sym", model="C1206_L3.2-W1.6-H1.3.step">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C12891", manufacturer="Samsung Electro-Mechanics", partno="CL31A226KAHNNNE">
+    trait has_designator_prefix<prefix="C">
+
+    # pins
+    pin 1
+    pin 2

@@ -1,0 +1,20 @@
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component onsemi_2N7002LT1G_package:
+    """2N7002LT1G"""
+
+    # This trait marks this file as auto-generated
+    # If you want to manually change it, remove the trait
+    trait is_auto_generated<system="ato_part", source="easyeda:C16338", date="2026-08-11T06:26:42.433701+00:00", checksum="d8d4d99959fb57e64e6c94df5d70df524255d74a1c3544c729eb3aeb3cab0236">
+
+    trait is_atomic_part<manufacturer="onsemi", partnumber="2N7002LT1G", footprint="SOT-23_L2.9-W1.3-P1.90-LS2.4-BR.kicad_mod", symbol="2N7002LT1G.kicad_sym">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C16338", manufacturer="onsemi", partno="2N7002LT1G">
+    trait has_designator_prefix<prefix="Q">
+
+    # pins
+    signal D ~ pin 3
+    signal G ~ pin 1
+    signal S ~ pin 2

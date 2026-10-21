@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "status": "electrical_review",
+  "revision": "Rev A.1",
+  "buck": {
+    "ref": "U3",
+    "mpn": "AP63203WU-7",
+    "converter_rating_a": 2.0,
+    "maximum_load_current_a": 0.525,
+    "inductor_current_margin": 1.35,
+    "source": "https://www.diodes.com/datasheet/download/AP63200-AP63201-AP63203-AP63205.pdf",
+    "evidence": "The Rev A.1 system budget reserves 0.5 A at 3V3 for the ESP32-S3 module and 0.025 A for J4 and remaining low-power loads. The AP63203 application information requires the selected inductor DC current rating to be at least 35% higher than the actual maximum load current."
+  },
+  "buck_input_loop_physical_review": {
+    "board_sha256": "B58299A9C09D1B0C49E54AE62FB5181EA8D15CFB97AC4A17187FCE9CC1D386A6",
+    "disposition": "accept_for_rev_a_prototype_without_footprint_move",
+    "c4_vin_to_nearest_u3_vin_pad_mm": 1.846,
+    "c4_gnd_to_nearest_ground_via_mm": 1.0,
+    "u3_gnd_to_nearest_ground_via_mm": 1.059,
+    "ground_via_separation_mm": 6.61,
+    "reference_plane_depth_mm": 0.2064,
+    "rationale": "Both input-loop legs were reviewed. The local plane-entry stubs are short and In1 is close, but the two ground vias are not a compact shared return. Moving C4 now would collide with or disturb the validated U3/L1 cluster and require broader rerouting. Validate startup, ripple and load transient on the first prototype.",
+    "template_rule": "Evaluate both capacitor terminals and the complete high-di/dt return topology; a short VIN leg alone cannot pass a switch-mode input-loop review."
+  },
+  "inductor": {
+    "ref": "L1",
+    "mpn": "XGL4030-472MEC",
+    "inductance_uh": 4.7,
+    "isat_20_percent_drop_a": 3.2,
+    "irms_40c_rise_a": 6.6,
+    "source": "https://www.coilcraft.com/getmedia/032d9c73-4222-482f-b6bc-7808590e27c9/xgl4030.pdf",
+    "footprint": "Inductor_SMD:L_Coilcraft_XxL4030",
+    "assembly_listing": "JLCPCB C7159276"
+  },
+  "bulk_mlcc": {
+    "refs": ["C2", "C4", "C6", "C7"],
+    "mpn": "CL31A226KAHNNNE",
+    "nominal_capacitance_uf": 22.0,
+    "rated_voltage_v": 25.0,
+    "package": "1206",
+    "source": "https://product.samsungsem.com/mlcc/CL31A226KAHNNN.do",
+    "typical_dc_bias_change_percent": {"3.3_v": -20.52, "5.0_v": -37.96},
+    "evidence_limit": "Manufacturer curves are typical design-reference data, not guaranteed production minima."
+  },
+  "limitations": [
+    "The 4.7 uH selection intentionally exceeds the AP63203 3.3 V typical-application value of 3.9 uH; validate transient response and startup on the prototype.",
+    "Prototype validation must cover buck startup and load transients because the MLCC DC-bias curves are typical rather than guaranteed minima.",
+    "Worst-case USB 5 V input current including conversion loss and startup must remain at or below 0.5 A.",
+    "This is an electrical selection check, not a thermal release approval.",
+    "Validate the assembled converter temperature and selected JLCPCB assembly listing again immediately before manufacture."
+  ]
+}

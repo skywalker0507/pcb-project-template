@@ -1,0 +1,10 @@
+# Hard KRT rescue floors for the reviewed USB path.
+# These values are bound to config/jlcpcb-impedance-evidence.json and the
+# reviewed Default clearance/via policy. Supplying this file disables KRT's
+# automatic standard-to-advanced shrink ladder for this candidate path.
+track_width = 0.2
+clearance = 0.15
+via_diameter = 0.45
+via_drill = 0.2
+hole_to_hole = 0.25
+board_edge = 0.5

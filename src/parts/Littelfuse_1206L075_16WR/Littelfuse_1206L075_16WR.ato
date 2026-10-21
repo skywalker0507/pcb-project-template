@@ -1,0 +1,17 @@
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component Littelfuse_1206L075_16WR_package:
+    # This trait marks this file as auto-generated
+    # If you want to manually change it, remove the trait
+    trait is_auto_generated<system="ato_part", source="easyeda:C371166", date="2026-08-11T05:59:20.558361+00:00", checksum="40242a603e12ff249d8111970bc5d1621b803199efcc46d12d50e5fa52113466">
+
+    trait is_atomic_part<manufacturer="Littelfuse", partnumber="1206L075/16WR", footprint="F1206.kicad_mod", symbol="1206L075_16WR.kicad_sym">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C371166", manufacturer="Littelfuse", partno="1206L075/16WR">
+    trait has_designator_prefix<prefix="F">
+
+    # pins
+    pin 1
+    pin 2

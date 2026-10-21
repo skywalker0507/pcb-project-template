@@ -13,9 +13,19 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pcb_policy import relative_to
+from electrical_backend import read_config, selected_backend
+from physical_backend import read_config as read_physical_config, selected_backend as selected_physical_backend
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def portable_path(path: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(ROOT.resolve()).as_posix()
+    except ValueError:
+        return str(resolved)
 
 
 def tree_hash(paths: list[Path]) -> str:
@@ -25,7 +35,10 @@ def tree_hash(paths: list[Path]) -> str:
         if path.is_file():
             files.append(path)
         elif path.is_dir():
-            files.extend(item for item in path.rglob("*") if item.is_file())
+            files.extend(
+                item for item in path.rglob("*")
+                if item.is_file() and not {"node_modules", "dist", ".git"}.intersection(item.relative_to(ROOT).parts)
+            )
     for path in sorted(files):
         digest.update(path.relative_to(ROOT).as_posix().encode())
         digest.update(b"\0")
@@ -46,6 +59,35 @@ def git(*args: str) -> str:
         check=False,
     )
     return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def refresh_workset(expected_stage: str, expected_objective: str) -> dict[str, object]:
+    """Compile WORKSET from the just-written handoff and verify it is current."""
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/session_boot.py")],
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    target = ROOT / "build/WORKSET.json"
+    if result.returncode != 0 or not target.is_file():
+        raise SystemExit("Handoff was written but WORKSET refresh failed: " + result.stdout[-800:])
+    try:
+        value = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Refreshed WORKSET is invalid: {exc}") from exc
+    if value.get("stage") != expected_stage or value.get("objective") != expected_objective:
+        raise SystemExit("Refreshed WORKSET does not match the new handoff stage/objective")
+    return {
+        "path": portable_path(target),
+        "bytes": target.stat().st_size,
+        "stage": value.get("stage"),
+        "status": value.get("status"),
+    }
 
 
 def run_pipeline(config: Path) -> dict[str, object]:
@@ -99,6 +141,52 @@ def receipt_open_items(receipt: dict[str, object], limit: int) -> list[str]:
     return items[:limit] or ["Pipeline receipt has no actionable audit detail; inspect its failed-step log."]
 
 
+def completion_receipt_passes_stage(stage: str, receipt: dict[str, object]) -> bool:
+    if receipt.get("success") is not True:
+        return False
+    kind = receipt.get("kind")
+    allowed = {
+        "requirements": {"requirements_validation": "success", "part_provenance_validation": "success"},
+        "electrical": {"electrical_build": "success", "electrical_contract_validation": "contract_pass", "electrical_freeze": "freeze_pass"},
+        "physical": {"kicad_physical_candidate": "success", "physical_review": "review_pass"},
+        "routing": {"routing_candidate": "success"},
+        "release": {"release_snapshot": "release_pass"},
+    }.get(stage, {})
+    return isinstance(kind, str) and kind in allowed and receipt.get(allowed[kind]) is True
+
+
+def completion_receipt_kinds_required(stage: str) -> set[str]:
+    return {
+        "requirements": {"requirements_validation", "part_provenance_validation"},
+        "electrical": {"electrical_build", "electrical_contract_validation", "electrical_freeze"},
+        "physical": {"kicad_physical_candidate", "physical_review"},
+        "routing": {"routing_candidate"},
+        "release": {"release_snapshot"},
+    }.get(stage, set())
+
+
+def validate_routing_return(
+    previous_stage: str | None, next_stage: str, receipt_path: Path | None,
+) -> dict[str, str] | None:
+    if previous_stage != "routing" or next_stage != "physical":
+        return None
+    if receipt_path is None:
+        raise SystemExit("Returning from routing to physical requires --routing-escalation evidence")
+    resolved = receipt_path.resolve()
+    try:
+        receipt = json.loads(resolved.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Invalid routing escalation receipt: {receipt_path}: {exc}") from exc
+    if (
+        not isinstance(receipt, dict)
+        or receipt.get("kind") != "routing_escalation"
+        or receipt.get("placement_review_eligible") is not True
+        or receipt.get("placement_change_authorized") is not False
+    ):
+        raise SystemExit("Routing escalation does not establish placement-review eligibility")
+    return {"path": portable_path(resolved), "sha256": hashlib.sha256(resolved.read_bytes()).hexdigest().upper()}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--stage", required=True)
@@ -106,6 +194,17 @@ def main() -> int:
     parser.add_argument("--objective", required=True)
     parser.add_argument("--open-item", action="append", default=[])
     parser.add_argument("--next-action", action="append", default=[])
+    parser.add_argument("--required-input", action="append", default=[])
+    parser.add_argument("--blocking-condition")
+    parser.add_argument("--blocking-observations", type=int, default=0)
+    parser.add_argument("--safe-alternatives-exhausted", action="store_true")
+    parser.add_argument("--why-user-input-required")
+    parser.add_argument("--board", type=Path, help="Board represented by this handoff; defaults to the configured active board.")
+    parser.add_argument(
+        "--candidate-receipt", action="append", type=Path, default=[],
+        help="Audited isolated-candidate receipt(s) that must match --board.",
+    )
+    parser.add_argument("--routing-escalation", type=Path, help="Required only when returning from routing to physical placement review.")
     parser.add_argument(
         "--config",
         type=Path,
@@ -113,22 +212,51 @@ def main() -> int:
     )
     parser.add_argument("--skip-pipeline", action="store_true")
     parser.add_argument(
+        "--completion-receipt", action="append", type=Path, default=[],
+        help="Passing deterministic receipt(s) used when a complete handoff does not run the PCB pipeline.",
+    )
+    parser.add_argument(
         "--from-pipeline-receipt", type=Path,
         help="Use an existing run_pcb_pipeline JSON receipt instead of rerunning the pipeline.",
     )
     args = parser.parse_args()
 
     config = json.loads(args.config.read_text(encoding="utf-8"))
+    backend_config = read_config()
+    backend_name, backend = selected_backend(backend_config)
+    physical_backend_name, _ = selected_physical_backend(read_physical_config())
     checklist_path = ROOT / config.get("stage_checklist", "config/stage-checklist.json")
     checklist = json.loads(checklist_path.read_text(encoding="utf-8"))
     stage_rules = checklist.get("stages", {}).get(args.stage)
     if not isinstance(stage_rules, dict):
         raise SystemExit(f"Unknown stage {args.stage!r}; use a key from {checklist_path}")
+    current_handoff_path = ROOT / config["handoff"]["output"]
+    previous_stage = None
+    if current_handoff_path.is_file():
+        try:
+            previous_stage = json.loads(current_handoff_path.read_text(encoding="utf-8")).get("stage")
+        except (OSError, json.JSONDecodeError):
+            previous_stage = None
+    routing_return = validate_routing_return(
+        str(previous_stage) if previous_stage is not None else None,
+        args.stage,
+        args.routing_escalation,
+    )
     stage_number = stage_rules.get("number")
     stage_label = f"{int(stage_number):02d}-{args.stage}" if isinstance(stage_number, int) else args.stage
     limit = int(config["handoff"].get("max_open_items", 8))
-    if len(args.open_item) > limit or len(args.next_action) > limit:
+    if len(args.open_item) > limit or len(args.next_action) > limit or len(args.required_input) > limit:
         raise SystemExit(f"Handoff lists are limited to {limit} items")
+    blocked_statuses = {"blocked", "blocked_external_dependency"}
+    if args.status in blocked_statuses:
+        if not args.blocking_condition or not args.why_user_input_required:
+            raise SystemExit("Blocked handoff requires --blocking-condition and --why-user-input-required")
+        if args.blocking_observations < 3:
+            raise SystemExit("Blocked handoff requires --blocking-observations of at least 3")
+        if not args.safe_alternatives_exhausted:
+            raise SystemExit("Blocked handoff requires --safe-alternatives-exhausted")
+    elif any((args.blocking_condition, args.blocking_observations, args.safe_alternatives_exhausted, args.why_user_input_required)):
+        raise SystemExit("Blocking evidence is only valid for a blocked handoff status")
 
     if args.from_pipeline_receipt:
         try:
@@ -137,7 +265,7 @@ def main() -> int:
             raise SystemExit(f"Invalid pipeline receipt: {args.from_pipeline_receipt}: {exc}") from exc
         if not isinstance(pipeline, dict):
             raise SystemExit("Pipeline receipt must contain a JSON object")
-        pipeline["receipt_source"] = str(args.from_pipeline_receipt.resolve())
+        pipeline["receipt_source"] = portable_path(args.from_pipeline_receipt)
         if pipeline.get("success") is not False:
             raise SystemExit("--from-pipeline-receipt requires a failed pipeline receipt")
         if not args.open_item:
@@ -146,7 +274,62 @@ def main() -> int:
             args.next_action = ["Resolve the recorded failure; do not rerun unrelated stages."]
     else:
         pipeline = None if args.skip_pipeline else run_pipeline(args.config)
-    board_path = ROOT / config["project"]["board"]
+    board_path = (args.board if args.board else ROOT / config["project"]["board"]).resolve()
+    if not board_path.is_file():
+        raise SystemExit(f"Handoff board not found: {board_path}")
+    board_sha256 = hashlib.sha256(board_path.read_bytes()).hexdigest().upper()
+    candidate_receipts = []
+    for receipt_path in args.candidate_receipt:
+        try:
+            receipt = json.loads(receipt_path.resolve().read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SystemExit(f"Invalid candidate receipt: {receipt_path}: {exc}") from exc
+        if receipt.get("kind") != "routing_candidate" or receipt.get("candidate_sha256") != board_sha256:
+            raise SystemExit("Candidate receipt does not match the handoff board")
+        candidate_receipts.append(portable_path(receipt_path))
+    complete_status = args.status in {"complete", "completed"}
+    if args.completion_receipt and not complete_status:
+        raise SystemExit("--completion-receipt is only valid for a complete handoff")
+    completion_receipts: list[dict[str, str]] = []
+    for receipt_path in args.completion_receipt:
+        resolved = receipt_path.resolve()
+        try:
+            completion = json.loads(resolved.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SystemExit(f"Invalid completion receipt: {receipt_path}: {exc}") from exc
+        if not isinstance(completion, dict) or not completion_receipt_passes_stage(args.stage, completion):
+            raise SystemExit(f"Completion receipt is not valid passing evidence for {args.stage}: {receipt_path}")
+        receipt_board_sha = completion.get(
+            "board_sha256",
+            completion.get(
+                "candidate_board_sha256",
+                completion.get("candidate_sha256", completion.get("frozen_board_sha256")),
+            ),
+        )
+        if receipt_board_sha is not None and receipt_board_sha != board_sha256:
+            raise SystemExit(f"Completion receipt does not match the handoff board: {receipt_path}")
+        completion_receipts.append({
+            "path": portable_path(resolved),
+            "sha256": hashlib.sha256(resolved.read_bytes()).hexdigest().upper(),
+            "kind": str(completion.get("kind", "deterministic_validation")),
+        })
+    required_completion_kinds = completion_receipt_kinds_required(args.stage)
+    recorded_completion_kinds = {item["kind"] for item in completion_receipts}
+    if complete_status and completion_receipts and not required_completion_kinds.issubset(recorded_completion_kinds):
+        missing = sorted(required_completion_kinds - recorded_completion_kinds)
+        raise SystemExit("Complete handoff is missing stage evidence receipt kinds: " + ", ".join(missing))
+    pipeline_completion = bool(
+        isinstance(pipeline, dict)
+        and pipeline.get("success") is True
+        and pipeline.get("board_sha256") == board_sha256
+        and (
+            args.stage in {"physical", "routing"}
+            or (args.stage == "release" and pipeline.get("release_pass") is True)
+        )
+    )
+    completion_verified = bool(complete_status and (pipeline_completion or completion_receipts))
+    if complete_status and not completion_verified:
+        raise SystemExit("A complete handoff requires a passing pipeline or --completion-receipt evidence")
     output = ROOT / config["handoff"]["output"]
     dirty_lines = git("status", "--short").splitlines()
     handoff = {
@@ -163,12 +346,25 @@ def main() -> int:
             "forbidden": stage_rules.get("forbidden", []),
         },
         "stage_files": stage_rules.get("files", []),
-        "source_sha256": tree_hash([ROOT / "ato.yaml", ROOT / "src"]),
-        "board_sha256": (
-            hashlib.sha256(board_path.read_bytes()).hexdigest().upper()
-            if board_path.is_file()
-            else None
+        "electrical_backend": backend_name,
+        "physical_backend": physical_backend_name,
+        "routing_engine": "kicad_routing_tools",
+        "validation_backends": list(
+            json.loads((ROOT / "config/backend-architecture.json").read_text(encoding="utf-8"))
+            .get("validation_backend", {}).get("required", [])
         ),
+        "manufacturing_backend": "jlcpcb",
+        "source_sha256": tree_hash([
+            ROOT / "config/electrical-backend.json",
+            ROOT / str(backend["source_root"]),
+        ]),
+        "board": portable_path(board_path),
+        "board_sha256": board_sha256,
+        "candidate_receipts": candidate_receipts,
+        "routing_return_escalation": routing_return,
+        "completion_verified": completion_verified,
+        "completion_basis": "pipeline" if pipeline_completion else "receipts" if completion_receipts else None,
+        "completion_receipts": completion_receipts,
         "git": {
             "commit": git("rev-parse", "HEAD"),
             "dirty": bool(dirty_lines),
@@ -177,6 +373,7 @@ def main() -> int:
         "pipeline": pipeline,
         "open_items": args.open_item,
         "next_actions": args.next_action,
+        "required_inputs": args.required_input,
         "read_first": [
             relative_to(ROOT, output),
         ],
@@ -185,6 +382,13 @@ def main() -> int:
             for path in config["handoff"].get("authoritative_docs", [])
         ],
     }
+    if args.status in blocked_statuses:
+        handoff["blocking_evidence"] = {
+            "condition": args.blocking_condition,
+            "observations": args.blocking_observations,
+            "safe_alternatives_exhausted": args.safe_alternatives_exhausted,
+            "why_user_input_required": args.why_user_input_required,
+        }
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
         json.dumps(handoff, ensure_ascii=False, indent=2) + "\n",
@@ -213,12 +417,13 @@ def main() -> int:
                 "## Next actions",
                 *([f"- {item}" for item in args.next_action] or ["- None"]),
                 "",
-                f"Machine-readable handoff: `{output}`",
+                f"Machine-readable handoff: `{portable_path(output)}`",
             ]
         )
         + "\n",
         encoding="utf-8",
     )
+    refreshed_workset = refresh_workset(args.stage, args.objective)
     print(
         json.dumps(
             {
@@ -226,6 +431,7 @@ def main() -> int:
                 "markdown": str(markdown.resolve()),
                 "bytes": output.stat().st_size,
                 "pipeline_success": pipeline.get("success") if pipeline else None,
+                "workset": refreshed_workset,
             },
             separators=(",", ":"),
         )

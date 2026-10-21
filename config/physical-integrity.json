@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "critical_footprints_from": "config/footprint-provenance.json",
+  "phases": {
+    "origin": {
+      "require_critical_footprint_equivalence": true,
+      "require_active_stack": false,
+      "require_closed_outline": false
+    },
+    "placement": {
+      "require_critical_footprint_equivalence": true,
+      "require_active_stack": true,
+      "require_closed_outline": true
+    },
+    "release": {
+      "require_critical_footprint_equivalence": true,
+      "require_active_stack": true,
+      "require_closed_outline": true
+    }
+  }
+}

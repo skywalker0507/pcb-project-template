@@ -1,0 +1,54 @@
+"""Exact J2 Tag-Connect and J3 JST-XH target connector pin contracts."""
+
+import Net
+import has_designator
+import has_net_name
+
+from "parts/TagConnect_TC2050_IDC_NL/TagConnect_TC2050_IDC_NL.ato" import TagConnect_TC2050_IDC_NL_package
+from "parts/JST_B8B_XH_A/JST_B8B_XH_A.ato" import JST_B8B_XH_A_package
+
+module TargetConnectors:
+    gnd = new Net
+    vtref = new Net
+    swdio = new Net
+    swclk = new Net
+    nrst = new Net
+    boot0 = new Net
+    target_tx = new Net
+    target_rx = new Net
+
+    trait gnd.part_of has_net_name<name="GND">
+    trait vtref.part_of has_net_name<name="VTREF">
+    trait swdio.part_of has_net_name<name="SWDIO">
+    trait swclk.part_of has_net_name<name="SWCLK">
+    trait nrst.part_of has_net_name<name="NRST">
+    trait boot0.part_of has_net_name<name="BOOT0">
+    trait target_tx.part_of has_net_name<name="TARGET_TX">
+    trait target_rx.part_of has_net_name<name="TARGET_RX">
+
+    j2 = new TagConnect_TC2050_IDC_NL_package
+    j3 = new JST_B8B_XH_A_package
+    trait j2 has_designator<designator="J2">
+    trait j3 has_designator<designator="J3">
+
+    # TC2050-IDC-NL exact 10-pin cable contract.
+    j2.1 ~ vtref.part_of
+    j2.2 ~ swdio.part_of
+    j2.3 ~ gnd.part_of
+    j2.4 ~ swclk.part_of
+    j2.5 ~ gnd.part_of
+    j2.6 ~ target_tx.part_of
+    j2.7 ~ boot0.part_of
+    j2.8 ~ target_rx.part_of
+    j2.9 ~ nrst.part_of
+    j2.10 ~ gnd.part_of
+
+    # JST B8B-XH-A exact 1x8 keyed connector contract.
+    j3.1 ~ gnd.part_of
+    j3.2 ~ vtref.part_of
+    j3.3 ~ swdio.part_of
+    j3.4 ~ swclk.part_of
+    j3.5 ~ nrst.part_of
+    j3.6 ~ boot0.part_of
+    j3.7 ~ target_tx.part_of
+    j3.8 ~ target_rx.part_of

@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "template_engine": {
+    "contract": "config/template-engine.json",
+    "project_independent_package": "template-engine",
+    "project_adapters": "scripts"
+  },
+  "electrical_backend": {
+    "config": "config/electrical-backend.json",
+    "authority": "reviewed_atopile_source"
+  },
+  "physical_backend": {
+    "config": "config/physical-backend.json",
+    "authority_after_freeze_only": true
+  },
+  "routing_engine": {
+    "active": "kicad_routing_tools",
+    "config": "config/kicad-routing-tools.json",
+    "secondary": [],
+    "experimental_optional": ["freerouting"],
+    "independent_of_gui_backend": true
+  },
+  "validation_backend": {
+    "required": ["kicad_cli"],
+    "optional": ["easyeda_pro_drc"],
+    "independent_validation_required": true,
+    "acceptance": "config/pcb-acceptance.json"
+  },
+  "manufacturing_backend": {
+    "active": "jlcpcb",
+    "config": "config/manufacturing-backend.json"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "priority": ["accuracy", "codex_token_efficiency", "latency"],
+  "stages": {
+    "requirements": [],
+    "electrical": ["atopile"],
+    "physical": ["krt", "konnect", "kicad_cli"],
+    "routing": ["krt", "konnect", "kicad_cli"],
+    "release": ["kicad_cli"]
+  },
+  "optional_tools": {
+    "freerouting": ["routing"],
+    "easyeda_pro_optional": ["physical", "routing", "release"],
+    "tscircuit_experimental": ["electrical"]
+  },
+  "krt": {
+    "role": "Isolated targeted routing candidates and pre-promotion critical route probes only; never modifies the active board.",
+    "max_identical_attempts": 2,
+    "max_topology_failures": 2,
+    "require_independent_drc": true
+  },
+  "freerouting": {
+    "role": "Explicit lab-only comparison router for non-critical leftovers; it is not installed, checked, or invoked by the production path.",
+    "max_profiles": 3,
+    "max_attempts_per_profile": 2,
+    "require_ignored_net_classes": true,
+    "require_independent_drc": true
+  },
+  "konnect": {
+    "role": "Primary live KiCad placement, bounded geometry queries, and a small number of explicit trace/via edits.",
+    "max_extra_toolsets": 1,
+    "allowed_toolsets": ["pcb_board", "pcb_components", "pcb_routing", "pcb_export", "verification"],
+    "forbidden_toolsets": ["sch_components", "sch_wiring", "sch_batch", "templates", "design_review", "manufacturing"],
+    "forbid_autoroute": true
+  }
+}

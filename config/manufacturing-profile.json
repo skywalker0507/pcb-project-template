@@ -1,10 +1,199 @@
 {
   "schema": 1,
-  "selected": false,
-  "manufacturer": null,
-  "source": null,
+  "selected": true,
+  "manufacturer": "JLCPCB",
+  "source": "https://tools.jlc.com/jlcTools/index.html#/impedanceCalculatenew",
+  "order_profile": {
+    "status": "reviewed",
+    "fabrication": {
+      "surface_finish": "ENIG",
+      "solder_mask_color": "black"
+    },
+    "assembly": {
+      "service": "smt",
+      "required_dfm_modules": ["pcb", "smt"]
+    },
+    "evidence": [
+      "The current KiCad physical authority and generated Gerber Job declare ENIG and black top/bottom solder mask.",
+      "config/requirements.json and config/product-decisions.json require JLCPCB SMT assembly for the first prototype.",
+      "https://jlcpcb.com/capabilities/pcb-capabilities/: fabrication capability depends on the selected solder-mask color and process."
+    ]
+  },
+  "routing_rules": {
+    "reviewed": true,
+    "source": "https://tools.jlc.com/jlcTools/index.html#/impedanceCalculatenew",
+    "values": {
+      "track_width": 0.2,
+      "clearance": 0.2,
+      "via_size": 0.45,
+      "via_drill": 0.2
+    },
+    "evidence": [
+      "https://jlcpcb.com/capabilities/Capabilities?type=1 lines 201-202: multilayer 1 oz minimum track/spacing 0.09/0.09 mm.",
+      "https://jlcpcb.com/capabilities/Capabilities?type=1 lines 217-218: SMD pad-to-pad minimum 0.15 mm; the reviewed 0.20 mm board default preserves margin for USB-C fine pitch.",
+      "config/jlcpcb-impedance-evidence.json: JLC04161H-3313A USB pair uses the manufacturer-calculated 0.290576 mm base width and 0.2032 mm gap over In1.Cu."
+    ]
+  },
+  "fine_pitch_exceptions": {
+    "usb_connector_fanout": {
+      "reviewed": true,
+      "nets": ["USB_DP_RAW", "USB_DM_RAW"],
+      "track_width": 0.2,
+      "clearance": 0.15,
+      "scope": "Connector-side J1-to-U2 nets only; never applies after U2.",
+      "evidence": "https://jlcpcb.com/capabilities/Capabilities?type=1 lines 217-218: SMD pad-to-pad minimum 0.15 mm."
+    }
+  },
+  "cost_review": {
+    "status": "reviewed",
+    "pricing_model": "live_quote_only",
+    "currency": "CNY",
+    "rule": "Never hard-code a vendor price. Every non-standard selected process needs evidence and a lower-cost alternative or an explicit required decision; every live quote line must map back to one reviewed driver.",
+    "drivers": [
+      {
+        "id": "minimum_0p20mm_drill",
+        "selection": "0.20 mm finished drill",
+        "selected": true,
+        "decision": "required",
+        "cost_risk": "surcharge_likely",
+        "reason": "The adopted board contains 0.20 mm vias; changing this order option without a board revision would violate the released drill data.",
+        "evidence": ["config/manufacturing-profile.json:routing_rules", "exact-board drill report"],
+        "lower_cost_alternative": "On the next board revision, trial 0.30 mm drills and larger via pads before routing congestion is accepted.",
+        "quote_aliases": ["最小孔径/外径", "最小孔径", "minimum hole size"]
+      },
+      {
+        "id": "controlled_impedance",
+        "selection": "90 ohm USB differential impedance control",
+        "selected": true,
+        "decision": "required",
+        "cost_risk": "surcharge_likely",
+        "reason": "The reviewed electrical requirement explicitly requires a 90-ohm USB differential design and the routed geometry is bound to the selected manufacturer stack.",
+        "evidence": ["config/requirements.json:controlled_impedance", "config/jlcpcb-impedance-evidence.json"],
+        "lower_cost_alternative": "A future cost-down review may waive paid impedance control only with a documented SI/risk decision; geometry and a continuous reference plane still remain mandatory.",
+        "quote_aliases": ["阻抗管控", "阻抗控制", "controlled impedance"]
+      },
+      {
+        "id": "surface_finish_enig",
+        "selection": "ENIG",
+        "selected": true,
+        "decision": "quality_preference",
+        "cost_risk": "surcharge_likely",
+        "reason": "ENIG provides a planar RoHS finish for the fine-pitch USB-C footprint and the castellated ESP32 module used on the first article.",
+        "evidence": ["https://jlcpcb.com/help/article/jlcpcb-surface-finish", "config/manufacturing-profile.json:order_profile"],
+        "lower_cost_alternative": "Evaluate lead-free HASL against the exact fine-pitch footprints and assembly process; do not silently substitute it at order time.",
+        "quote_aliases": ["喷镀费", "沉金费", "ENIG", "surface finish"]
+      },
+      {
+        "id": "black_solder_mask",
+        "selection": "black solder mask",
+        "selected": true,
+        "decision": "quality_preference",
+        "cost_risk": "surcharge_likely",
+        "reason": "Black solder mask is a reviewed product appearance choice, not an electrical requirement.",
+        "evidence": ["config/manufacturing-profile.json:order_profile"],
+        "lower_cost_alternative": "Use the vendor's standard green solder mask when prototype cost is more important than appearance, then rerun DFM with green-mask capabilities.",
+        "quote_aliases": ["黑色阻焊", "black solder mask"]
+      },
+      {
+        "id": "specified_impedance_laminate",
+        "selection": "JLC04161H-3313A stack material",
+        "selected": true,
+        "decision": "required",
+        "cost_risk": "surcharge_likely",
+        "reason": "The released USB geometry was calculated against this reviewed stack; choosing another material invalidates the impedance evidence.",
+        "evidence": ["config/jlcpcb-impedance-evidence.json"],
+        "lower_cost_alternative": "For the next revision, start with the calculator's lowest-cost standard stack before fixing trace geometry.",
+        "quote_aliases": ["指定板材费", "指定板材", "specified laminate"]
+      },
+      {
+        "id": "epoxy_filled_vias",
+        "selection": "epoxy-filled and capped vias where pad proximity requires it",
+        "selected": true,
+        "decision": "required",
+        "cost_risk": "quote_required",
+        "reason": "The adopted geometry contains vias in or within 0.35 mm of paste-bearing pads; ordinary ink plugging is not a reliable anti-wicking treatment.",
+        "evidence": ["https://jlcpcb.com/help/article/pcb-via-covering", "build/07-release/evidence/smt-hole-proximity-v2-20260825/report.json"],
+        "lower_cost_alternative": "Move ordinary return vias clear of pads and redesign the U1 thermal-via construction before the next routing freeze.",
+        "quote_aliases": ["阻焊覆盖费", "树脂塞孔", "过孔填孔", "epoxy-filled vias", "via covering"]
+      },
+      {
+        "id": "manufacturer_quality_fee",
+        "selection": "vendor quality service",
+        "selected": true,
+        "decision": "quality_preference",
+        "cost_risk": "standard",
+        "reason": "This is accepted only when it is an unavoidable vendor order line rather than an optional electrical test.",
+        "evidence": ["live vendor quote"],
+        "lower_cost_alternative": "None if the vendor confirms the line is mandatory; otherwise deselect it and regenerate the quote.",
+        "quote_aliases": ["品质付费", "quality fee"]
+      },
+      {
+        "id": "four_wire_low_resistance_test",
+        "selection": "four-wire low-resistance test",
+        "selected": false,
+        "decision": "not_required",
+        "cost_risk": "quote_required",
+        "reason": "This board has no reviewed milliohm or Kelvin-resistance acceptance requirement.",
+        "evidence": [],
+        "lower_cost_alternative": "Use normal continuity/e-test included with fabrication.",
+        "quote_aliases": ["四线低阻全测费", "四线低阻", "four-wire resistance test"]
+      },
+      {
+        "id": "nonstandard_via_copper_process",
+        "selection": "non-standard via copper deposition option",
+        "selected": false,
+        "decision": "not_required",
+        "cost_risk": "quote_required",
+        "reason": "No reviewed copper-thickness or special via-plating requirement exists beyond the standard four-layer fabrication capability.",
+        "evidence": [],
+        "lower_cost_alternative": "Use the standard via copper process unless current-capacity evidence explicitly requires otherwise.",
+        "quote_aliases": ["过孔沉铜方式", "special via copper plating"]
+      },
+      {
+        "id": "opaque_manual_surcharge",
+        "selection": "unexplained manual or special-price surcharge",
+        "selected": false,
+        "decision": "not_required",
+        "cost_risk": "quote_required",
+        "reason": "An opaque surcharge cannot be approved without the vendor identifying the triggering process and its design requirement.",
+        "evidence": [],
+        "lower_cost_alternative": "Ask the vendor to identify the source option, then map it to a reviewed driver or remove it.",
+        "quote_aliases": ["特价", "special price", "manual surcharge"]
+      }
+    ]
+  },
+  "special_processes": {
+    "open_0p20mm_vias_near_smt_pads": {
+      "status": "confirmation_required",
+      "component": "All open 0.20 mm drill vias, including the 18 unique vias whose drill area intersects an SMT paste-bearing pad",
+      "via_count": 172,
+      "reviewed_intersection_count": 18,
+      "drill_mm": 0.2,
+      "allowed_confirmed_outcomes": [
+        "all_0p20mm_open_vias_epoxy_filled_and_capped",
+        "all_intersecting_vias_moved_clear_and_reverified"
+      ],
+      "selected_outcome": null,
+      "evidence": "build/07-release/evidence/smt-hole-proximity-v2-20260825/report.json; https://jlcpcb.com/help/article/pcb-via-covering",
+      "reason": "The exact adopted board has 20 vendor-style PIN-to-hole intersections representing 18 unique same-net open vias. They are electrically safe but ordinary unfilled construction can wick solder; JLCPCB states that vias in pads or less than 0.35 mm from pads require epoxy or copper filling rather than ink plugging."
+    },
+    "u1_thermal_holes": {
+      "status": "confirmation_required",
+      "component": "U1 ESP32-S3-WROOM-1 exposed ground pad",
+      "hole_count": 12,
+      "drill_mm": 0.2,
+      "current_excellon_classification": "Plated PTH ComponentDrill",
+      "allowed_confirmed_outcomes": [
+        "epoxy_filled_and_capped",
+        "jlcpcb_assembly_engineer_approved_current_construction"
+      ],
+      "selected_outcome": null,
+      "evidence": null,
+      "reason": "Gerber and Excellon cannot prove that the 12 under-module holes receive the intended anti-wicking treatment. Confirm the order/CAM treatment before release."
+    }
+  },
   "notes": [
-    "Set selected=true only after choosing a manufacturer process and recording its authoritative source.",
-    "Do not add widths, clearances, impedance, or stackup values here without reviewed manufacturer evidence."
+    "Selection records provenance only. Run apply_reviewed_fab_values.py after independent review before real routing.",
+    "The listed 0.20 mm default is a manufacturability rule, not an approval for high-current power copper. Power-net geometry requires its own reviewed current-capacity evidence."
   ]
 }

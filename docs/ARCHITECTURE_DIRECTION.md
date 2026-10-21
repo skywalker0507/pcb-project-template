@@ -16,15 +16,26 @@ LLMs are narrow-interface operators, never design or release authorities.
 1. `requirements.json` is the product-intent authority: interfaces, rails,
    current, mechanics, constraints, explicit unknowns, and requested
    manufacturer.
-2. Reviewed atopile sources are the electrical-realization authority.
+2. Reviewed `.ato` sources are the production electrical-realization authority.
+   tscircuit is an optional experimental backend and cannot create a production
+   electrical freeze.
 3. A reviewed manufacturer capability source is the numeric fabrication
    authority. Models must never supply missing numeric values.
-4. KiCad is the physical-board authority, subject to SHA-bound audits and
-   reviews.
-5. A generated resolved policy is the executable contract consumed by routing,
+4. A passing immutable release-lane `ELECTRICAL_FREEZE` bundle is the one-way
+   boundary into physical work. Final electrical parity is measured only
+   against its frozen manifest.
+5. KiCad is the primary physical backend and native atopile physical
+   interchange. EasyEDA Pro is an optional compatibility, JLC DFM, and ordering
+   capability; it is not a second physical authority.
+6. KiCadRoutingTools is the sole production routing engine; FreeRouting is a lab-only comparison adapter.
+7. A generated resolved policy is the executable contract consumed by routing,
    DFM checks, handoffs, and release guards.
+8. The independently versioned `template-engine/` package owns reusable policy
+   and manufacturing logic. The project owns reviewed inputs and binds the
+   engine through a version/API/source-digest contract.
 
-No generated artifact supersedes its reviewed input. A changed input invalidates
+No generated artifact supersedes its reviewed input. EasyEDA, KiCad, KRT, and
+any lab router may not become electrical authorities. A changed input invalidates
 the resolved-policy receipt and all dependent evidence.
 
 ## Target pipeline
@@ -36,25 +47,30 @@ requirements + reviewed frozen modules + board stack + reviewed fab capability
                       compile_design_policy.py
                                   |
                                   v
-                  build/design-policy-resolved.json
+              design-policy-resolved.json + manufacturing-registry.json
                                   |
        +--------------------------+---------------------------+
        |                          |                           |
        v                          v                           v
-atopile contract checks   placement/critical-net checks  KRT/DFM/KiCad rules
+electrical-backend checks placement/critical-net checks  KRT/DFM/KiCad rules
        \                          |                           /
         \                         v                          /
          +---- SHA-bound DRC + physical review evidence -----+
                                   |
                                   v
-              release_pass AND review_pass -> manufacturing export
+ EasyEDA parity + EasyEDA DRC + KiCad validation + JLC DFM + release_pass
+                         AND review_pass -> manufacturing export
 ```
 
-Long text is a separate path: deterministic scripts retain logs on disk and
-may create a Houtini job only when the delegation policy permits it. The
-sidekick returns a bounded JSON draft; it has no authority over any gate.
-Normal sessions begin from `session_boot` and `stage_doctor`, not from a full
-board or long log.
+Deterministic scripts retain logs on disk and return compact receipts; the
+production template has no second-model log-delegation dependency. Normal
+sessions begin from the single `session_boot` receipt, not from
+`stage_doctor`, `CURRENT.json`, a full board, or a long log. Stage doctor and
+the detailed workflow documents are loaded only for diagnosis.
+
+Validation strength follows the existing numbered stage. Explore/develop/freeze/
+release are descriptive ideas only; they must not become a parallel mode state
+machine or another set of transition configuration.
 
 ## Decisions recorded
 
@@ -75,6 +91,9 @@ board or long log.
 - External KiCad or Konnect edits cannot be completely prevented. Their board
   SHA changes invalidate dependent receipts, so later guarded operations must
   rerun the required checks.
+- Gerber layer, package-file and geometry rules compile from project policy into
+  one registry. Manufacturer/process evidence stays project-owned; component
+  names and rule branches are forbidden in the engine implementation.
 
 ## Delivery order
 
@@ -86,8 +105,8 @@ board or long log.
    policy plus KRT, DFM, and KiCad-rule artifacts from requirements, board stack,
    and reviewed manufacturing values.
 3. Make KRT, DFM, handoff, and export reject stale or missing resolved policy.
-4. Evolve `stage_doctor` into a small command bus with explicit allowed
-   commands and evidence gaps per stage.
+4. Keep `pcbctl.py` a thin dispatcher over existing scripts; do not duplicate
+   stage, KRT, freeze, pipeline, or release logic in a second command bus.
 
 ### P1: accuracy checks that derive from intent
 
@@ -111,11 +130,14 @@ board or long log.
 
 - Stage checklists, stage guard coverage for candidate routing/export, compact
   session boot, bounded handoffs, SHA-bound DRC baseline and release audit.
-- Candidate-only KRT/FreeRouting paths and a compact candidate diff.
+- Candidate-only KRT routing and a compact candidate diff; FreeRouting remains an explicit lab comparison.
 - Reviewed fabrication-value recording via `apply_reviewed_fab_values.py`;
   unreviewed values cannot authorize real KRT routing.
-- Houtini large-text eligibility jobs: short receipts are not delegated; jobs
-  use Flash, disabled thinking, and bounded JSON output.
+- A pinned project-neutral template-engine package with thin project adapters.
+- A design-policy-derived manufacturing registry covering required copper
+  layers, outline/drill artifacts, geometric keepouts and special processes.
+- Reviewed manufacturing cost drivers plus a live-quote mapper that rejects
+  unrequested or opaque surcharge lines without hard-coding vendor prices.
 
 ## Explicit non-goals
 

@@ -12,6 +12,8 @@ import re
 import subprocess
 import sys
 
+from pcb_policy import configured_board
+
 
 ROOT = Path(__file__).resolve().parents[1]
 KICAD_PYTHON = Path(r"C:\Program Files\KiCad\10.0\bin\python.exe")
@@ -61,12 +63,12 @@ def main() -> int:
     parser.add_argument(
         "--board",
         type=Path,
-        default=ROOT / "elec/layout/default/default.kicad_pcb",
+        default=configured_board(ROOT),
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=ROOT / "build/delegated/pcb-context.json",
+        default=ROOT / "build/07-release/tmp/manual/context/pcb-context.json",
     )
     parser.add_argument(
         "--policy",
@@ -97,7 +99,9 @@ def main() -> int:
         }
         position = footprint.GetPosition()
         x, y = mm(position.x), mm(position.y)
-        address = fields.get("atopile_address", "")
+        # Keep old generated boards readable while presenting backend-neutral
+        # provenance to downstream AI/context tooling.
+        address = fields.get("design_source_address") or fields.get("atopile_address", "")
         group = address.split(".", 1)[0] if address else "mechanical_or_external"
         group_positions[group].append((x, y, footprint.GetReference()))
         fpid = footprint.GetFPID()
@@ -123,7 +127,7 @@ def main() -> int:
                 "y_mm": y,
                 "rotation_deg": round(footprint.GetOrientationDegrees(), 3),
                 "side": board.GetLayerName(footprint.GetLayer()),
-                "atopile_address": address,
+                "design_source_address": address,
                 "group": group,
                 "pads": pads,
             }

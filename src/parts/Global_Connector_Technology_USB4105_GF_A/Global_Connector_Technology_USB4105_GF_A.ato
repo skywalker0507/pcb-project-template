@@ -1,0 +1,29 @@
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component Global_Connector_Technology_USB4105_GF_A_package:
+    """Reviewed USB4105-GF-A pin map using the official KiCad/GCT land pattern."""
+
+    trait is_atomic_part<manufacturer="Global Connector Technology", partnumber="USB4105-GF-A", footprint="USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal.kicad_mod", symbol="USB4105-GF-A.kicad_sym">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C3020560", manufacturer="Global Connector Technology", partno="USB4105-GF-A">
+    trait has_designator_prefix<prefix="J">
+
+    # pins
+    signal CC1 ~ pin A5
+    signal CC2 ~ pin B5
+    signal DN1 ~ pin A7
+    signal DN2 ~ pin B7
+    signal DP1 ~ pin A6
+    signal DP2 ~ pin B6
+    signal EH ~ pin SH
+    signal GND ~ pin B1
+    GND ~ pin B12
+    GND ~ pin A1
+    GND ~ pin A12
+    signal SBU1 ~ pin A8
+    signal SBU2 ~ pin B8
+    signal VBUS ~ pin B4
+    VBUS ~ pin B9
+    VBUS ~ pin A4
+    VBUS ~ pin A9

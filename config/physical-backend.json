@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "active": "kicad",
+  "contract": {
+    "input_kind": "electrical_freeze",
+    "interchange_format": "kicad_pcb",
+    "import_parity_checker": "scripts/check_easyeda_import_parity.py",
+    "strict_parity": [
+      "component_references",
+      "footprints",
+      "pad_numbers",
+      "pad_instances_multiset",
+      "nets",
+      "pad_to_net_mapping",
+      "board_outline",
+      "drills_and_holes",
+      "side",
+      "rotation"
+    ],
+    "final_electrical_parity_checker": "scripts/check_final_electrical_parity.py",
+    "invariant": "Physical backends may place, route, and edit frozen physical data but may not become an electrical design authority. Connectivity changes return to atopile and a new electrical freeze."
+  },
+  "backends": {
+    "easyeda_pro": {
+      "role": "optional_compatibility",
+      "status": "available",
+      "integration": "scripts/easyeda_bridge_client.py",
+      "bridge_config": "config/easyeda-integration.json",
+      "capabilities": ["placement", "physical_editing", "routing_orchestration", "drc", "jlc_dfm"]
+    },
+    "kicad": {
+      "role": "primary",
+      "status": "available",
+      "integration": "scripts/prepare_kicad_physical_candidate.py",
+      "capabilities": ["placement", "physical_editing", "routing_orchestration", "independent_validation", "deterministic_manufacturing_export"]
+    }
+  }
+}
