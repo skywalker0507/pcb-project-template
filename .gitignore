@@ -27,3 +27,17 @@ __pycache__/
 *.kicad_pcb.lck
 *-backups/
 .history/
+
+# User credentials and editor artifacts (do not add to source control).
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.log
+.idea/
+.vscode/
+.DS_Store

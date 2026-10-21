@@ -4,6 +4,15 @@ A reproducible, audit-first PCB workflow for Codex. Reviewed atopile source is
 the electrical authority, KiCad is the physical authority and independent
 validator, and KiCadRoutingTools (KRT) creates isolated routing candidates.
 
+> **Personal open-source project.** This repository also contains an ESP32-S3
+> remote flashing probe design used during development, so it is not an empty
+> example board. The workflow is mainly developed for Windows/WSL, Python 3.14,
+> KiCad 10, and atopile. Please review and adapt design rules, parts and DRC
+> results before manufacturing your own board.
+>
+> Project-authored code: [MIT](LICENSE). Upstream tools, CAD symbols, footprints
+> and vendor models retain their own terms; see [third-party notes](docs/THIRD_PARTY.md).
+
 The only default production path is:
 
 ```text
