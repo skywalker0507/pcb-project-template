@@ -19,6 +19,8 @@ class OpenSourceReadyTests(unittest.TestCase):
             root = Path(directory)
             (root / "README.md").write_text("# Demo\n", encoding="utf-8")
             self.assertEqual(MODULE.scan_paths(root, ["README.md"]), [])
+            (root / ".env.example").write_text("API_URL=https://example.com\\n", encoding="utf-8")
+            self.assertEqual(MODULE.scan_paths(root, [".env.example"]), [])
 
     def test_secret_filenames_and_generated_state_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

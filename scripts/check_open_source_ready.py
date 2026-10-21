@@ -43,7 +43,7 @@ def scan_paths(root: Path, paths: list[str]) -> list[str]:
         if normalized in FORBIDDEN_PATHS or any(part in FORBIDDEN_DIRS for part in pieces):
             problems.append(f"{normalized}: generated/private path tracked")
             continue
-        if path.name in PRIVATE_NAMES or path.suffix.lower() in PRIVATE_SUFFIXES or path.name.startswith(".env."):
+        if path.name in PRIVATE_NAMES or path.suffix.lower() in PRIVATE_SUFFIXES or (path.name.startswith(".env.") and path.name != ".env.example"):
             problems.append(f"{normalized}: credential-like filename tracked")
             continue
         file = root / path
