@@ -23,6 +23,11 @@ jobs:
         run: python -m compileall -q scripts tests template-engine/src
       - name: Run existing template regression checks
         run: python scripts/run_template_checks.py
+      - name: Show test failures
+        if: failure()
+        run: |
+          echo "=== unit-tests.log (last 120 lines) ==="
+          tail -n 120 build/00-shared/template-checks/logs/unit-tests.log || true
       - name: Upload test details on failure
         if: failure()
         uses: actions/upload-artifact@v4
