@@ -9,6 +9,7 @@ export ATO_BINARY="${ATO_BINARY:-$(command -v ato)}"
 export ATOPILE_WORKSPACE="$root"
 export PYTHONUTF8=1
 export PYTHONIOENCODING=utf-8
+export ATO_MP_START_METHOD="${ATO_MP_START_METHOD:-spawn}"
 
 resolve_node() {
     if command -v node >/dev/null 2>&1; then

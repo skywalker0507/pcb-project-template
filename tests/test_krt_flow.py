@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import ntpath
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -26,7 +27,7 @@ audit = load("krt_candidate_audit", ROOT / "scripts/krt_candidate_audit.py")
 
 class KrtFlowTests(unittest.TestCase):
     def test_candidate_delta_has_a_default_kicad_cli(self):
-        self.assertEqual(ntpath.basename(str(audit.DEFAULT_KICAD_CLI)), "kicad-cli.exe")
+        self.assertEqual(ntpath.basename(str(audit.DEFAULT_KICAD_CLI)), "kicad-cli.exe" if os.name == "nt" else "kicad-cli")
 
     def test_bounded_preview_has_hard_limit(self):
         result = flow.bounded(list(range(20)), 3)

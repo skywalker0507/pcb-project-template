@@ -11,7 +11,10 @@ permissions:
 
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,6 +28,7 @@ jobs:
         run: python scripts/run_template_checks.py
       - name: Show test failures
         if: failure()
+        shell: bash
         run: |
           echo "=== unit-tests.log (last 120 lines) ==="
           tail -n 120 build/00-shared/template-checks/logs/unit-tests.log || true
@@ -32,6 +36,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: template-regression-logs
+          name: template-regression-logs-${{ matrix.os }}
           path: build/00-shared/template-checks/
           retention-days: 7

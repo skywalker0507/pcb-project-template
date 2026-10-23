@@ -12,6 +12,8 @@ authority/validator. KRT creates candidates; integrations are optional.
 Run `py -3.14 scripts/session_boot.py` once per session. Follow `next_command`,
 read only `read_now`, and open `read_if_needed` only after a related failure.
 
+Linux: `.venv-pcb/bin/python`; KiCad: `pcb_runtime`. Setup: `docs/LINUX.md`.
+
 Use only these default commands:
 
 `status / build / freeze / physical-start / place / route / verify / release`

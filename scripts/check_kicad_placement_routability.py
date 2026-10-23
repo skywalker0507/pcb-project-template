@@ -12,8 +12,10 @@ import subprocess
 import sys
 
 
+from pcb_runtime import kicad_python, ensure_kicad_python as ensure_host_kicad_python
+
 ROOT = Path(__file__).resolve().parents[1]
-KICAD_PYTHON = Path(r"C:\Program Files\KiCad\10.0\bin\python.exe")
+KICAD_PYTHON = kicad_python()
 
 
 def sha256(path: Path) -> str:
@@ -21,10 +23,7 @@ def sha256(path: Path) -> str:
 
 
 def ensure_kicad_python() -> None:
-    try:
-        import pcbnew  # noqa: F401
-    except ImportError:
-        raise SystemExit(subprocess.call([str(KICAD_PYTHON), str(Path(__file__).resolve()), *sys.argv[1:]]))
+    ensure_host_kicad_python()
 
 
 def mst(points: list[tuple[float, float]]) -> tuple[float, list[tuple[tuple[float, float], tuple[float, float]]]]:

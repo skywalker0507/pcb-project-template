@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import subprocess
 import shutil
+from pcb_runtime import atopile_command, atopile_environment, routing_python, konnect_binary
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,7 +18,7 @@ RECEIPT = ROOT / "build/00-shared/evidence/toolchain/toolchain-resolved.json"
 
 
 def output(command: list[str], cwd: Path = ROOT) -> str:
-    result = subprocess.run(command, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
+    result = subprocess.run(command, cwd=cwd, env=atopile_environment(), capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
     if result.returncode:
         raise SystemExit(f"Command failed: {command!r}\n{result.stdout[-1000:]}{result.stderr[-1000:]}")
     return result.stdout.strip()
@@ -92,7 +93,7 @@ def main() -> int:
 
     krt = ROOT / "tools/KiCadRoutingTools"
     jar = ROOT / "tools/freerouting/freerouting-latest.jar"
-    krt_python = ROOT / ".venv-routingtools/Scripts/python.exe"
+    krt_python = routing_python(ROOT)
     missing = [str(path) for path in (krt / ".git", krt_python) if not path.exists()]
     if missing and not args.electrical_only:
         raise SystemExit("Cannot record an incomplete local toolchain:\n" + "\n".join(missing))
@@ -120,14 +121,14 @@ def main() -> int:
             "lock_sha256": sha256(lock),
         }
     elif active_backend == "atopile":
-        update["atopile"] = {"version": output(["wsl.exe", "-d", args.distro, "--", "bash", "-lc", "export PATH=\"$HOME/.local/bin:$PATH\"; ato --version | tail -n 1"])}
+        update["atopile"] = {"version": output(atopile_command(["--version"], args.distro)).splitlines()[-1]}
     else:
         raise SystemExit(f"No receipt strategy is configured for electrical backend: {active_backend}")
     if not args.electrical_only:
         update["kicad_routing_tools"] = {"commit": output(["git", "-C", str(krt), "rev-parse", "HEAD"])}
         if jar.is_file():
             update["freerouting"] = {"sha256": sha256(jar), "scope": "optional_lab_only"}
-        konnect = ROOT / "tools/konnect/konnect.exe"
+        konnect = konnect_binary(ROOT)
         if args.without_konnect:
             update["konnect"] = {"disabled": True}
         else:

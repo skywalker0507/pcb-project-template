@@ -16,8 +16,10 @@ import time
 from typing import Any
 
 
+from pcb_runtime import kicad_cli
+
 DRC_CACHE_CONTRACT = "krt-candidate-audit-v1|json|severity-all"
-DEFAULT_KICAD_CLI = Path(r"C:\Program Files\KiCad\10.0\bin\kicad-cli.exe")
+DEFAULT_KICAD_CLI = kicad_cli()
 
 
 def compact(value: Any) -> str:

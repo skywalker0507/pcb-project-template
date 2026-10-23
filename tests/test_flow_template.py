@@ -632,8 +632,8 @@ class FlowTemplateTests(unittest.TestCase):
         with mock.patch.dict(
             os.environ,
             {"HTTP_PROXY": "http://proxy", "ALL_PROXY": "socks://proxy", "WSLENV": "HTTP_PROXY/u:KEEP/u"},
-            clear=False,
-        ):
+            clear=True,
+        ), mock.patch.object(atopile_build.os, "name", "nt"):
             env = atopile_build.wsl_process_environment("direct")
         self.assertNotIn("HTTP_PROXY", env)
         self.assertNotIn("ALL_PROXY", env)

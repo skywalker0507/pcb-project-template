@@ -19,10 +19,10 @@ from pcb_policy import configured_board, load_acceptance, require_no_prohibited_
 from design_policy import DEFAULT_OUTPUT as DEFAULT_POLICY, require_policy
 from stage_policy import require_operation
 from check_jlcpcb_release import package_report
+from pcb_runtime import kicad_cli, kicad_python
 
 
 ROOT = Path(__file__).resolve().parents[1]
-KICAD_BIN = Path(r"C:\Program Files\KiCad\10.0\bin")
 STACK_PATH = ROOT / "config/board-stack.json"
 MANUFACTURING_PROFILE_PATH = ROOT / "config/manufacturing-profile.json"
 ACCEPTANCE_PATH = ROOT / "config/pcb-acceptance.json"
@@ -282,8 +282,8 @@ def main() -> int:
     assembly.mkdir(parents=True)
     args.log.parent.mkdir(parents=True, exist_ok=True)
 
-    cli = KICAD_BIN / "kicad-cli.exe"
-    python = KICAD_BIN / "python.exe"
+    cli = kicad_cli()
+    python = kicad_python()
     try:
         with args.log.open("w", encoding="utf-8", newline="\n") as log:
             run(

@@ -17,6 +17,8 @@ from electrical_freeze_contract import DEFAULT_FREEZE_ROOT, load_release_freeze
 from physical_backend import read_config, selected_backend
 from stage_policy import current_stage
 
+from pcb_runtime import kicad_cli as resolve_kicad_cli, kicad_python
+
 
 ROOT = Path(__file__).resolve().parents[1]
 FLOW_PATH = ROOT / "config/pcb-flow.json"
@@ -127,7 +129,7 @@ def main() -> int:
     frozen_copy_sha = sha256(output)
     minimal_project(project)
     fp_table, fp_table_created = ensure_reviewed_fp_table(output.parent)
-    kicad_cli = Path(r"C:\Program Files\KiCad\10.0\bin\kicad-cli.exe")
+    kicad_cli = resolve_kicad_cli()
     subprocess.run([str(kicad_cli), "pcb", "upgrade", "--force", str(output)], cwd=ROOT, check=True)
     manifest = run.evidence / "kicad-physical-candidate-manifest.json"
     parity = run.evidence / "kicad-physical-candidate-parity.json"
@@ -143,7 +145,7 @@ def main() -> int:
     integrity = run.evidence / "kicad-physical-integrity.json"
     footprint_equivalence = run.evidence / "footprint-equivalence.json"
     integrity_result = subprocess.run([
-        str(kicad_cli.with_name("python.exe")), "scripts/check_kicad_physical_integrity.py",
+        str(kicad_python()), "scripts/check_kicad_physical_integrity.py",
         "--board", str(output), "--phase", "origin",
         "--output", str(integrity), "--footprint-output", str(footprint_equivalence),
     ], cwd=ROOT, check=False)
