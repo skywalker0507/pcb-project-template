@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import importlib.util
-import json
 import os
 from pathlib import Path
 import shutil
@@ -21,7 +19,7 @@ import install_linux_kicad as installer
 
 class HostRuntimeTests(unittest.TestCase):
     def test_linux_legacy_defaults_resolve_without_windows_or_wsl(self):
-        with mock.patch.object(runtime, "WINDOWS", False), mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(runtime.shutil, "which", return_value=None):
+        with mock.patch.object(runtime, "WINDOWS", False), mock.patch.dict(os.environ, {"ATO_BINARY": "/native/bin/ato"}, clear=True), mock.patch.object(runtime.shutil, "which", return_value=None):
             self.assertEqual(runtime.kicad_cli("C:/Program Files/KiCad/10.0/bin/kicad-cli.exe").name, "kicad-cli")
             self.assertEqual(runtime.routing_python(ROOT, ".venv-routingtools/Scripts/python.exe"), ROOT / ".venv-routingtools/bin/python")
             self.assertNotIn("wsl.exe", runtime.atopile_command(["--version"]))
