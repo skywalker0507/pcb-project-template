@@ -7,6 +7,8 @@ disk; stdout receives one compact JSON receipt suitable for an AI tool call.
 
 from __future__ import annotations
 
+from pcb_runtime import kicad_cli as resolve_kicad_cli, kicad_python as resolve_kicad_python, routing_python
+
 import argparse
 import copy
 import datetime as dt
@@ -62,7 +64,7 @@ def routing_task_advice(
         return None
     result = subprocess.run(
         [
-            str(Path(config["kicad_cli"]).with_name("python.exe")),
+            str(resolve_kicad_python()),
             str(root / "scripts/classify_routing_task.py"),
             "--board", str(board), "--nets", *nets,
             "--policy", str(resolve(root, planner_value)),
@@ -808,7 +810,7 @@ def route_stdout_index(receipt: dict[str, Any]) -> dict[str, Any]:
 def tool_state(config: dict[str, Any], root: Path) -> dict[str, Any]:
     tool = config["tool"]
     repository = resolve(root, tool["repository"])
-    python = resolve(root, tool["python"])
+    python = routing_python(root, tool.get("python"))
     router = repository / tool.get("router_script", "route.py")
     commit = subprocess.run(
         ["git", "-C", str(repository), "rev-parse", "HEAD"],
@@ -960,6 +962,11 @@ def run_audit(
         "work_dir": str(log_path.parent / "drc"),
     }
     command = [str(item).format(**substitutions) for item in command_template]
+    if command[0] == "python":
+        command[0] = sys.executable
+    if "--kicad-cli" in command:
+        index = command.index("--kicad-cli") + 1
+        command[index] = str(resolve_kicad_cli(command[index]))
     result = subprocess.run(
         command, cwd=root, capture_output=True, text=True,
         encoding="utf-8", errors="replace", check=False,
@@ -1012,7 +1019,7 @@ def normalize_candidate(
     missing = [name for name in required if routing.get(name) is None]
     if missing:
         raise SystemExit("Candidate normalization lacks reviewed values: " + ", ".join(missing))
-    kicad_python = Path(config["kicad_cli"]).with_name("python.exe")
+    kicad_python = resolve_kicad_python()
     command = [
         str(kicad_python), str(root / "scripts" / "normalize_krt_candidate.py"),
         "--board", str(output), "--expected-sha256", sha256(output),
@@ -1274,7 +1281,7 @@ def command_route(args: argparse.Namespace) -> int:
     source_metrics = board_metrics(source, config.get("guardrails", {}).get("forbidden_signal_layers", []))
     placement_probe = subprocess.run(
         [
-            str(Path(config["kicad_cli"]).with_name("python.exe")),
+            str(resolve_kicad_python()),
             str(root / "scripts" / "check_kicad_placement_routability.py"),
             "--board", str(source),
         ],

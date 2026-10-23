@@ -12,6 +12,8 @@ import re
 import shutil
 import subprocess
 import sys
+import shlex
+from pcb_runtime import atopile_binary, atopile_shell, atopile_environment
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +47,8 @@ def source_requires_part_picker(source_root: Path) -> bool:
 def wsl_process_environment(network_mode: str = "inherit") -> dict[str, str]:
     """Apply the reviewed direct/inherited network policy to WSL processes."""
     env = os.environ.copy()
+    if os.name != "nt":
+        return atopile_environment()
     proxy_names = (
         "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
         "http_proxy", "https_proxy", "no_proxy", "all_proxy",
@@ -73,7 +77,7 @@ def wsl_process_environment(network_mode: str = "inherit") -> dict[str, str]:
 
 def classify_failure(log: str) -> dict[str, object] | None:
     rules = [
-        ("atopile_auth_required", r"Part picking on atopile 0\.15\.8 requires sign-in|Sign-in required", "Run `ato auth login` interactively in the configured WSL distro, then rerun the isolated electrical build. Never add credentials to the repository."),
+        ("atopile_auth_required", r"Part picking on atopile 0\.15\.8 requires sign-in|Sign-in required", "Run `ato auth login` interactively in the selected atopile runtime (native Linux or WSL), then rerun the isolated electrical build. Never add credentials to the repository."),
         ("component_data_unreachable", r"Fetching component data failed|Name or service not known|EasyEDA API is unavailable|Failed to fetch footprint data.*handshake operation timed out", "Restore component-data access or provide a reviewed offline component cache; do not change electrical sources merely to bypass picking."),
         ("footprint_resource_mismatch", r"Footprint `[^`]+` doesn't exist in library `[^`]+`", "Align the reviewed footprint filename, internal footprint name, and atomic-part resource reference; do not substitute a similar package."),
         ("package_compiler_incompatible", r"trait not found|Incompatible interface types", "Review the exact upstream package/compiler compatibility issue; keep any local migration patch separately reviewed."),
@@ -206,12 +210,14 @@ def main() -> int:
         return 1
     preflight_log = ""
     if source_requires_part_picker(ROOT / "src"):
+        ato = "ato" if os.name == "nt" else shlex.quote(atopile_binary())
         preflight_command = (
-            "printf 'CODEX_ATO_VERSION=' && ato --version | tail -n 1 && "
-            "ato auth status"
+            f"printf 'CODEX_ATO_VERSION=' && {ato} --version | tail -n 1 && "
+            f"{ato} auth status"
         )
         preflight = subprocess.run(
-            ["wsl.exe", "-d", args.distro, "--", "bash", "-lc", preflight_command],
+            atopile_shell(preflight_command, args.distro, ROOT),
+            cwd=ROOT,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -260,13 +266,14 @@ def main() -> int:
     exit_code = 1
     candidate_captured = False
     try:
+        ato = "ato" if os.name == "nt" else shlex.quote(atopile_binary())
         command = (
-            f"cd {windows_to_wsl(ROOT)} && "
-            "printf 'CODEX_ATO_VERSION=' && ato --version | tail -n 1 && "
-            f"ato build --build {args.build}"
+            f"printf 'CODEX_ATO_VERSION=' && {ato} --version | tail -n 1 && "
+            f"{ato} build --build {shlex.quote(args.build)}"
         )
         process = subprocess.Popen(
-            ["wsl.exe", "-d", args.distro, "--", "bash", "-lc", command],
+            atopile_shell(command, args.distro, ROOT),
+            cwd=ROOT,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,

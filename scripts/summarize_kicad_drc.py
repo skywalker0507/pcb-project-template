@@ -15,8 +15,10 @@ import sys
 from krt_candidate_audit import DEFAULT_KICAD_CLI, drc_context_key, run_drc
 
 
+from pcb_runtime import kicad_python, ensure_kicad_python as ensure_host_kicad_python
+
 ROOT = Path(__file__).resolve().parents[1]
-KICAD_PYTHON = Path(r"C:\Program Files\KiCad\10.0\bin\python.exe")
+KICAD_PYTHON = kicad_python()
 CONNECTIVITY = {"unconnected_items"}
 PRESENTATION = {"silk_edge_clearance", "silk_over_copper", "silk_overlap"}
 IDENTITY = {"lib_footprint_mismatch", "lib_footprint_issues", "missing_footprint"}
@@ -34,7 +36,8 @@ def load_pcbnew() -> object:
     try:
         import pcbnew  # type: ignore
     except ImportError:
-        raise SystemExit(subprocess.call([str(KICAD_PYTHON), str(Path(__file__).resolve()), *sys.argv[1:]]))
+        ensure_host_kicad_python()
+        import pcbnew
     return pcbnew
 
 

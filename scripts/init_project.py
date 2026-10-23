@@ -8,8 +8,10 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import shutil
+import shlex
 import subprocess
 import sys
+from pcb_runtime import WINDOWS, kicad_cli, konnect_binary
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -106,20 +108,27 @@ def configure_project(project_name: str, distro: str, force: bool, with_konnect:
     root_wsl = windows_to_wsl(ROOT)
     node = shutil.which("node") or r"C:\Program Files\nodejs\node.exe"
     tscircuit_enabled = "true" if electrical_backend == "tscircuit" else "false"
+    if WINDOWS:
+        ato_command = r"C:\Windows\System32\wsl.exe"
+        ato_args = ["-d", distro, "--", "bash", "-lc", f"cd {shlex.quote(root_wsl)} && exec bash scripts/start-atopile-mcp-wsl.sh"]
+    else:
+        ato_command = shutil.which("bash") or "/bin/bash"
+        ato_args = [str(ROOT / "scripts/start-atopile-mcp-wsl.sh")]
     config = f'''[mcp_servers.atopile]
 type = "stdio"
-command = 'C:\\Windows\\System32\\wsl.exe'
-args = ['-d', '{distro}', '--', 'bash', '-lc', 'cd {root_wsl} && exec ./scripts/start-atopile-mcp-wsl.sh']
-cwd = '{root_windows}'
+command = {json.dumps(ato_command)}
+args = {json.dumps(ato_args)}
+cwd = {json.dumps(root_windows)}
 enabled = true
+env_vars = ["ATO_BINARY", "ATOPILE_PYTHON"]
 startup_timeout_sec = 30
 tool_timeout_sec = 300
 
 [mcp_servers.tscircuit]
 type = "stdio"
-command = '{node}'
-args = ['{ROOT / ".codex/mcp/tscircuit-server.mjs"}']
-cwd = '{root_windows}'
+command = {json.dumps(node)}
+args = {json.dumps([str(ROOT / '.codex/mcp/tscircuit-server.mjs')])}
+cwd = {json.dumps(root_windows)}
 enabled = {tscircuit_enabled}
 env_vars = ["PCB_PYTHON", "BUN_BINARY"]
 startup_timeout_sec = 30
@@ -127,23 +136,25 @@ tool_timeout_sec = 300
 
 '''
     if with_konnect:
-        konnect = ROOT / "tools/konnect/konnect.exe"
+        konnect = konnect_binary(ROOT)
         konnect_config = ROOT / ".codex/konnect/config.toml"
         konnect_config.parent.mkdir(parents=True, exist_ok=True)
-        konnect_config.write_text(f'''kicad_cli = 'C:\\Program Files\\KiCad\\10.0\\bin\\kicad-cli.exe'
-kicad_binary = 'C:\\Program Files\\KiCad\\10.0\\bin\\kicad.exe'
-project_dir = '{root_windows}'
+        cli = kicad_cli()
+        gui = cli.with_name("kicad.exe" if WINDOWS else "kicad")
+        konnect_config.write_text(f'''kicad_cli = {json.dumps(str(cli))}
+kicad_binary = {json.dumps(str(gui))}
+project_dir = {json.dumps(root_windows)}
 ipc_address = ''
 transport = 'stdio'
-jlcpcb_db_path = '{ROOT / "build/00-shared/tmp/konnect/jlcpcb.sqlite"}'
+jlcpcb_db_path = {json.dumps(str(ROOT / 'build/00-shared/tmp/konnect/jlcpcb.sqlite'))}
 log_level = 'warn'
 ''', encoding="utf-8")
         config += f'''
 [mcp_servers.konnect]
 type = "stdio"
-command = '{sys.executable}'
-args = ['{ROOT / "scripts/start_konnect_mcp.py"}', '{konnect}', '--config', '{konnect_config}']
-cwd = '{root_windows}'
+command = {json.dumps(sys.executable)}
+args = {json.dumps([str(ROOT / 'scripts/start_konnect_mcp.py'), str(konnect), '--config', str(konnect_config)])}
+cwd = {json.dumps(root_windows)}
 enabled = true
 env_vars = ["KICAD_API_SOCKET"]
 startup_timeout_sec = 30

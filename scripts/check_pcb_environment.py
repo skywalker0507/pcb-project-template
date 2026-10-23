@@ -16,11 +16,13 @@ import importlib.metadata
 from easyeda_bridge_client import compact_health as easyeda_compact_health, read_config as read_easyeda_config
 from start_konnect_mcp import discover_kicad_api_socket
 
+from pcb_runtime import kicad_cli, kicad_python, atopile_command, atopile_environment, routing_python, venv_python, konnect_binary
+
 
 def run(command: list[str], cwd: Path, timeout: int = 30) -> tuple[bool, str]:
     try:
         result = subprocess.run(
-            command, cwd=cwd, text=True, encoding="utf-8", errors="replace",
+            command, cwd=cwd, env=atopile_environment(), text=True, encoding="utf-8", errors="replace",
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout,
         )
         return result.returncode == 0, result.stdout.strip()
@@ -80,7 +82,7 @@ def main() -> int:
     add(checks, "project:active-electrical-source", source_ok, f"backend={active_backend};source={source_root};entry={entry}")
     add(checks, "project:resolved-toolchain", resolved_path.is_file(), str(resolved_path))
     mcp_configured = (root / ".codex/config.toml").is_file() or (root / ".codex/pcb-mcp.fragment.toml").is_file()
-    add(checks, "project:mcp-config", mcp_configured, ".codex/config.toml or merge fragment")
+    add(checks, "project:mcp-config", mcp_configured, ".codex/config.toml or merge fragment", required=False)
     physical_bridge_required = current_stage in {"physical", "routing"} and active_physical == "easyeda_pro"
     physical_bridge_configured = (
         isinstance(active_physical_config, dict)
@@ -112,10 +114,16 @@ def main() -> int:
         required=physical_bridge_required,
     )
 
-    kicad = Path(r"C:\Program Files\KiCad\10.0\bin\kicad-cli.exe")
-    add(checks, "kicad-cli", kicad.is_file(), str(kicad))
+    kicad = kicad_cli()
+    cli_ok, cli_version = run([str(kicad), "version"], root)
+    cli_version = cli_version.splitlines()[-1] if cli_version.splitlines() else "missing"
+    expected_major = str((policy.get("kicad") or {}).get("major", 10))
+    add(checks, "kicad-cli", cli_ok and cli_version.startswith(expected_major + "."), f"{kicad};version={cli_version}")
+    bindings_ok, bindings = run([str(kicad_python()), "-c", "import pcbnew; print(pcbnew.Version())"], root)
+    bindings = bindings.splitlines()[-1] if bindings.splitlines() else "missing"
+    add(checks, "kicad-python", bindings_ok and bindings.startswith(expected_major + "."), f"{kicad_python()};version={bindings}")
     add(checks, "git", shutil.which("git") is not None, shutil.which("git") or "not found")
-    add(checks, "python", sys.version_info >= (3, 10), sys.version.split()[0])
+    add(checks, "python", sys.version_info >= (3, 14), sys.version.split()[0])
     expected_gerbonara = str((policy.get("gerber_parser") or {}).get("version", ""))
     try:
         actual_gerbonara = importlib.metadata.version("gerbonara")
@@ -124,7 +132,14 @@ def main() -> int:
     add(checks, "gerbonara", actual_gerbonara == expected_gerbonara, f"expected={expected_gerbonara};actual={actual_gerbonara}", required=current_stage == "release")
 
     wsl = shutil.which("wsl.exe") or shutil.which("wsl")
-    if active_backend != "atopile":
+    if active_backend == "atopile" and os.name != "nt":
+        add(checks, "wsl", True, "native Linux; WSL is not used", required=False)
+        add(checks, "wsl-atopile", True, "native Linux; WSL is not used", required=False)
+        ok, output = run(atopile_command(["--version"], args.distro), root)
+        actual_ato = output.splitlines()[-1] if output.splitlines() else "missing"
+        expected_ato = resolved.get("atopile", {}).get("version")
+        add(checks, "native-atopile", ok and actual_ato == expected_ato, f"expected={expected_ato};actual={actual_ato}")
+    elif active_backend != "atopile":
         add(checks, "wsl", True, "not selected", required=False)
         add(checks, "wsl-atopile", True, "not selected", required=False)
     elif tier == "minimal":
@@ -148,7 +163,7 @@ def main() -> int:
     api_skill = root / str(api_bridge_config.get("tool", "tools/easyeda-api-skill"))
     api_ok, api_head = git_head(api_skill, root)
     expected_api = api_bridge_config.get("required_commit")
-    add(checks, "easyeda-api-skill-commit", api_ok and api_head == expected_api, f"expected={expected_api};actual={api_head}")
+    add(checks, "easyeda-api-skill-commit", api_ok and api_head == expected_api, f"expected={expected_api};actual={api_head}", required=physical_bridge_required)
     format_converter_config = easyeda_integration.get("format_converter", {})
     format_converter_root = Path(str(format_converter_config.get("install_root", r"C:\Program Files\lceda-pro-format-converter")))
     format_converter_package = format_converter_root / "resources/app/package.json"
@@ -175,14 +190,14 @@ def main() -> int:
     expected_kirouting = kirouting_config.get("required_commit")
     easyeda_routing_required = current_stage == "routing" and active_physical == "easyeda_pro"
     add(checks, "easyeda-kirouting-commit", kirouting_ok and kirouting_head == expected_kirouting, f"expected={expected_kirouting};actual={kirouting_head}", required=easyeda_routing_required)
-    easyeda_bridge_python = root / ".venv-easyeda-bridge/Scripts/python.exe"
+    easyeda_bridge_python = venv_python(root / ".venv-easyeda-bridge")
     add(checks, "easyeda-kirouting-python", easyeda_bridge_python.is_file(), str(easyeda_bridge_python), required=easyeda_routing_required)
     bun = shutil.which("bun")
     tscircuit_root = root / "tscircuit"
     add(checks, "bun", bool(bun), bun or "not found", required=active_backend == "tscircuit")
     add(checks, "tscircuit-lockfile", (tscircuit_root / "bun.lock").is_file(), str(tscircuit_root / "bun.lock"), required=active_backend == "tscircuit")
     krt_repo = root / "tools/KiCadRoutingTools"
-    krt_python = root / ".venv-routingtools/Scripts/python.exe"
+    krt_python = routing_python(root)
     add(checks, "krt-repository", krt_repo.is_dir(), str(krt_repo))
     add(checks, "krt-python", krt_python.is_file(), str(krt_python))
     krt_ok, krt_head = git_head(krt_repo, root)
@@ -200,7 +215,7 @@ def main() -> int:
     konnect_resolved = resolved.get("konnect")
     konnect_disabled = isinstance(konnect_resolved, dict) and konnect_resolved.get("disabled") is True
     if not konnect_disabled and (konnect_resolved or policy.get("konnect", {}).get("enabled_by_default", False)):
-        konnect = root / "tools/konnect/konnect.exe"
+        konnect = konnect_binary(root)
         ok, output = run([str(konnect), "--version"], root) if konnect.is_file() else (False, "missing")
         binary_hash = hashlib.sha256(konnect.read_bytes()).hexdigest() if konnect.is_file() else "missing"
         add(
@@ -209,7 +224,7 @@ def main() -> int:
             and ok
             and output == konnect_resolved.get("binary_version")
             and binary_hash.lower() == str(konnect_resolved.get("binary_sha256", "")).lower(),
-            f"version={output};sha256={binary_hash}",
+            f"version={output};sha256={binary_hash}", required=False,
         )
         socket = discover_kicad_api_socket()
         add(checks, "konnect-ipc-address", bool(socket), socket or "unavailable", required=False)
@@ -217,11 +232,11 @@ def main() -> int:
     if tier == "deep" and (root / "scripts/krt_flow.py").is_file():
         ok, output = run([sys.executable, "scripts/krt_flow.py", "check"], root, 120)
         add(checks, "krt-check", ok, output[-300:])
-    if tier == "deep" and active_backend == "atopile" and wsl and (root / "ato.yaml").is_file():
+    if tier == "deep" and active_backend == "atopile" and (root / "ato.yaml").is_file():
         ok, output = run([
-            sys.executable, "scripts/build_electrical.py", "--backend", "atopile", "--build", "default",
+            sys.executable, "scripts/validate_atopile_source.py", "--distro", args.distro,
         ], root, 300)
-        add(checks, "atopile-build", ok, output[-300:])
+        add(checks, "atopile-source", ok, output[-300:])
     if tier == "deep" and active_backend == "tscircuit" and bun and tscircuit_root.is_dir():
         ok, output = run([bun, "run", "typecheck"], tscircuit_root, 180)
         add(checks, "tscircuit-typecheck", ok, output[-300:])
@@ -230,13 +245,13 @@ def main() -> int:
         "minimal": {
             "project:config/electrical-backend.json", "project:config/backend-architecture.json", "project:config/physical-backend.json", "project:config/manufacturing-backend.json", "project:active-electrical-source", "project:config/pcb-flow.json", "project:config/kicad-routing-tools.json",
             "project:config/easyeda-integration.json", "project:config/toolchain-policy.json", "project:config/template-engine.json", "project:config/manufacturing-rules.json", "project:config/board-stack.json", "project:config/pcb-acceptance.json", "project:config/requirements.json",
-            "project:handoff/stages/CURRENT_STAGE.json", "project:mcp-config", "python",
+            "project:handoff/stages/CURRENT_STAGE.json", "python",
         },
         "standard": {
             "project:config/electrical-backend.json", "project:config/backend-architecture.json", "project:config/physical-backend.json", "project:config/manufacturing-backend.json", "project:active-electrical-source", "project:config/pcb-flow.json", "project:config/kicad-routing-tools.json",
             "project:config/easyeda-integration.json", "project:config/toolchain-policy.json", "project:config/template-engine.json", "project:config/manufacturing-rules.json", "project:config/board-stack.json", "project:config/pcb-acceptance.json", "project:config/requirements.json",
-            "project:handoff/stages/CURRENT_STAGE.json", "project:resolved-toolchain", "project:mcp-config",
-            "kicad-cli", "git", "python", "krt-repository", "krt-python", "krt-commit",
+            "project:handoff/stages/CURRENT_STAGE.json", "project:resolved-toolchain",
+            "kicad-cli", "kicad-python", "git", "python", "krt-repository", "krt-python", "krt-commit",
         },
         "deep": {item["name"] for item in checks if item["required"]},
     }
@@ -247,7 +262,7 @@ def main() -> int:
     if physical_bridge_required:
         required_by_tier["standard"].update({"node", "easyeda-bridge", "easyeda-api-skill-commit", "easyeda-format-converter"})
         required_by_tier["deep"].update({"node", "easyeda-bridge", "easyeda-api-skill-commit", "easyeda-format-converter"})
-    if active_physical == "kicad" and current_stage in {"physical", "routing"}:
+    if active_physical == "kicad" and current_stage in {"physical", "routing"} and not konnect_disabled:
         required_by_tier["standard"].update({"konnect", "konnect-ipc-address"})
         required_by_tier["deep"].update({"konnect", "konnect-ipc-address"})
     if easyeda_routing_required:
@@ -262,13 +277,15 @@ def main() -> int:
     elif active_backend == "atopile":
         for item in checks:
             if item["name"] in {"wsl", "wsl-atopile"}:
+                item["required"] = os.name == "nt" and tier in {"standard", "deep"}
+            if item["name"] == "native-atopile":
                 item["required"] = tier in {"standard", "deep"}
     required_ok = all(item["ok"] for item in checks if item["required"])
     optional_ok = all(item["ok"] for item in checks if not item["required"])
     names = {item["name"] for item in checks if not item["ok"]}
     suggestions: list[str] = []
     if "project:mcp-config" in names:
-        suggestions.append("Run: python scripts/init_project.py --project-name <name>")
+        suggestions.append("Optional MCP setup: python scripts/init_project.py --project-name <existing-name> --preserve-existing --no-konnect")
     if "project:resolved-toolchain" in names:
         suggestions.append("After installing tools manually, run: python scripts/record_toolchain_receipt.py")
     if "easyeda-bridge" in names:
@@ -281,7 +298,7 @@ def main() -> int:
     if active_backend == "tscircuit" and ("bun" in names or "tscircuit-lockfile" in names):
         suggestions.append("Install Bun natively, then run bun install in tscircuit/ to restore the locked tscircuit toolchain.")
     if "krt-repository" in names:
-        suggestions.append("Clone the configured KRT fork to tools/KiCadRoutingTools and check out codex/repository-support.")
+        suggestions.append("Clone the configured KRT fork to tools/KiCadRoutingTools and check out tool.commit from config/kicad-routing-tools.json.")
     if "krt-commit" in names and krt_ok and expected_krt:
         suggestions.append("Check out the KRT commit recorded in build/00-shared/evidence/toolchain/toolchain-resolved.json, or record a receipt for the reviewed local commit.")
     if "krt-python" in names:

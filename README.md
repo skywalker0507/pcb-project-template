@@ -13,6 +13,10 @@ validator, and KiCadRoutingTools (KRT) creates isolated routing candidates.
 > Project-authored code: [MIT](LICENSE). Upstream tools, CAD symbols, footprints
 > and vendor models retain their own terms; see [third-party notes](docs/THIRD_PARTY.md).
 
+Linux and ChatGPT Work command-line setup is documented in [docs/LINUX.md](docs/LINUX.md).
+Use `.venv-pcb/bin/python` instead of `py -3.14` on Linux. Project tools and
+KiCad's ABI-matched Python are resolved separately; the Windows/WSL path remains supported.
+
 The only default production path is:
 
 ```text

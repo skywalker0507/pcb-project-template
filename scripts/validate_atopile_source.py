@@ -11,6 +11,8 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import shlex
+from pcb_runtime import atopile_python, atopile_shell
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,14 +97,14 @@ def main() -> int:
     parser.add_argument("--wsl-child", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
-    if os.name == "nt" and not args.wsl_child:
+    if not args.wsl_child:
+        compiler_python = "~/.local/share/uv/tools/atopile/bin/python" if os.name == "nt" else shlex.quote(str(atopile_python()))
         command = (
-            f"cd {windows_to_wsl(ROOT)} && "
-            "~/.local/share/uv/tools/atopile/bin/python "
-            f"scripts/validate_atopile_source.py --wsl-child --entry {args.entry}"
+            f"{compiler_python} scripts/validate_atopile_source.py --wsl-child "
+            f"--entry {shlex.quote(args.entry)}"
         )
         process = subprocess.run(
-            ["wsl.exe", "-d", args.distro, "--", "bash", "-lc", command],
+            atopile_shell(command, args.distro, ROOT),
             cwd=ROOT,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,

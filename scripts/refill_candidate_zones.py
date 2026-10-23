@@ -3,9 +3,13 @@
 from __future__ import annotations
 import argparse,hashlib,json,shutil,subprocess,sys
 from pathlib import Path
-KICAD_PYTHON=Path(r"C:\Program Files\KiCad\10.0\bin\python.exe")
+
+from pcb_runtime import kicad_python, ensure_kicad_python as ensure_host_kicad_python
+KICAD_PYTHON=kicad_python()
 try:import pcbnew
-except ImportError:raise SystemExit(subprocess.call([str(KICAD_PYTHON),str(Path(__file__).resolve()),*sys.argv[1:]]))
+except ImportError:
+ ensure_host_kicad_python()
+ import pcbnew
 def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest().upper()
 def main():
  ap=argparse.ArgumentParser();ap.add_argument("--input",type=Path,required=True);ap.add_argument("--output",type=Path,required=True);a=ap.parse_args();src,out=a.input.resolve(),a.output.resolve()

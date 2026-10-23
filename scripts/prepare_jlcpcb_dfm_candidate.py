@@ -22,10 +22,12 @@ from manufacturing_work_packet import (
 )
 from release_inputs import register_release_input
 
+from pcb_runtime import kicad_python, ensure_kicad_python as ensure_host_kicad_python, kicad_cli
+
 
 ROOT = Path(__file__).resolve().parents[1]
-KICAD_CLI = Path(r"C:\Program Files\KiCad\10.0\bin\kicad-cli.exe")
-KICAD_PYTHON = Path(r"C:\Program Files\KiCad\10.0\bin\python.exe")
+KICAD_CLI = kicad_cli()
+KICAD_PYTHON = kicad_python()
 DEFAULT_ASSEMBLY_PARTS = ROOT / "config/jlcpcb-parts.json"
 DEFAULT_MANUFACTURING_PROFILE = ROOT / "config/manufacturing-profile.json"
 

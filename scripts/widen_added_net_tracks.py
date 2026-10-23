@@ -10,15 +10,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+from pcb_runtime import kicad_python, ensure_kicad_python as ensure_host_kicad_python
 
-KICAD_PYTHON = Path(r"C:\Program Files\KiCad\10.0\bin\python.exe")
+
+KICAD_PYTHON = kicad_python()
 
 try:
     import pcbnew
 except ImportError:
-    raise SystemExit(
-        subprocess.call([str(KICAD_PYTHON), str(Path(__file__).resolve()), *sys.argv[1:]])
-    )
+    ensure_host_kicad_python()
+    import pcbnew
 
 
 def main() -> int:

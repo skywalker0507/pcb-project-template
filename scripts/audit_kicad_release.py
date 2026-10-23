@@ -16,8 +16,10 @@ import sys
 from pcb_policy import configured_board
 
 
+from pcb_runtime import kicad_cli
+
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_KICAD_CLI = Path(r"C:\Program Files\KiCad\10.0\bin\kicad-cli.exe")
+DEFAULT_KICAD_CLI = kicad_cli()
 DEFAULT_BASELINE = ROOT / "config/pcb-release-baseline.json"
 DEFAULT_ROUTING_PATHS = ROOT / "config/routing-paths.json"
 FATAL_CATEGORIES = {
