@@ -8,10 +8,12 @@ blockers and next command. Read that file once; treat `read_if_needed` as an
 on-demand index rather than a reading list. `stage_doctor.py` remains an on-demand diagnostic,
 while routing and export scripts enforce their own stage guards.
 
-Run `py -3.14 scripts/init_project.py --project-name <name>` on each fresh clone.
-The command configures project/MCP defaults, points the active board at the
-atopile default build output, and resets the tracked handoff to requirements.
-Use `--preserve-existing` only when reconfiguring a live project. Install or update
+Run `py -3.14 scripts/init_project.py --new-project --project-name <name>` in a
+separate checkout for a new design. This archives inherited reviewed inputs,
+creates unreviewed drafts, and resets adoption pointers and the handoff to
+requirements. Existing CAD and release artifacts are preserved as history.
+Without `--new-project`, the default reconfigures the current project while
+preserving its identity, reviewed inputs and progress. Install or update
 tools manually, then run `python scripts/record_toolchain_receipt.py`. Restart Codex after
 `.codex/config.toml` is generated, then run the deep environment check.
 An electrical-only receipt may be created first with

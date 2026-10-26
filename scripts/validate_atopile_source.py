@@ -9,8 +9,11 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import sys
+
+from electrical_backend import read_config, selected_backend, source_entry
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,7 +41,7 @@ def windows_to_wsl(path: Path) -> str:
 
 def source_sha256(source_root: Path) -> str:
     digest = hashlib.sha256()
-    for path in sorted(source_root.rglob("*.ato")):
+    for path in sorted(source_root.rglob("*.ato"), key=lambda path: path.relative_to(source_root).as_posix()):
         digest.update(path.relative_to(source_root).as_posix().encode())
         digest.update(b"\0")
         digest.update(path.read_bytes())
@@ -46,7 +49,7 @@ def source_sha256(source_root: Path) -> str:
     return digest.hexdigest().upper()
 
 
-def compile_source(entry: str) -> dict[str, object]:
+def compile_source(entry: str | None, build: str = "default") -> dict[str, object]:
     import importlib.metadata
 
     import faebryk.core.faebrykpy as fbrk
@@ -54,15 +57,13 @@ def compile_source(entry: str) -> dict[str, object]:
     from atopile.compiler.build import Linker, StdlibRegistry, build_file, build_stage_2
     from atopile.config import config
 
-    file_name, separator, module_name = entry.partition(":")
-    if not separator or not file_name.endswith(".ato") or not module_name:
+    _, backend = selected_backend(read_config(ROOT / "config/electrical-backend.json"), "atopile")
+    source_root, entry_path, module_name = source_entry(backend, entry, root=ROOT)
+    file_name = entry_path.relative_to(source_root).as_posix()
+    if not file_name.endswith(".ato") or not module_name:
         raise ValueError("Entry must use path/to/file.ato:Module syntax")
-    entry_path = (ROOT / "src" / file_name).resolve()
-    entry_path.relative_to((ROOT / "src").resolve())
-    if not entry_path.is_file():
-        raise FileNotFoundError(entry_path)
 
-    config.apply_options(None, selected_builds=("default",), working_dir=ROOT)
+    config.apply_options(None, selected_builds=(build,), working_dir=ROOT)
     g = graph.GraphView.create()
     tg = fbrk.TypeGraph.create(g=g)
     stdlib = StdlibRegistry(tg)
@@ -79,9 +80,11 @@ def compile_source(entry: str) -> dict[str, object]:
         "schema": 1,
         "kind": "atopile_source_validation",
         "success": True,
-        "entry": entry,
+        "entry": f"{entry_path.relative_to(ROOT).as_posix()}:{module_name}",
+        "build": build,
+        "source_root": source_root.relative_to(ROOT).as_posix(),
         "compiler_version": importlib.metadata.version("atopile"),
-        "source_sha256": source_sha256(ROOT / "src"),
+        "source_sha256": source_sha256(source_root),
         "checks": ["parse", "imports", "type_graph", "deferred_operations", "entry_instantiation"],
         "limit": "This does not pick parts, run electrical ERC, or generate a PCB candidate.",
     }
@@ -89,7 +92,8 @@ def compile_source(entry: str) -> dict[str, object]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--entry", default="main.ato:App")
+    parser.add_argument("--entry", help="Entry relative to configured backend source_root; defaults to backend entry")
+    parser.add_argument("--build", default="default")
     parser.add_argument("--distro", default="Ubuntu-24.04")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--wsl-child", action="store_true", help=argparse.SUPPRESS)
@@ -97,10 +101,12 @@ def main() -> int:
 
     if os.name == "nt" and not args.wsl_child:
         command = (
-            f"cd {windows_to_wsl(ROOT)} && "
+            f"cd {shlex.quote(windows_to_wsl(ROOT))} && "
             "~/.local/share/uv/tools/atopile/bin/python "
-            f"scripts/validate_atopile_source.py --wsl-child --entry {args.entry}"
+            f"scripts/validate_atopile_source.py --wsl-child --build {shlex.quote(args.build)}"
         )
+        if args.entry:
+            command += f" --entry {shlex.quote(args.entry)}"
         process = subprocess.run(
             ["wsl.exe", "-d", args.distro, "--", "bash", "-lc", command],
             cwd=ROOT,
@@ -135,14 +141,13 @@ def main() -> int:
         return 0 if receipt.get("success") is True else 1
 
     try:
-        receipt = compile_source(args.entry)
+        receipt = compile_source(args.entry, args.build)
     except BaseException as exc:
         receipt = {
             "schema": 1,
             "kind": "atopile_source_validation",
             "success": False,
             "entry": args.entry,
-            "source_sha256": source_sha256(ROOT / "src"),
             "failure": type(exc).__name__,
             "evidence": str(exc).splitlines()[-8:],
         }

@@ -12,7 +12,7 @@ checkout. All project policy and automation live outside that directory:
 - `scripts/krt_flow.py`: compact check/route interface;
 - `scripts/krt_checkpoint.py`: detached start/status/finalize lifecycle for
   routes that outlive an Agent tool call;
-- `scripts/init_project.py`: project MCP configuration only;
+- `scripts/init_project.py`: safe project/MCP reconfiguration, or explicit new-project initialization;
 - `scripts/record_toolchain_receipt.py`: records a manually installed toolchain.
 
 ## AI usage protocol
@@ -94,7 +94,7 @@ lists live only in report files.
 ## Initialize the project
 
 ```text
-py -3.14 scripts/init_project.py --project-name new-board
+py -3.14 scripts/init_project.py --new-project --project-name new-board
 ```
 
 Manually fetch the configured KRT branch from `config/toolchain-policy.json`,

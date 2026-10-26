@@ -65,7 +65,7 @@ installs its Claude integration later if wanted.
 ## Installation
 
 ```text
-python scripts/init_project.py --project-name my-board
+python scripts/init_project.py
 python scripts/check_pcb_environment.py --deep
 ```
 

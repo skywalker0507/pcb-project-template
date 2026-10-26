@@ -12,6 +12,7 @@ import sys
 
 from artifact_store import create_run, finish_run, relative
 from electrical_backend import DEFAULT_CONFIG, ROOT, read_config, selected_backend, validate_backend, workspace_path
+from electrical_candidate_contract import require_candidate_integrity
 
 
 TOOLCHAIN_RECEIPT = ROOT / "build/00-shared/evidence/toolchain/toolchain-resolved.json"
@@ -53,9 +54,15 @@ def build_input_manifest(
 ) -> dict[str, object]:
     """Describe every reviewed or local producer input needed to reuse a build."""
     driver = workspace_path(str(backend["driver"]), "Backend driver")
-    dependency_paths = [Path(__file__).resolve(), ROOT / "scripts/electrical_backend.py", driver]
+    dependency_paths = [Path(__file__).resolve(), ROOT / "scripts/electrical_backend.py", driver,
+                        ROOT / "scripts/check_electrical_candidate_integrity.py",
+                        ROOT / "scripts/check_kicad_footprint_equivalence.py",
+                        ROOT / "scripts/electrical_candidate_contract.py"]
+    scope = ROOT / "config/project-initialization.json"
+    if scope.is_file():
+        dependency_paths.append(scope)
     if name == "atopile":
-        dependency_paths.append(ROOT / "ato.yaml")
+        dependency_paths.extend([ROOT / "ato.yaml", ROOT / "scripts/validate_atopile_source.py"])
     dependencies = [
         {"path": relative(path), "sha256": sha256(path)}
         for path in sorted(set(dependency_paths), key=lambda item: relative(item))
@@ -64,6 +71,7 @@ def build_input_manifest(
         "schema": 1,
         "backend": name,
         "build": build_name,
+        "project": json.loads((ROOT / "config/pcb-flow.json").read_text(encoding="utf-8"))["project"]["name"],
         "backend_config": {
             key: backend.get(key)
             for key in sorted(backend)
@@ -115,6 +123,10 @@ def find_matching_build(build_input: dict[str, object]) -> dict[str, object] | N
         except ValueError:
             continue
         if not candidate.is_file() or sha256(candidate) != candidate_hash:
+            continue
+        try:
+            require_candidate_integrity(payload, ROOT)
+        except (ValueError, OSError):
             continue
         return {
             "receipt": relative(receipt),
@@ -215,9 +227,13 @@ def main() -> int:
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text(process.stdout, encoding="utf-8")
     if process.returncode:
+        try:
+            failure = json.loads(receipt.read_text(encoding="utf-8")).get("failure")
+        except (OSError, ValueError):
+            failure = {"class": "backend_runtime_failure", "evidence": process.stdout.splitlines()[-6:]}
         if run:
-            finish_run(run, False, artifacts={"log": relative(log)}, metrics={"exit_code": process.returncode})
-        print(json.dumps({"success": False, "backend": name, "exit_code": process.returncode, "log": relative(log)}, separators=(",", ":")))
+            finish_run(run, False, artifacts={"receipt": relative(receipt), "log": relative(log)}, metrics={"exit_code": process.returncode})
+        print(json.dumps({"success": False, "backend": name, "exit_code": process.returncode, "failure": failure, "receipt": relative(receipt), "log": relative(log)}, separators=(",", ":")))
         return process.returncode
     try:
         payload = json.loads(receipt.read_text(encoding="utf-8"))
@@ -313,6 +329,36 @@ def main() -> int:
     payload["candidate_board_sha256"] = sha256(candidate_board)
     payload["build_input"] = build_input
     payload["contract"] = post_status
+    audit_path = receipt.parent / f"{receipt.stem}-candidate-integrity.json"
+    audit_process = subprocess.run([
+        sys.executable, str(ROOT / "scripts/check_electrical_candidate_integrity.py"),
+        "--board", str(candidate_board), "--source-root", str(ROOT / backend["source_root"]),
+        "--output", str(audit_path),
+    ], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
+    audit_payload = {}
+    try:
+        decoded_audit = json.loads(audit_path.read_text(encoding="utf-8"))
+        if not isinstance(decoded_audit, dict):
+            raise ValueError("Candidate integrity receipt must be a JSON object")
+        audit_payload = decoded_audit
+        payload["candidate_integrity"] = {"receipt": relative(audit_path), "sha256": sha256(audit_path)}
+        require_candidate_integrity(payload, ROOT)
+        if audit_process.returncode:
+            raise ValueError("Candidate integrity checker exited unsuccessfully")
+    except (OSError, ValueError) as exc:
+        payload["success"] = False
+        payload["failure"] = {
+            "class": "electrical_candidate_integrity_failed", "evidence": str(exc).splitlines()[-3:],
+            "audit_receipt": relative(audit_path),
+            "failed_refs": audit_payload.get("failed_refs", [])[:8],
+            "audit_failure": audit_payload.get("failure"),
+            "next": "Review the candidate integrity receipt. Restore native KiCad if unavailable; otherwise repair the source/exporter. Do not freeze or adopt this candidate.",
+        }
+        receipt.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if run:
+            finish_run(run, False, artifacts={"receipt": relative(receipt), "log": relative(log)}, metrics={"failure_class": payload["failure"]["class"]})
+        print(json.dumps({"success": False, "backend": name, "failure": payload["failure"], "receipt": relative(receipt)}, separators=(",", ":")))
+        return 1
     receipt.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if run:
         finish_run(

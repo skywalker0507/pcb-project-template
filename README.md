@@ -63,7 +63,7 @@ when no default subcommand expresses the reviewed operation.
 ## Create and configure a project
 
 ```powershell
-py -3.14 scripts/init_project.py --project-name my-board --layers 4
+py -3.14 scripts/init_project.py --new-project --project-name my-board --layers 4
 py -3.14 scripts/check_pcb_environment.py --deep
 py -3.14 scripts/record_toolchain_receipt.py --electrical-only
 ```
@@ -71,6 +71,23 @@ py -3.14 scripts/record_toolchain_receipt.py --electrical-only
 The initializer never installs or downloads tools. The production path expects
 Git, Python 3.14, KiCad 10 and atopile. Konnect is a bounded live-KiCad helper;
 it does not replace KRT and must not author the schematic or approve release.
+
+Use `--new-project` in a separate project checkout. It archives inherited
+requirements, decisions, selected parts, footprint provenance and adoption
+pointers under `tmp/project-initialization/`, then creates unreviewed drafts.
+Existing CAD and release artifacts remain on disk; a different project's freeze
+cannot be adopted. Project-specific placement, routing and manufacturing inputs
+still require review for the new design. Without `--new-project`, initialization
+only reconfigures the current project and preserves its identity and progress.
+
+Electrical builds audit every candidate footprint against local resources under
+the configured backend `source_root`, including nested resource directories.
+Pad numbering/geometry, source identity properties and footprint rule areas must
+survive export before a build can pass or freeze. Compile-time library tables use
+current resource paths; the existing physical board and its library table are
+restored after compilation. Failed builds return a bounded cause and receipt path.
+Physical-start resolves footprint libraries from the immutable freeze's source
+snapshot and rejects stale physical tables before creating a candidate board.
 
 ## Template engine boundary
 

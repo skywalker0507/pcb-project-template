@@ -31,6 +31,9 @@ def load_release_freeze(receipt_path: Path, freeze_root: Path = DEFAULT_FREEZE_R
         or value.get("freeze_pass") is not True
     ):
         raise SystemExit("A passing schema-2 electrical freeze receipt is required")
+    scope = ROOT / "config/project-initialization.json"
+    if scope.is_file() and value.get("project_initialization_sha256") != sha256(scope):
+        raise SystemExit("Electrical freeze belongs to a different project initialization; inherited freezes cannot be adopted")
 
     bundle = receipt_path.parent
     try:

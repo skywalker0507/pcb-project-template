@@ -25,6 +25,27 @@ electrical_build = load("electrical_build_plan", "scripts/build_electrical.py")
 
 
 class ElectricalBuildPlanTests(unittest.TestCase):
+    def test_physical_adoption_does_not_trigger_a_new_compile_but_project_identity_does(self):
+        config = electrical_build.read_config(electrical_build.DEFAULT_CONFIG)
+        name, backend = electrical_build.selected_backend(config)
+        status = electrical_build.validate_backend(config, name, backend)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root / "config").mkdir()
+            flow_path = root / "config/pcb-flow.json"
+            flow = {"project": {"name": "first-project", "board": "board-a"}}
+            flow_path.write_text(json.dumps(flow))
+            with mock.patch.object(electrical_build, "ROOT", root), mock.patch.object(electrical_build, "sha256", return_value="H"*64), mock.patch.object(electrical_build, "relative", side_effect=lambda path: path.name):
+                first = electrical_build.build_input_manifest(name, backend, status, "default", None)
+                flow["project"]["board"] = "adopted-physical-board"
+                flow_path.write_text(json.dumps(flow))
+                adopted = electrical_build.build_input_manifest(name, backend, status, "default", None)
+                self.assertEqual(first["fingerprint"], adopted["fingerprint"])
+                flow["project"]["name"] = "different-project"
+                flow_path.write_text(json.dumps(flow))
+                changed = electrical_build.build_input_manifest(name, backend, status, "default", None)
+                self.assertNotEqual(first["fingerprint"], changed["fingerprint"])
+
     def test_input_fingerprint_is_stable_and_build_specific(self) -> None:
         config = electrical_build.read_config(electrical_build.DEFAULT_CONFIG)
         name, backend = electrical_build.selected_backend(config)
@@ -57,12 +78,21 @@ class ElectricalBuildPlanTests(unittest.TestCase):
             candidate.write_text("candidate", encoding="utf-8")
             candidate_hash = electrical_build.sha256(candidate)
             receipt = evidence / "electrical-build.json"
-            receipt.write_text(json.dumps({
+            integrity = evidence / "integrity.json"
+            integrity.write_text(json.dumps({
+                "kind": "electrical_candidate_integrity", "success": True,
+                "read_only_inputs_unchanged": True, "candidate_board_sha256": candidate_hash,
+                "source_sha256": "S" * 64,
+            }), encoding="utf-8")
+            payload = {
                 "success": True,
                 "build_input": {"fingerprint": "A" * 64},
                 "candidate_board": str(candidate),
                 "candidate_board_sha256": candidate_hash,
-            }), encoding="utf-8")
+                "contract": {"source_sha256": "S" * 64},
+                "candidate_integrity": {"receipt": str(integrity), "sha256": electrical_build.sha256(integrity)},
+            }
+            receipt.write_text(json.dumps(payload), encoding="utf-8")
 
             relative = lambda path: path.resolve().relative_to(root.resolve()).as_posix()
             with mock.patch.object(electrical_build, "ROOT", root), mock.patch.object(
@@ -70,6 +100,11 @@ class ElectricalBuildPlanTests(unittest.TestCase):
             ):
                 match = electrical_build.find_matching_build({"fingerprint": "A" * 64})
                 self.assertEqual(match["candidate_board_sha256"], candidate_hash)
+                integrity.write_text("{}", encoding="utf-8")
+                self.assertIsNone(electrical_build.find_matching_build({"fingerprint": "A" * 64}))
+                payload.pop("candidate_integrity")
+                receipt.write_text(json.dumps(payload), encoding="utf-8")
+                self.assertIsNone(electrical_build.find_matching_build({"fingerprint": "A" * 64}))
                 candidate.write_text("tampered", encoding="utf-8")
                 self.assertIsNone(electrical_build.find_matching_build({"fingerprint": "A" * 64}))
 

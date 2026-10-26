@@ -16,6 +16,8 @@ from artifact_store import create_run, finish_run, relative
 from electrical_freeze_contract import DEFAULT_FREEZE_ROOT, load_release_freeze
 from physical_backend import read_config, selected_backend
 from stage_policy import current_stage
+from electrical_backend import footprint_libraries, footprint_table, read_config as read_electrical, selected_backend as selected_electrical, source_sha256
+from check_kicad_footprint_equivalence import libraries
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,29 +58,22 @@ def minimal_project(path: Path) -> None:
     }, indent=2) + "\n", encoding="utf-8")
 
 
-def ensure_reviewed_fp_table(project_dir: Path) -> tuple[Path, bool]:
-    """Create a deterministic project-local table for reviewed src/parts libraries."""
+def ensure_reviewed_fp_table(project_dir: Path, source_root: Path | None = None) -> tuple[Path, bool]:
+    """Resolve configured resources and reject stale existing physical tables."""
     table = project_dir / "fp-lib-table"
+    if source_root is None:
+        _, backend = selected_electrical(read_electrical(ROOT / "config/electrical-backend.json"))
+        source_root = (ROOT / backend["source_root"]).resolve()
+    expected = footprint_libraries(source_root)
+    if not expected:
+        raise SystemExit(f"No authoritative local footprint libraries found under {source_root}")
     if table.is_file():
+        actual = libraries(table, project_dir)
+        stale = [name for name, path in expected.items() if actual.get(name) != path]
+        if stale:
+            raise SystemExit(f"Physical footprint table has stale or missing libraries: {', '.join(stale[:8])}. Review the table against authoritative source_root {source_root} before proceeding.")
         return table, False
-    parts_root = ROOT / "src/parts"
-    if not parts_root.is_dir():
-        raise SystemExit(f"Reviewed footprint root is unavailable: {parts_root}")
-    rows = ["(fp_lib_table", "  (version 7)"]
-    library_count = 0
-    for directory in sorted(path for path in parts_root.iterdir() if path.is_dir()):
-        if not any(directory.glob("*.kicad_mod")):
-            continue
-        library_count += 1
-        uri = "${KIPRJMOD}/" + Path(os.path.relpath(directory, project_dir)).as_posix()
-        rows.append(
-            f'  (lib (name "{directory.name}")(type "KiCad")(uri "{uri}")'
-            '(options "")(descr "Reviewed project footprint"))'
-        )
-    rows.append(")")
-    if not library_count:
-        raise SystemExit("No reviewed project footprint libraries were found")
-    table.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    table.write_text(footprint_table(project_dir, source_root), encoding="utf-8")
     return table, True
 
 
@@ -121,12 +116,17 @@ def main() -> int:
     if existing:
         raise SystemExit("Refusing to overwrite an existing physical candidate: " + ", ".join(map(str, existing)))
 
-    run = create_run("physical", "kicad-physical-candidate", args.run_id)
+    frozen_source = freeze_receipt.parent / "provenance/source"
+    if not frozen_source.is_dir() or source_sha256(frozen_source) != freeze.get("source_sha256"):
+        raise SystemExit("Immutable freeze source resources are missing or changed")
     output.parent.mkdir(parents=True, exist_ok=True)
+    # Resolve/validate libraries before creating a board or a run. A stale
+    # physical table must not leave a partial candidate that blocks a retry.
+    fp_table, fp_table_created = ensure_reviewed_fp_table(output.parent, frozen_source)
+    run = create_run("physical", "kicad-physical-candidate", args.run_id)
     shutil.copy2(artifacts["frozen_board"], output)
     frozen_copy_sha = sha256(output)
     minimal_project(project)
-    fp_table, fp_table_created = ensure_reviewed_fp_table(output.parent)
     kicad_cli = Path(r"C:\Program Files\KiCad\10.0\bin\kicad-cli.exe")
     subprocess.run([str(kicad_cli), "pcb", "upgrade", "--force", str(output)], cwd=ROOT, check=True)
     manifest = run.evidence / "kicad-physical-candidate-manifest.json"

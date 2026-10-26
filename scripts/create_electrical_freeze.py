@@ -12,6 +12,7 @@ import shutil
 
 from artifact_store import create_run, finish_run, relative
 from electrical_backend import DEFAULT_CONFIG, ROOT, read_config, selected_backend, source_sha256
+from electrical_candidate_contract import require_candidate_integrity
 
 
 TOOLCHAIN_RECEIPT = ROOT / "build/00-shared/evidence/toolchain/toolchain-resolved.json"
@@ -96,6 +97,12 @@ def main() -> int:
     if not board.is_file() or not manifest.is_file():
         raise SystemExit("Electrical candidate board or deterministic source manifest is unavailable")
     board_hash = sha256(board)
+    try:
+        integrity_path = require_candidate_integrity(build, ROOT)
+    except (OSError, ValueError) as exc:
+        raise SystemExit(str(exc)) from exc
+    if build.get("candidate_board_sha256") != board_hash:
+        raise SystemExit("Electrical build candidate changed after integrity validation")
     manifest_payload = load(manifest, "Electrical source manifest")
     if manifest_payload.get("schema") != 2 or manifest_payload.get("board_sha256") != board_hash:
         raise SystemExit("Electrical source manifest schema/SHA does not match the candidate board")
@@ -108,6 +115,9 @@ def main() -> int:
             raise SystemExit(f"{label} does not match the candidate board SHA-256")
 
     inputs = {name: path.resolve() for name, path in PROVENANCE_INPUTS.items()}
+    scope_path = ROOT / "config/project-initialization.json"
+    if scope_path.is_file():
+        inputs["project_initialization"] = scope_path
     for name, path in inputs.items():
         if not path.is_file():
             raise SystemExit(f"Freeze provenance input is unavailable: {name}: {path}")
@@ -141,6 +151,7 @@ def main() -> int:
         shutil.copy2(manifest, bundle_tmp / "frozen-electrical-manifest.json")
         evidence_files = {
             "build_receipt": build_path,
+            "candidate_integrity": integrity_path,
             "contract_receipt": contract_path,
             "candidate_review": review_path,
             **inputs,
@@ -173,6 +184,7 @@ def main() -> int:
             "freeze_pass": True,
             "freeze_id": run.run_id,
             "backend": backend_name,
+            "project_initialization_sha256": sha256(scope_path) if scope_path.is_file() else None,
             "source_sha256": snapshot_source_hash,
             "frozen_board": relative(run.release / "frozen.kicad_pcb"),
             "frozen_board_sha256": board_hash,

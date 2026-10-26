@@ -66,6 +66,13 @@ class ProcessQualityOptimizationTests(unittest.TestCase):
             part = root / "src/parts/Demo"
             part.mkdir(parents=True)
             (part / "Demo.kicad_mod").write_text("(footprint Demo)", encoding="utf-8")
+            (root / "config").mkdir()
+            (root / "config/electrical-backend.json").write_text(json.dumps({
+                "schema": 1, "active": "atopile", "backends": {"atopile": {
+                    "driver": "scripts/build_atopile_isolated.py", "source_root": "src", "entry": "main.ato:App",
+                    "runtime": "wsl-ato", "platform": "wsl-native", "status": "primary",
+                }},
+            }), encoding="utf-8")
             project = root / "elec/layout/board"
             project.mkdir(parents=True)
             with mock.patch.object(prepare, "ROOT", root):

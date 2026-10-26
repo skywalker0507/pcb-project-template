@@ -9,9 +9,12 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
+
+from electrical_backend import footprint_table, read_config, selected_backend, source_entry
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -72,20 +75,26 @@ def wsl_process_environment(network_mode: str = "inherit") -> dict[str, str]:
 
 
 def classify_failure(log: str) -> dict[str, object] | None:
+    log = re.sub(r"\x1b\[[0-9;]*m", "", log)
     rules = [
         ("atopile_auth_required", r"Part picking on atopile 0\.15\.8 requires sign-in|Sign-in required", "Run `ato auth login` interactively in the configured WSL distro, then rerun the isolated electrical build. Never add credentials to the repository."),
         ("component_data_unreachable", r"Fetching component data failed|Name or service not known|EasyEDA API is unavailable|Failed to fetch footprint data.*handshake operation timed out", "Restore component-data access or provide a reviewed offline component cache; do not change electrical sources merely to bypass picking."),
-        ("footprint_resource_mismatch", r"Footprint `[^`]+` doesn't exist in library `[^`]+`", "Align the reviewed footprint filename, internal footprint name, and atomic-part resource reference; do not substitute a similar package."),
+        ("electrical_net_name_conflict", r"Multiple conflicting required net names|conflicting.*net names", "Resolve the conflicting net names in reviewed .ato connectivity. Retry only after the source changes."),
+        ("footprint_resource_mismatch", r"Footprint `[^`]+` doesn't exist in library `[^`]+`", "Check the configured source_root, resolved fp-lib-table URI, filename and internal footprint name. A stale library URI after moving resources is distinct from a wrong package; do not substitute a similar footprint."),
         ("package_compiler_incompatible", r"trait not found|Incompatible interface types", "Review the exact upstream package/compiler compatibility issue; keep any local migration patch separately reviewed."),
         ("dependency_resolution", r"Failed to resolve.*dependency|ConnectError", "Check the local dependency cache and immutable package revision before retrying."),
         ("source_validation", r"SyntaxError|TypeError|Ercfault", "Inspect the cited .ato source location and resolve the electrical validation error."),
     ]
     for name, pattern, next_action in rules:
         if re.search(pattern, log, re.IGNORECASE):
-            matches = [line.strip() for line in log.splitlines() if re.search(pattern, line, re.IGNORECASE)]
-            return {"class": name, "evidence": matches[-3:], "next": next_action}
-    if "Build failed" in log:
-        return {"class": "unclassified_build_failure", "evidence": log.splitlines()[-8:], "next": "Inspect only the bounded build log tail, then add a deterministic classifier if this recurs."}
+            lines = log.splitlines()
+            indices = [i for i, line in enumerate(lines) if re.search(pattern, line, re.IGNORECASE)]
+            evidence = list(dict.fromkeys(line.strip().strip("│ ") for i in indices[:2] for line in lines[max(0, i-1):i+3] if line.strip()))
+            return {"class": name, "evidence": evidence[:6], "next": next_action}
+    if log.strip():
+        lines = [line.strip().strip("│ ") for line in log.splitlines() if line.strip()]
+        errors = [line for line in lines if re.search(r"error|exception|failed|\.ato:\d|\.py:\d", line, re.IGNORECASE) and not re.search(r"^Build failed|^Build took|^Targets?\s", line, re.IGNORECASE)]
+        return {"class": "unclassified_build_failure", "evidence": (errors[:6] or lines[-6:]), "next": "Inspect the cited root error in the on-disk build log; do not retry an unchanged failure."}
     return None
 
 
@@ -93,7 +102,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--build", default="default")
     parser.add_argument("--distro", default="Ubuntu-24.04")
-    parser.add_argument("--entry", default="main.ato:App")
+    parser.add_argument("--entry", help="Entry relative to configured source_root")
     parser.add_argument("--network-mode", choices=("direct", "inherit"), default="inherit")
     parser.add_argument("--board", type=Path)
     parser.add_argument(
@@ -109,6 +118,9 @@ def main() -> int:
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", args.build):
         raise SystemExit("Invalid build name")
+    _, backend = selected_backend(read_config(ROOT / "config/electrical-backend.json"), "atopile")
+    source_root, _, _ = source_entry(backend, args.entry, root=ROOT)
+    args.entry = args.entry or backend["entry"]
 
     board = (
         args.board if args.board and args.board.is_absolute()
@@ -152,6 +164,7 @@ def main() -> int:
             args.distro,
             "--entry",
             args.entry,
+            "--build", args.build,
         ],
         cwd=ROOT,
         stdout=subprocess.PIPE,
@@ -205,7 +218,7 @@ def main() -> int:
         print(json.dumps(payload, separators=(",", ":")))
         return 1
     preflight_log = ""
-    if source_requires_part_picker(ROOT / "src"):
+    if source_requires_part_picker(source_root):
         preflight_command = (
             "printf 'CODEX_ATO_VERSION=' && ato --version | tail -n 1 && "
             "ato auth status"
@@ -255,13 +268,19 @@ def main() -> int:
                 )
             print(json.dumps(payload, separators=(",", ":")))
             return 1
+    table = board.parent / "fp-lib-table"
+    table_before = table.read_bytes() if table.exists() else None
+    compiler_table = footprint_table(board.parent, source_root)
     if protected_board_existed:
         os.replace(board, guard)
     exit_code = 1
     candidate_captured = False
     try:
+        # Compile against current resource paths, then restore the physical
+        # project's table byte-for-byte, just like its reviewed board.
+        table.write_text(compiler_table, encoding="utf-8")
         command = (
-            f"cd {windows_to_wsl(ROOT)} && "
+            f"cd {shlex.quote(windows_to_wsl(ROOT))} && "
             "printf 'CODEX_ATO_VERSION=' && ato --version | tail -n 1 && "
             f"ato build --build {args.build}"
         )
@@ -290,15 +309,22 @@ def main() -> int:
                     if candidate_board.exists():
                         raise RuntimeError(f"Refusing to overwrite existing candidate board: {candidate_board}")
                     shutil.copy2(board, candidate_board)
+                    (candidate_board.parent / "fp-lib-table").write_text(footprint_table(candidate_board.parent, source_root), encoding="utf-8")
                     candidate_captured = True
                 if args.verbose:
                     print(f"DISCARDING_GENERATED_BOARD={board}")
                 board.unlink()
         finally:
-            if protected_board_existed:
-                if not guard.exists():
-                    raise RuntimeError("Protected-board guard disappeared during build")
-                os.replace(guard, board)
+            try:
+                if protected_board_existed:
+                    if not guard.exists():
+                        raise RuntimeError("Protected-board guard disappeared during build")
+                    os.replace(guard, board)
+            finally:
+                if table_before is not None:
+                    table.write_bytes(table_before)
+                elif table.exists():
+                    table.unlink()
 
     after = sha256(board) if protected_board_existed else None
     if protected_board_existed and after != before:

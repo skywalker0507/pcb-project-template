@@ -16,11 +16,11 @@ import sys
 KICAD_PYTHON = Path(r"C:\Program Files\KiCad\10.0\bin\python.exe")
 
 
-def load_pcbnew() -> object:
+def load_pcbnew(entrypoint: Path | None = None) -> object:
     try:
         import pcbnew  # type: ignore
     except ImportError:
-        raise SystemExit(subprocess.call([str(KICAD_PYTHON), str(Path(__file__).resolve()), *sys.argv[1:]]))
+        raise SystemExit(subprocess.call([str(KICAD_PYTHON), str(entrypoint or Path(__file__).resolve()), *sys.argv[1:]]))
     return pcbnew
 
 
@@ -46,11 +46,15 @@ def pad_signature(pcbnew: object, pad: object) -> tuple[object, ...]:
     position = pad.GetFPRelativePosition()
     size = pad.GetSize()
     drill = pad.GetDrillSize()
+    offset = pad.GetOffset()
     return (
         str(pad.GetNumber()), mm(pcbnew, position.x), mm(pcbnew, position.y),
         mm(pcbnew, size.x), mm(pcbnew, size.y), mm(pcbnew, drill.x), mm(pcbnew, drill.y),
         int(pad.GetShape()), int(pad.GetAttribute()), str(pad.GetLayerSet().FmtHex()),
         round(float(pad.GetFPRelativeOrientation().AsDegrees()), 6),
+        int(pad.GetDrillShape()), mm(pcbnew, offset.x), mm(pcbnew, offset.y),
+        round(float(pad.GetRoundRectRadiusRatio()), 6),
+        round(float(pad.GetChamferRectRatio()), 6), int(pad.GetChamferPositions()),
     )
 
 

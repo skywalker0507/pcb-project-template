@@ -12,6 +12,7 @@
     "template_engine": "scripts/check_template_engine.py",
     "backend_architecture": "scripts/check_backend_architecture.py",
     "electrical_build": "scripts/build_electrical.py",
+    "electrical_candidate_integrity": "scripts/check_electrical_candidate_integrity.py",
     "electrical_freeze": "scripts/create_electrical_freeze.py",
     "kicad_physical_candidate": "scripts/prepare_kicad_physical_candidate.py",
     "kicad_physical_integrity": "scripts/check_kicad_physical_integrity.py",
