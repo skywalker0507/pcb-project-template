@@ -27,6 +27,17 @@ session context.
 
 ## Start a session
 
+When this checkout hosts work on another PCB project, set the ignored
+`.pcb-workspace.local.json` to `{"schema":1,"active_project":"../my-board"}`.
+Session boot and `pcbctl` then use that project. Override with
+`pcbctl.py --project PATH <command>`; use `--local` for this template's checks.
+An invalid selection fails explicitly instead of falling back to the example.
+
+Run existing project checks through `pcbctl.py verify project --plan`, then
+`pcbctl.py verify project`. Checks with unchanged input and output hashes are
+reused, including failures; no new checkpoint script is needed. See
+[project check declarations and scope](docs/PROJECT_CHECKS.md).
+
 Use Python 3.14 throughout this project:
 
 ```powershell
@@ -37,6 +48,14 @@ The command writes `build/WORKSET.json` and emits one compact navigation
 receipt. Read only the workset by default. Open a path from `read_if_needed`
 only when the active action or a failure requires it. Never load a complete
 `.kicad_pcb`, `.kicad_sch`, DSN or SES into model context.
+Worksets keep bounded list previews with counts and truncation flags. In the
+requirements stage, draft status and blocking unknowns are review blockers even
+when the basic input structure passes; status does not replace the full gate.
+Electrical contract validation and the freeze entrypoint independently apply the
+same reviewed-requirements predicate. See [requirement evidence gates](docs/REQUIREMENT_GATES.md)
+for cumulative scopes and explicit prototype test plans. A `reviewed` label or old passing receipt
+cannot hide blocking unknowns or missing requirement structure. Freeze rechecks
+the bound inputs before promotion and snapshots the requirements validator.
 
 The Agent-facing command surface is intentionally limited to eight commands:
 
@@ -57,6 +76,10 @@ under stable subcommands, for example `pcbctl.py place score`, `place
 semantics`, `place render`, `place promote`, `route run` and `route escalate`.
 An exact surviving electrical candidate blocks a duplicate build; use
 `build --force-rebuild` only for an intentional compiler reproducibility check.
+Build plans and successful build receipts state `validation_scope: modeled_components_only`
+and include a bounded, informational snapshot of review states and declared unknowns.
+This snapshot is not a completeness check or freeze authorization; live review metadata
+does not change the compiler reuse fingerprint. Freeze retains its independent gates.
 Advanced operations remain in `config/tool-entrypoints.json`; use them only
 when no default subcommand expresses the reviewed operation.
 
@@ -88,6 +111,56 @@ current resource paths; the existing physical board and its library table are
 restored after compilation. Failed builds return a bounded cause and receipt path.
 Physical-start resolves footprint libraries from the immutable freeze's source
 snapshot and rejects stale physical tables before creating a candidate board.
+For atopile 0.15.8's missing footprint-zone schema, the build adapter retains the
+raw compiler PCB and produces a separate candidate containing the omitted source
+rule areas. Recovery rejects partial/mismatched areas or other resource errors,
+checks exact electrical/geometry parity, and still requires the independent
+all-component integrity gate. It never repairs a routed physical board.
+Cross-file consistency checks only the impedance channels explicitly declared in
+`requirements.controlled_impedance` (use `{}` for a design without them). Stack
+identity, target, optional exact geometry/layer sequence and calculator evidence
+are compared with project data; no USB stack or trace width is built into the
+validator.
+
+Projects may declare `source_preflight` in the selected backend in
+`config/electrical-backend.json`: a workspace `script` (Python), a non-empty
+`inputs` list of exact workspace files, and optional `timeout_seconds` (1–60,
+default 60). `build --plan`, `build --check` and builds run it before compiling
+or reusing a candidate. The script receives `--output <temporary-json-path>`
+and must exit zero with `{"schema":1,"success":true,"issues":[]}`. List imported
+project helpers, rule manifests and reference documents explicitly; the source
+tree is already hashed. The check must preserve source, backend config and all
+declared inputs. Its bounded result and hashes stay in evidence; logs stay in
+tmp. No preflight means no additional process. Manufacturer dimensions and
+project rules belong in the project checker/data, outside generic engine code.
+Freeze rejects missing or stale declared-check evidence and snapshots its input
+files. `--new-project` archives and clears inherited preflight declarations;
+ordinary reconfiguration preserves them. A passing check does not approve a
+footprint, placement or fabrication beyond its declared scope.
+
+Required preflight inputs must be durable workspace files and must pass Git
+ignore checks; `tmp`, `build` and generated dependency directories cannot supply
+them. Optional `config/source-references.json` (schema1, non-empty `files`) pins
+each reference's workspace `path`, uppercase SHA-256 `sha256` and bounded `scope`.
+Store reference snapshots under `references/`; preserve their origin, third-party
+notices and existing review limits. Missing, altered or ignored inputs reject
+before compilation. Freeze snapshots the manifest and its exact input files.
+New-project initialization archives/removes the inherited manifest and preserves
+the files as historical material. Default reconfiguration preserves both.
+
+Build plans separate compiler inputs from validation inputs. `build_required`
+reports whether a compiler invocation is needed; `validation_required` reports
+whether the surviving output needs current gates. An unchanged source, entry,
+driver, project initialization and resolved toolchain can supply its pinned raw
+compiler PCB even when checks or reference paths changed. Run the suggested
+`build` command to revalidate: it copies the raw result, reruns normalization,
+parity and all-component integrity, binds fresh preflight/reference evidence and
+retains the original receipt. A failed new gate stops there without restarting
+the compiler. Schema1 receipts require a valid full input fingerprint and every
+compiler dependency before they can supply this cache; incomplete proof requires
+compilation. Schema2 stores separate compiler/full fingerprints. The common
+driver argument protocol has an explicit version; changes to its compile
+semantics must bump that version. `--force-rebuild` remains an explicit override.
 
 ## Template engine boundary
 

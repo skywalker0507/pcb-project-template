@@ -14,7 +14,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pcb_policy import configured_board, selected_manufacturing_profile
-from design_policy import DEFAULT_OUTPUT as DEFAULT_POLICY, MANUFACTURING_REGISTRY_ARTIFACT, require_policy
+from design_policy import DEFAULT_OUTPUT as DEFAULT_POLICY, MANUFACTURING_REGISTRY_ARTIFACT, require_policy, release_scope
 from export_jlcpcb_release import require_passing_physical_review
 from stage_policy import require_operation
 
@@ -81,6 +81,9 @@ def main() -> int:
     if audit.get("release_pass") is not True or audit.get("board_sha256") != board_hash:
         raise SystemExit("Snapshot requires release_pass=true from an audit matching this exact board")
     design_policy = require_policy("release", args.design_policy.resolve())
+    scope = read_json(package / "release-scope.json", "Export release scope")
+    if scope != release_scope(design_policy, board_hash):
+        raise SystemExit("Export release scope does not match this exact board, policy, target and unfinished evidence")
     manufacturing_registry = read_json(args.manufacturing_registry.resolve(), "Manufacturing registry")
     registry_pre_export = read_json(args.registry_pre_export.resolve(), "Manufacturing registry pre-export receipt")
     gerber_rules = read_json(args.gerber_rules.resolve(), "Manufacturing registry Gerber receipt")
@@ -132,6 +135,7 @@ def main() -> int:
         "gerber_rules": args.gerber_rules.resolve(),
         "physical_review": args.physical_review.resolve(),
         "assembly_parts": args.assembly_parts.resolve(),
+        "requirements": ROOT / "config/requirements.json",
     }
     for label, source in evidence.items():
         if not source.is_file():
@@ -163,6 +167,8 @@ def main() -> int:
             "kind": "release_snapshot",
             "board_sha256": board_hash,
             "release_pass": True,
+            "release_target": scope["release_target"],
+            "production_ready": scope["production_ready"],
             "manufacturer": profile["manufacturer"],
             "manufacturing_source": profile["source"],
             "design_policy_sha256": design_policy["policy_sha256"],

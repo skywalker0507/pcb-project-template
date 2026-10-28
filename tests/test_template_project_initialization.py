@@ -18,6 +18,7 @@ import electrical_backend as backend
 import electrical_freeze_contract as freeze
 import init_project as initializer
 import prepare_kicad_physical_candidate as physical
+from validate_requirements import problems as requirement_problems
 
 
 class ProjectInitializationTests(unittest.TestCase):
@@ -96,10 +97,44 @@ class ProjectInitializationTests(unittest.TestCase):
             self.assertTrue(release.exists())
             self.assertEqual(board.read_bytes(), b"reviewed-board-fixture")
             self.assertEqual(json.loads((root / "handoff/stages/CURRENT_STAGE.json").read_text())["stage"], "requirements")
+            requirements = json.loads((root / "config/requirements.json").read_text())
+            self.assertEqual(requirement_problems(requirements), [])
+            self.assertTrue(requirement_problems(requirements, require_reviewed=True))
             with mock.patch.object(freeze, "ROOT", root):
                 release.write_text(json.dumps({"schema": 2, "kind": "electrical_freeze", "success": True, "freeze_pass": True}))
                 with self.assertRaisesRegex(SystemExit, "different project initialization"):
                     freeze.load_release_freeze(release, release.parent.parent)
+
+    def test_new_project_clears_inherited_source_preflights_after_archiving(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(initializer, "ROOT", Path(directory).resolve()):
+            root = Path(directory).resolve()
+            self.fixture(root)
+            path = root / "config/electrical-backend.json"
+            config = json.loads(path.read_text())
+            for item in config["backends"].values():
+                item["source_preflight"] = {"script": "old-project.py", "inputs": ["old-rules.json"]}
+            path.write_text(json.dumps(config))
+            inherited = path.read_bytes()
+            initializer.configure_project(None, None, True, False, 4, "atopile", True)
+            self.assertEqual(path.read_bytes(), inherited)
+            initializer.configure_project("fresh", None, True, False, 4, "atopile", False)
+            current = json.loads(path.read_text())
+            self.assertTrue(all("source_preflight" not in item for item in current["backends"].values()))
+            scope = json.loads((root / "config/project-initialization.json").read_text())
+            self.assertEqual((root / scope["archive"] / "config/electrical-backend.json").read_bytes(), inherited)
+
+    def test_new_project_archives_reference_manifest_without_removing_reference_files(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(initializer, "ROOT", Path(directory).resolve()):
+            root=Path(directory).resolve();self.fixture(root)
+            manifest=root/'config/source-references.json';manifest.write_text('{"schema":1,"files":[]}')
+            reference=root/'references/vendor.pdf';reference.parent.mkdir();reference.write_bytes(b'original reference')
+            initializer.configure_project(None,None,True,False,4,'atopile',True)
+            self.assertTrue(manifest.exists())
+            initializer.configure_project('fresh',None,True,False,4,'atopile',False)
+            scope=json.loads((root/'config/project-initialization.json').read_text())
+            self.assertEqual((root/scope['archive']/'config/source-references.json').read_text(),'{"schema":1,"files":[]}')
+            self.assertFalse(manifest.exists())
+            self.assertEqual(reference.read_bytes(),b'original reference')
 
     def test_nested_resources_and_stale_physical_table(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -146,6 +181,12 @@ class ProjectInitializationTests(unittest.TestCase):
             table.write_text('(fp_lib_table (lib (name "Frozen")(type "KiCad")(uri "${KIPRJMOD}/obsolete-live-source")))')
             before = table.read_bytes()
             output = project / "board.kicad_pcb"
+            (root / "config").mkdir()
+            (root / "config/requirements.json").write_text(json.dumps({
+                "schema": 2, "status": "reviewed", "interfaces": [{"name": "fixture"}],
+                "rails": [], "connectors": [], "constraints": [], "mechanical": {},
+                "unknowns": [], "critical_nets": [], "placement_regions": [],
+            }), encoding="utf-8")
             args = ["physical-start", "--electrical-freeze", str(freeze_path), "--output", str(output)]
             with mock.patch.object(physical, "ROOT", root), mock.patch.object(sys, "argv", args), mock.patch.object(physical, "current_stage", return_value={"stage": "physical"}), mock.patch.object(physical, "read_config", return_value={}), mock.patch.object(physical, "selected_backend", return_value=("kicad", {"role": "primary"})), mock.patch.object(physical, "load_release_freeze", return_value=({"source_sha256": backend.source_sha256(source)}, {})), mock.patch.object(physical, "create_run") as create_run:
                 with self.assertRaisesRegex(SystemExit, "stale"):

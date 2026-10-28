@@ -19,6 +19,29 @@ from electrical_backend import read_config, selected_backend, source_entry
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def source_failure_evidence(exc: BaseException, limit: int = 8) -> list[str]:
+    """Expose grouped linker errors without sending a traceback into context."""
+    evidence: list[str] = []
+    pending = [exc]
+    seen: set[int] = set()
+    while pending and len(evidence) < limit:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend(reversed(current.exceptions))
+            continue
+        message = " ".join(str(current).split())
+        evidence.append(f"{type(current).__name__}: {message}"[:480])
+        cause = current.__cause__
+        if cause is not None:
+            pending.append(cause)
+    if pending:
+        evidence.append("Additional errors omitted.")
+    return evidence
+
+
 def wsl_process_environment() -> dict[str, str]:
     env = os.environ.copy()
     existing = [item for item in env.get("WSLENV", "").split(":") if item]
@@ -149,7 +172,7 @@ def main() -> int:
             "success": False,
             "entry": args.entry,
             "failure": type(exc).__name__,
-            "evidence": str(exc).splitlines()[-8:],
+            "evidence": source_failure_evidence(exc),
         }
     print(json.dumps(receipt, ensure_ascii=False, separators=(",", ":")))
     return 0 if receipt.get("success") is True else 1

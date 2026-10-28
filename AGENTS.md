@@ -1,23 +1,27 @@
 # Codex instructions for AI PCB projects
 
-This repository has one production path:
+Production path:
 
 `requirements -> electrical -> physical -> routing -> release`
 
-Reviewed requirements/`.ato` are electrical authority; KiCad is physical
-authority/validator. KRT creates candidates; integrations are optional.
+Reviewed requirements/`.ato`: electrical authority. KiCad: physical
+authority/validator. KRT creates candidates; integrations optional.
 
 ## Start and command surface
 
-Run `py -3.14 scripts/session_boot.py` once per session. Follow `next_command`,
-read only `read_now`, and open `read_if_needed` only after a related failure.
+Boot: `py -3.14 scripts/session_boot.py` once/session. Follow `next_command`;
+read `read_now`, then related `read_if_needed` after failure.
 
-Use only these default commands:
+Commands:
 
 `status / build / freeze / physical-start / place / route / verify / release`
 
-Dispatch with `py -3.14 scripts/pcbctl.py <command>`; run `pcbctl build --plan`
-before compiling. Keep optional entrypoints outside default context.
+Dispatch: `py -3.14 scripts/pcbctl.py <command>`; `build --plan` before compiling.
+`--local`: template work. Optional entrypoints stay on-demand.
+
+Checks: `verify project --plan`, then `verify project [--only ID]`.
+Declare dependencies in `config/project-checks.json`. Reuse exact receipts;
+no checkpoint runners/duplicated status JSON. Screening never approves freeze.
 
 ## Hard invariants
 

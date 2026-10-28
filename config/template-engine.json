@@ -1,16 +1,26 @@
 {
   "schema": 1,
   "package": "pcb_template_engine",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "api_version": 1,
   "source": {
     "type": "path",
     "path": "template-engine",
-    "sha256": "86DBE8A2D24F0DDBAF6D26DC9CCDEDAD872D265D3CFDBDA15AA1CCF3E4BA7FF2"
+    "sha256": "7E38ABD1F00BFB168E99BF9D126A2A684F0AAAAF868C3E31522ABA8662793347"
   },
   "boundary": {
-    "engine_owns": ["policy_compilation", "manufacturing_registry_compilation", "manufacturing_rule_evaluation"],
-    "project_owns": ["reviewed_inputs", "board_sources", "component_semantics", "manufacturing_evidence", "artifact_locations"],
+    "engine_owns": [
+      "policy_compilation",
+      "manufacturing_registry_compilation",
+      "manufacturing_rule_evaluation"
+    ],
+    "project_owns": [
+      "reviewed_inputs",
+      "board_sources",
+      "component_semantics",
+      "manufacturing_evidence",
+      "artifact_locations"
+    ],
     "compatibility_adapters": "scripts"
   }
 }

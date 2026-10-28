@@ -16,7 +16,7 @@ import hashlib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pcb_policy import configured_board, load_acceptance, require_no_prohibited_evidence, selected_manufacturing_profile
-from design_policy import DEFAULT_OUTPUT as DEFAULT_POLICY, require_policy
+from design_policy import DEFAULT_OUTPUT as DEFAULT_POLICY, require_policy, release_scope
 from stage_policy import require_operation
 from check_jlcpcb_release import package_report
 
@@ -358,10 +358,13 @@ def main() -> int:
         if preflight.get("success") is not True:
             raise RuntimeError("Staged JLCPCB package failed deterministic preflight: " + ", ".join(preflight.get("failures", [])))
 
+        scope = staging / "release-scope.json"
+        scope.write_text(json.dumps(release_scope(design_policy, audit["board_sha256"]), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         targets = [
             (gerber, output / "gerber"),
             (assembly, output / "assembly"),
             (staged_archive, output / f"{output.name}-gerber.zip"),
+            (scope, output / "release-scope.json"),
         ]
         backups: list[tuple[Path, Path]] = []
         committed: list[Path] = []

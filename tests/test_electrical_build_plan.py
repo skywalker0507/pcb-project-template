@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import contextlib
+import io
 import json
 from pathlib import Path
 import sys
@@ -25,6 +27,73 @@ electrical_build = load("electrical_build_plan", "scripts/build_electrical.py")
 
 
 class ElectricalBuildPlanTests(unittest.TestCase):
+    def test_plan_rejects_build_directory_option_before_running_preflight(self):
+        with mock.patch.object(sys, 'argv', ['build_electrical.py', '--plan', '--output', 'wrong.json']), \
+             mock.patch.object(electrical_build.source_preflight, 'run') as preflight, \
+             contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as result:
+            electrical_build.main()
+        self.assertEqual(result.exception.code, 2)
+        preflight.assert_not_called()
+
+    def test_plan_reports_live_review_state_without_claiming_whole_board_approval(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "config").mkdir()
+            for status in ["draft", "reviewed"]:
+                with self.subTest(status=status):
+                    (root / "config/requirements.json").write_text(json.dumps({
+                        "status": status, "unknowns": [{"id": "unmeasured-power-off"}],
+                    }), encoding="utf-8")
+                    (root / "config/selected-parts.json").write_text(json.dumps({
+                        "status": status, "parts": [{"refs": ["U1", "R1"]}, {"refs": ["R1"]}],
+                    }), encoding="utf-8")
+                    stdout = io.StringIO()
+                    with mock.patch.object(electrical_build, "ROOT", root), \
+                         mock.patch.object(sys, "argv", ["build_electrical.py", "--plan"]), \
+                         mock.patch.object(electrical_build, "read_config", return_value={}), \
+                         mock.patch.object(electrical_build, "selected_backend", return_value=("test", {})), \
+                         mock.patch.object(electrical_build, "validate_backend", return_value={}), \
+                         mock.patch.object(electrical_build, "production_toolchain", return_value=None), \
+                         mock.patch.object(electrical_build, "build_input_manifest", return_value={"fingerprint": "A"*64}), \
+                         mock.patch.object(electrical_build, "find_matching_build", return_value={"receipt": "surviving.json"}), \
+                         contextlib.redirect_stdout(stdout):
+                        self.assertEqual(electrical_build.main(), 0)
+                    plan = json.loads(stdout.getvalue())
+                    self.assertEqual(json.loads((root / 'build/03-electrical/build-plan.json').read_text()), plan)
+                    self.assertFalse(plan["build_required"])
+                    self.assertEqual(plan["validation_scope"], "modeled_components_only")
+                    self.assertEqual(plan["next_action"], "review_matching_candidate")
+                    self.assertEqual(plan["review_context"]["requirements"]["status"], status)
+                    self.assertEqual(plan["review_context"]["requirements"]["unknown_ids"], ["unmeasured-power-off"])
+                    self.assertEqual(plan["review_context"]["selected_parts"]["declared_unique_ref_count"], 2)
+                    self.assertTrue(plan["review_context"]["informational_only"])
+
+    def test_review_context_bounds_output_without_hiding_declared_unknown_count(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "config").mkdir()
+            (root / "config/requirements.json").write_text(json.dumps({
+                "status": "x"*1000, "unknowns": [{"id": str(i)*1000} for i in range(20)],
+            }), encoding="utf-8")
+            with mock.patch.object(electrical_build, "ROOT", root):
+                entry = electrical_build.review_context()["requirements"]
+            self.assertEqual(entry["declared_unknown_count"], 20)
+            self.assertEqual(len(entry["unknown_ids"]), 12)
+            self.assertTrue(entry["unknown_ids_truncated"])
+            self.assertLessEqual(len(json.dumps(entry)), 1300)
+
+    def test_missing_or_malformed_review_metadata_stays_unknown(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "config").mkdir()
+            (root / "config/requirements.json").write_text("[]", encoding="utf-8")
+            (root / "config/selected-parts.json").write_text('{"status":"draft","parts":[{"refs":"U1"}]}', encoding="utf-8")
+            with mock.patch.object(electrical_build, "ROOT", root):
+                context = electrical_build.review_context()
+            self.assertEqual(context["requirements"], {"availability": "unavailable", "status": None})
+            self.assertIsNone(context["selected_parts"]["declared_unique_ref_count"])
+            self.assertEqual(context["assembly_registry"]["availability"], "unavailable")
+
     def test_physical_adoption_does_not_trigger_a_new_compile_but_project_identity_does(self):
         config = electrical_build.read_config(electrical_build.DEFAULT_CONFIG)
         name, backend = electrical_build.selected_backend(config)
@@ -35,12 +104,17 @@ class ElectricalBuildPlanTests(unittest.TestCase):
             flow_path = root / "config/pcb-flow.json"
             flow = {"project": {"name": "first-project", "board": "board-a"}}
             flow_path.write_text(json.dumps(flow))
-            with mock.patch.object(electrical_build, "ROOT", root), mock.patch.object(electrical_build, "sha256", return_value="H"*64), mock.patch.object(electrical_build, "relative", side_effect=lambda path: path.name):
+            with mock.patch.object(electrical_build, "ROOT", root), mock.patch.object(electrical_build, "sha256", return_value="H"*64), mock.patch.object(electrical_build, "relative", side_effect=lambda path: path.relative_to(root if path.is_relative_to(root) else ROOT).as_posix()):
                 first = electrical_build.build_input_manifest(name, backend, status, "default", None)
                 flow["project"]["board"] = "adopted-physical-board"
                 flow_path.write_text(json.dumps(flow))
                 adopted = electrical_build.build_input_manifest(name, backend, status, "default", None)
                 self.assertEqual(first["fingerprint"], adopted["fingerprint"])
+                review_path = root / "config/requirements.json"
+                review_path.write_text('{"status":"draft","unknowns":[{"id":"open"}]}', encoding="utf-8")
+                electrical_build.review_context()
+                review_path.write_text('{"status":"reviewed","unknowns":[]}', encoding="utf-8")
+                self.assertEqual(adopted["fingerprint"], electrical_build.build_input_manifest(name, backend, status, "default", None)["fingerprint"])
                 flow["project"]["name"] = "different-project"
                 flow_path.write_text(json.dumps(flow))
                 changed = electrical_build.build_input_manifest(name, backend, status, "default", None)
@@ -100,6 +174,20 @@ class ElectricalBuildPlanTests(unittest.TestCase):
             ):
                 match = electrical_build.find_matching_build({"fingerprint": "A" * 64})
                 self.assertEqual(match["candidate_board_sha256"], candidate_hash)
+                normalization = evidence / "normalization.json"
+                normalization.write_text(json.dumps({
+                    "kind": "atopile_candidate_normalization", "success": True,
+                    "exact_electrical_geometry_parity": True, "source_sha256": "S"*64,
+                    "candidate_board_sha256": candidate_hash, "compiler_candidate_sha256": "R"*64,
+                }), encoding="utf-8")
+                payload["compiler_candidate_board_sha256"] = "R"*64
+                payload["normalization"] = {"receipt": str(normalization), "sha256": electrical_build.sha256(normalization)}
+                receipt.write_text(json.dumps(payload), encoding="utf-8")
+                self.assertIsNotNone(electrical_build.find_matching_build({"fingerprint": "A"*64}))
+                normalization.unlink()
+                self.assertIsNone(electrical_build.find_matching_build({"fingerprint": "A"*64}))
+                payload.pop("normalization")
+                receipt.write_text(json.dumps(payload), encoding="utf-8")
                 integrity.write_text("{}", encoding="utf-8")
                 self.assertIsNone(electrical_build.find_matching_build({"fingerprint": "A" * 64}))
                 payload.pop("candidate_integrity")

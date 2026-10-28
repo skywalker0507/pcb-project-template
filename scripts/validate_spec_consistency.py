@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 
@@ -50,6 +51,59 @@ def part_map(data: dict[str, object]) -> tuple[dict[str, str], list[str]]:
     return mapping, issues
 
 
+def impedance_problems(root: Path, controlled: object) -> list[str]:
+    """Validate declared channels against their evidence, without project geometry."""
+    if not isinstance(controlled, dict):
+        return ["controlled_impedance must be an object (empty for no controlled channels)"]
+    issues = []
+    def positive(value: object) -> bool:
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0
+    for name, channel in controlled.items():
+        prefix = f"controlled impedance {name}"
+        if not isinstance(channel, dict):
+            issues.append(f"{prefix}: declaration must be an object")
+            continue
+        evidence_value = channel.get("evidence")
+        if not isinstance(evidence_value, str) or not evidence_value:
+            issues.append(f"{prefix}: evidence path is missing")
+            continue
+        try:
+            (root / evidence_value).resolve().relative_to(root.resolve())
+            evidence = load_json(root, evidence_value)
+            stack = evidence.get("stackup", {})
+            section = evidence.get(channel.get("evidence_section", f"{name}_differential"), {})
+            if not isinstance(stack, dict) or not isinstance(section, dict):
+                raise ValueError("stackup and channel evidence must be objects")
+            if not channel.get("stack_template") or stack.get("template") != channel["stack_template"]:
+                issues.append(f"{prefix}: stack template does not match the declaration")
+            if not positive(channel.get("target_ohm")) or section.get("target_ohm") != channel.get("target_ohm"):
+                issues.append(f"{prefix}: target impedance does not match the declaration")
+            physical = stack.get("physical_layers", [])
+            if (evidence.get("schema") != 2 or not isinstance(physical, list) or not physical
+                    or any(not isinstance(item, dict) or not item.get("name") or not positive(item.get("thickness_mm")) for item in physical)):
+                issues.append(f"{prefix}: complete manufacturer physical stackup is missing")
+            else:
+                copper_count = sum(item.get("kind") == "copper" for item in physical)
+                if not copper_count or stack.get("layers") != copper_count:
+                    issues.append(f"{prefix}: copper layer count does not match the physical stackup")
+                expected_layers = channel.get("physical_layers")
+                if expected_layers is not None and [item["name"] for item in physical] != expected_layers:
+                    issues.append(f"{prefix}: physical layer sequence does not match the declaration")
+            geometry = section.get("pcb_geometry_mm")
+            if not isinstance(geometry, dict) or not geometry or any(not positive(value) for value in geometry.values()):
+                issues.append(f"{prefix}: positive reviewed PCB geometry is missing")
+                geometry = {}
+            expected_geometry = channel.get("geometry_mm", {})
+            if not isinstance(expected_geometry, dict) or any(geometry.get(key) != value for key, value in expected_geometry.items()):
+                issues.append(f"{prefix}: geometry does not match the project declaration")
+            verification = section.get("rounded_geometry_verification_response", {})
+            if not isinstance(verification, dict) or verification.get("dResultValid") != 1 or not positive(verification.get("dImpedance")):
+                issues.append(f"{prefix}: calculator verification is not valid")
+        except (OSError, json.JSONDecodeError, ValueError, TypeError) as exc:
+            issues.append(f"{prefix}: cannot load/validate evidence: {exc}")
+    return issues
+
+
 def consistency_problems(root: Path = ROOT) -> list[str]:
     issues: list[str] = []
     try:
@@ -67,6 +121,15 @@ def consistency_problems(root: Path = ROOT) -> list[str]:
     for name, revision in revisions.items():
         if revision != expected:
             issues.append(f"revision mismatch: {name}={revision!r}, expected={expected!r}")
+    flow_path = root / "config/pcb-flow.json"
+    if flow_path.is_file():
+        try:
+            project = load_json(root, "config/pcb-flow.json").get("project", {}).get("name")
+            for name, record in records.items():
+                if record.get("project") is not None and record["project"] != project:
+                    issues.append(f"project identity mismatch: {name}={record['project']!r}, expected={project!r}")
+        except (OSError, ValueError, AttributeError) as exc:
+            issues.append(f"cannot validate project identity: {exc}")
 
     requirements_controller = records["requirements"].get("controller")
     design_controller = records["design"].get("controller")
@@ -97,36 +160,7 @@ def consistency_problems(root: Path = ROOT) -> list[str]:
     if missing_assembly:
         issues.append(f"spec references missing from assembly mapping: {missing_assembly}")
 
-    controlled = records["requirements"].get("controlled_impedance")
-    usb = controlled.get("usb2") if isinstance(controlled, dict) else None
-    evidence_value = usb.get("evidence") if isinstance(usb, dict) else None
-    if not isinstance(evidence_value, str):
-        issues.append("USB impedance evidence path is missing")
-    else:
-        try:
-            evidence = load_json(root, evidence_value)
-            template = evidence.get("stackup", {}).get("template") if isinstance(evidence.get("stackup"), dict) else None
-            if template != usb.get("stack_template"):
-                issues.append(
-                    f"USB stack template mismatch: requirements={usb.get('stack_template')!r}, evidence={template!r}"
-                )
-            physical = evidence.get("stackup", {}).get("physical_layers", [])
-            geometry = evidence.get("usb2_differential", {}).get("pcb_geometry_mm", {})
-            verification = evidence.get("usb2_differential", {}).get(
-                "rounded_geometry_verification_response", {}
-            )
-            expected_stack = [
-                "F.Cu", "dielectric 1.1", "dielectric 1.2", "In1.Cu", "dielectric 2",
-                "In2.Cu", "dielectric 3.1", "dielectric 3.2", "B.Cu",
-            ]
-            if evidence.get("schema") != 2 or [item.get("name") for item in physical] != expected_stack:
-                issues.append("USB impedance evidence lacks the complete reviewed manufacturer stackup")
-            if geometry.get("base_width") != 0.290576 or geometry.get("pair_gap") != 0.2032:
-                issues.append("USB impedance evidence geometry does not match the reviewed calculator result")
-            if verification.get("dResultValid") != 1:
-                issues.append("USB impedance evidence calculator verification is not valid")
-        except (OSError, json.JSONDecodeError, ValueError) as exc:
-            issues.append(f"cannot load USB impedance evidence: {exc}")
+    issues.extend(impedance_problems(root, records["requirements"].get("controlled_impedance")))
 
     selected_status = records["selected"].get("status")
     if selected_status not in {"electrical_review", "reviewed", "release_review"}:
@@ -151,6 +185,16 @@ def main() -> int:
     root = args.project_root.resolve()
     issues = consistency_problems(root)
     input_paths = [root / "HARDWARE_SPEC.md", *(root / relative for relative in FILES.values())]
+    try:
+        controlled = load_json(root, FILES["requirements"]).get("controlled_impedance", {})
+        for channel in controlled.values() if isinstance(controlled, dict) else []:
+            if isinstance(channel, dict) and isinstance(channel.get("evidence"), str):
+                path = (root / channel["evidence"]).resolve()
+                path.relative_to(root.resolve())
+                if path.is_file() and path not in input_paths:
+                    input_paths.append(path)
+    except (OSError, ValueError):
+        pass  # The validation issues above already describe malformed inputs.
     payload = {
         "schema": 1,
         "kind": "spec_consistency_validation",

@@ -68,7 +68,9 @@
     "usb2": {
       "target_ohm": 90,
       "evidence": "config/jlcpcb-impedance-evidence.json",
-      "stack_template": "JLC04161H-3313A"
+      "stack_template": "JLC04161H-3313A",
+      "geometry_mm": {"base_width": 0.290576, "pair_gap": 0.2032},
+      "physical_layers": ["F.Cu", "dielectric 1.1", "dielectric 1.2", "In1.Cu", "dielectric 2", "In2.Cu", "dielectric 3.1", "dielectric 3.2", "B.Cu"]
     }
   },
   "assembly_exempt_refs": ["J2", "J3", "J4"],

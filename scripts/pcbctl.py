@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from project_context import selection
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -57,6 +59,8 @@ SUBCOMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
         "drc-review": ("scripts/record_kicad_drc_review.py",),
         "workflow": ("scripts/profile_workflow.py",),
         "template": ("scripts/run_template_checks.py",),
+        "project": ("scripts/project_checks.py",),
+        "requirements": ("scripts/validate_requirements.py",),
     },
     "route": {
         "run": ("scripts/krt_flow.py", "route"),
@@ -94,14 +98,14 @@ COMMAND_HELP = {
 
 
 def usage() -> str:
-    lines = ["usage: pcbctl.py <command> [arguments forwarded unchanged]", "commands:"]
+    lines = ["usage: pcbctl.py [--project PATH | --local] <command> [arguments forwarded unchanged]", "commands:"]
     lines.extend(f"  {name:<14} {COMMAND_HELP[name]}" for name in COMMANDS)
     lines.extend([
         "subcommands:",
         "  physical-start  create | rebase | outline | stack | plane | silkscreen",
         "  place           apply | query | score | semantics | immutability | integrity | render | review | promote",
         "  route           run | start | status | finalize | check | report | history | health | escalate | trace | return-vias | checkpoint-finalize",
-        "  verify          readiness | parity | prepare-review | finalize-review | delta | remaining | pre-route | footprint-equivalence | drc-review | workflow | template",
+        "  verify          project | requirements | readiness | parity | prepare-review | finalize-review | delta | remaining | pre-route | footprint-equivalence | drc-review | workflow | template",
         "  release         prepare-dfm | import-dfm-result | record-dfm (legacy) | check-cost-policy | review-quote | confirm-process | check-manufacturing | check-gerber",
     ])
     return "\n".join(lines)
@@ -124,12 +128,22 @@ def command_argv(command: str, arguments: list[str]) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
+    try:
+        target, args = selection(ROOT, args)
+    except (OSError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     if not args or args[0] in {"-h", "--help", "help"}:
         print(usage())
         return 0
+    if target != ROOT.resolve():
+        return subprocess.run([sys.executable, str(target / 'scripts/pcbctl.py'), '--local', *args],
+                              cwd=target, check=False).returncode
     command = args.pop(0)
     try:
         dispatched = command_argv(command, args)
+        if command == 'status':
+            dispatched.append('--local')
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         print(usage(), file=sys.stderr)

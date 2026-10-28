@@ -12,7 +12,11 @@ import shutil
 
 from artifact_store import create_run, finish_run, relative
 from electrical_backend import DEFAULT_CONFIG, ROOT, read_config, selected_backend, source_sha256
-from electrical_candidate_contract import require_candidate_integrity
+import electrical_source_preflight as source_preflight
+import source_references
+from electrical_build_identity import require_compiler_reuse
+from electrical_candidate_contract import require_candidate_integrity, require_candidate_normalization
+from validate_requirements import problems as requirements_problems
 
 
 TOOLCHAIN_RECEIPT = ROOT / "build/00-shared/evidence/toolchain/toolchain-resolved.json"
@@ -41,7 +45,14 @@ def load(path: Path, label: str) -> dict[str, object]:
     return value
 
 
+def require_reviewed_requirements(path: Path) -> None:
+    issues = requirements_problems(load(path, "Requirements"), require_reviewed=True, gate="electrical_freeze")
+    if issues:
+        raise SystemExit("Requirements are not ready for electrical freeze: " + "; ".join(issues[:8]))
+
+
 def verify_contract_inputs(contract: dict[str, object], inputs: dict[str, Path]) -> None:
+    require_reviewed_requirements(inputs["requirements"])
     recorded = contract.get("inputs")
     if not isinstance(recorded, dict):
         raise SystemExit("Electrical contract receipt does not bind its reviewed input files")
@@ -78,6 +89,7 @@ def main() -> int:
     backend_name, backend = selected_backend(config)
     if backend_name != "atopile" or backend.get("status") != "primary":
         raise SystemExit("Production electrical freeze requires the configured primary atopile backend")
+    require_reviewed_requirements(PROVENANCE_INPUTS["requirements"])
 
     build_path = args.build_receipt.resolve()
     contract_path = args.contract_receipt.resolve()
@@ -103,6 +115,7 @@ def main() -> int:
         raise SystemExit(str(exc)) from exc
     if build.get("candidate_board_sha256") != board_hash:
         raise SystemExit("Electrical build candidate changed after integrity validation")
+    normalization_path = require_candidate_normalization(build, ROOT)
     manifest_payload = load(manifest, "Electrical source manifest")
     if manifest_payload.get("schema") != 2 or manifest_payload.get("board_sha256") != board_hash:
         raise SystemExit("Electrical source manifest schema/SHA does not match the candidate board")
@@ -141,6 +154,12 @@ def main() -> int:
         raise SystemExit("Reviewed atopile source changed after the electrical build")
     if contract_meta.get("config_sha256") != sha256(DEFAULT_CONFIG):
         raise SystemExit("Electrical backend configuration changed after the electrical build")
+    try:
+        preflight_path = source_preflight.require(build, backend, ROOT)
+        reference_inputs = source_references.require(build, ROOT)
+        compiler_origin = require_compiler_reuse(build, ROOT)
+    except (OSError, ValueError) as exc:
+        raise SystemExit(str(exc)) from exc
 
     run = create_run("electrical_freeze", "electrical-freeze", args.freeze_id)
     bundle_tmp = run.tmp / "bundle"
@@ -154,14 +173,50 @@ def main() -> int:
             "candidate_integrity": integrity_path,
             "contract_receipt": contract_path,
             "candidate_review": review_path,
+            "requirements_validator": ROOT / "scripts/validate_requirements.py",
+            "requirements_policy": Path(requirements_problems.__code__.co_filename).resolve(),
+            "template_engine_contract": ROOT / "config/template-engine.json",
             **inputs,
         }
+        if normalization_path is not None:
+            evidence_files["candidate_normalization"] = normalization_path
+        if preflight_path is not None:
+            evidence_files["source_preflight"] = preflight_path
+        if compiler_origin is not None:
+            evidence_files["compiler_origin"] = compiler_origin
+            evidence_files["compiler_identity_validator"] = ROOT / "scripts/electrical_build_identity.py"
+        if reference_inputs is not None:
+            evidence_files["source_reference_manifest"] = ROOT / reference_inputs["manifest"]["path"]
+            evidence_files["source_reference_validator"] = ROOT / "scripts/source_references.py"
         frozen_inputs: dict[str, dict[str, str]] = {}
         for name, source in evidence_files.items():
             destination = provenance / f"{name.replace('_', '-')}{source.suffix}"
             shutil.copy2(source, destination)
             frozen_inputs[name] = {"path": relative(run.release / "provenance" / destination.name), "sha256": sha256(destination)}
         source_copy = provenance / "source"
+        if reference_inputs is not None:
+            for index, item in enumerate(reference_inputs["files"]):
+                source = ROOT / item["path"]
+                destination = provenance / "source-reference-inputs" / item["path"]
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
+                if sha256(destination) != item["sha256"] or sha256(source) != item["sha256"]:
+                    raise SystemExit("Source references changed while copying freeze provenance")
+                frozen_inputs[f"source_reference_input_{index}"] = {
+                    "path": relative(run.release / destination.relative_to(bundle_tmp)), "sha256": item["sha256"]}
+        if preflight_path is not None:
+            preflight_payload = load(preflight_path, "Source preflight receipt")
+            preflight_files = [*preflight_payload["inputs"]["files"],
+                               {"path": "scripts/electrical_source_preflight.py", "sha256": preflight_payload["runner_sha256"]}]
+            for index, item in enumerate(preflight_files):
+                source = ROOT / item["path"]
+                destination = provenance / "source-preflight-inputs" / item["path"]
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
+                if sha256(destination) != item["sha256"] or sha256(source) != item["sha256"]:
+                    raise SystemExit("Source preflight inputs changed while copying freeze provenance")
+                frozen_inputs[f"source_preflight_input_{index}"] = {
+                    "path": relative(run.release / destination.relative_to(bundle_tmp)), "sha256": item["sha256"]}
         shutil.copytree(source_root, source_copy)
         snapshot_source_hash = source_sha256(source_copy)
         if snapshot_source_hash != current_source_hash or source_sha256(source_root) != snapshot_source_hash:
@@ -177,6 +232,10 @@ def main() -> int:
         (bundle_tmp / "source-manifest.json").write_text(
             json.dumps(source_manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
+        verify_contract_inputs(contract, inputs)
+        for name, source in inputs.items():
+            if frozen_inputs[name]["sha256"] != sha256(source):
+                raise SystemExit(f"Freeze provenance input changed while copying: {name}")
         payload = {
             "schema": 2,
             "kind": "electrical_freeze",

@@ -92,7 +92,8 @@ def initialize_project_records(project_name: str) -> Path:
     identity = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     archive = ROOT / "tmp/project-initialization" / identity
     drafts = {
-        "requirements.json": {"schema": 2, "revision": "Rev A", "status": "draft", "interfaces": [], "rails": [], "connectors": [], "mechanical": {}, "constraints": [], "critical_nets": [], "unknowns": ["Record and review this project's requirements before electrical freeze."]},
+        "project-checks.json": {"schema": 1, "checks": []},
+        "requirements.json": {"schema": 2, "revision": "Rev A", "status": "draft", "interfaces": [], "rails": [], "connectors": [], "mechanical": {}, "constraints": [], "critical_nets": [], "placement_regions": [], "controlled_impedance": {}, "unknowns": ["Record and review this project's requirements before electrical freeze."]},
         "product-decisions.json": {"schema": 1, "project": project_name, "revision": "Rev A", "status": "draft", "decisions": {}, "invariants": []},
         "selected-parts.json": {"schema": 1, "revision": "Rev A", "status": "draft", "footprint_and_polarity_review": {"status": "pending", "reviewed_refs": []}, "parts": []},
         "footprint-provenance.json": {"schema": 1, "status": "draft", "parts": {}},
@@ -101,6 +102,9 @@ def initialize_project_records(project_name: str) -> Path:
     }
     pointers = [*ROOT.glob("build/*/CURRENT.json"), ROOT / "build/WORKSET.json", ROOT / "build/WORKSET.md"]
     paths = [*(ROOT / "config" / name for name in drafts), ROOT / "HARDWARE_SPEC.md",
+             ROOT / "config/electrical-backend.json",
+             ROOT / "config/source-references.json",
+             ROOT / '.pcb-workspace.local.json',
              ROOT / "config/project-initialization.json", ROOT / "handoff/stages/CURRENT_STAGE.json",
              ROOT / "handoff/stages/CURRENT_STAGE.md", *pointers]
     records = []
@@ -117,6 +121,12 @@ def initialize_project_records(project_name: str) -> Path:
         records.append({"path": path.relative_to(ROOT).as_posix(), "sha256": digest})
     archive.mkdir(parents=True, exist_ok=True)
     (archive / "archive.json").write_text(json.dumps({"schema": 1, "project": project_name, "files": records}, indent=2)+"\n", encoding="utf-8")
+    inherited_references = ROOT / "config/source-references.json"
+    if inherited_references.is_file():
+        inherited_references.unlink()
+    local_selection = ROOT / '.pcb-workspace.local.json'
+    if local_selection.is_file():
+        local_selection.unlink()
     for name, payload in drafts.items():
         payload["project"] = project_name
         (ROOT / "config" / name).write_text(json.dumps(payload, indent=2)+"\n", encoding="utf-8")
@@ -151,13 +161,19 @@ def configure_project(project_name: str | None, distro: str | None, force: bool,
     distro = distro or selected.get("distro", "Ubuntu-24.04")
     if not preserve_existing:
         initialize_project_records(project_name)
+    preflight_cleared = False
+    if not preserve_existing:
+        for candidate in backend_config["backends"].values():
+            if "source_preflight" in candidate:
+                del candidate["source_preflight"]
+                preflight_cleared = True
     flow["project"]["name"] = project_name
     if not preserve_existing:
         flow["project"]["board"] = "elec/layout/default/default.kicad_pcb"
         flow["manufacturing"]["output"] = f"manufacturing/jlcpcb/{project_name}-rev-a"
         flow_path.write_text(json.dumps(flow, indent=2) + "\n", encoding="utf-8")
         configure_board_stack(layers)
-    backend_changed = backend_config["active"] != electrical_backend
+    backend_changed = backend_config["active"] != electrical_backend or preflight_cleared
     if selected.get("platform") == "wsl-native" and selected.get("distro") != distro:
         selected["distro"] = distro
         backend_changed = True

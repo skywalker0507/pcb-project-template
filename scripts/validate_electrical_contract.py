@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 from check_easyeda_import_parity import validate_manifest
+from validate_requirements import problems as requirements_problems
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -158,8 +159,9 @@ def main() -> int:
             "selected-parts and assembly-parts disagree for: "
             + ", ".join(identity_record_conflicts)
         )
-    if requirements.get("status") != "reviewed":
-        decision_issues.append("requirements status is not reviewed")
+    decision_issues.extend(
+        f"requirements: {issue}" for issue in requirements_problems(requirements, require_reviewed=True, gate="electrical_freeze")
+    )
     if decisions.get("status") != "confirmed":
         decision_issues.append("product decision status is not confirmed")
     if selected_parts.get("status") not in {"electrical_review", "reviewed", "release_review"}:

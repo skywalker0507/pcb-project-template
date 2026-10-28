@@ -44,6 +44,18 @@ def compile_policy() -> dict[str, Any]:
     return engine_compile_policy(ROOT, INPUTS)
 
 
+def release_scope(policy: dict[str, Any], board_hash: str) -> dict[str, Any]:
+    requirements = policy["requirements"]
+    target = requirements["release_target"]
+    return {
+        "schema": 1, "kind": "release_scope", "board_sha256": board_hash,
+        "policy_sha256": policy["policy_sha256"], "release_target": target,
+        "production_ready": target == "production" and policy["capabilities"]["production_release"] is True,
+        "open_unknowns": requirements["open_unknowns"],
+        "prototype_validation": requirements["prototype_validation"],
+    }
+
+
 def parser_contract() -> dict[str, Any]:
     toolchain = read_json(ROOT / "config/toolchain-policy.json", "toolchain policy")
     parser = toolchain.get("gerber_parser")

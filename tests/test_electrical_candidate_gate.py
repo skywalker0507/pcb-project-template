@@ -27,6 +27,7 @@ class ElectricalCandidateGateTests(unittest.TestCase):
         self.assertTrue(positive["success"], positive)
         flipped = result.pop("flipped")
         self.assertTrue(flipped["success"], flipped)
+        self.assertTrue(result.pop("recovered_source_rule_area")["success"])
         self.assertTrue(result)
         self.assertTrue(all(value["success"] is False for value in result.values()), result)
 
@@ -80,6 +81,13 @@ class ElectricalCandidateGateTests(unittest.TestCase):
             selected = {"driver": "scripts/driver.py", "source_root": "hardware", "entry": "main.ato:App"}
             status = {"source_sha256": "SOURCE", "config_sha256": "CONFIG"}
             def run(command, **kwargs):
+                if any("normalize_atopile_candidate.py" in item for item in command):
+                    normalized = Path(command[command.index("--output")+1])
+                    normalized.write_bytes(candidate.read_bytes())
+                    normalization = Path(command[command.index("--receipt")+1])
+                    normalization.write_text(json.dumps({"success": True, "compiler_candidate_sha256": electrical.sha256(candidate),
+                        "candidate_board_sha256": electrical.sha256(normalized), "source_sha256": status["source_sha256"]}))
+                    return subprocess.CompletedProcess(command, 0, "normalized", "")
                 if "--source-root" in command:
                     audit = Path(command[command.index("--output")+1])
                     audit.write_text(json.dumps({"kind": "electrical_candidate_integrity", "success": False, "failed_refs": ["J2"]}))

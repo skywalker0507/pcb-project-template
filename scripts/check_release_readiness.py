@@ -180,6 +180,17 @@ def build_receipt(board: Path) -> dict[str, Any]:
         )
     release_capable = bool(expected_policy.get("capabilities", {}).get("release"))
     checks["release_capability"] = release_capable
+    checks["release_scope"] = {
+        "release_target": expected_policy["requirements"]["release_target"],
+        "production_ready": expected_policy["requirements"]["release_target"] == "production"
+        and expected_policy["capabilities"]["production_release"],
+        "production_blockers": expected_policy["requirements"]["blocking_unknowns_by_gate"]["production_release"],
+    }
+    used_paths.extend(resolve_path(item["path"]) for item in expected_policy["inputs"].values())
+    used_paths.extend([
+        ROOT / "config/template-engine.json", ROOT / "scripts/design_policy.py",
+        ROOT / "scripts/engine_runtime.py",
+    ])
     if not release_capable:
         add_blocker(
             blockers, "release_policy_incomplete", "policy", "resolve_reviewed_policy_inputs",
@@ -334,7 +345,7 @@ def build_receipt(board: Path) -> dict[str, Any]:
         "required_inputs": required_inputs,
         "checks": checks,
         "dependencies": {path: item["sha256"] for path, item in unique_dependencies.items()},
-        "limits": "Readiness aggregates current blockers and reuses cached DRC; only the guarded release pipeline can approve production output.",
+        "limits": "Readiness aggregates current blockers and reuses cached DRC; guarded export approves only the explicit release target, never untested production acceptance.",
     }
 
 

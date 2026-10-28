@@ -18,6 +18,7 @@ from physical_backend import read_config, selected_backend
 from stage_policy import current_stage
 from electrical_backend import footprint_libraries, footprint_table, read_config as read_electrical, selected_backend as selected_electrical, source_sha256
 from check_kicad_footprint_equivalence import libraries
+from validate_requirements import problems as requirements_problems
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -98,6 +99,16 @@ def main() -> int:
     backend_name, backend = selected_backend(read_config())
     if backend_name != "kicad" or backend.get("role") != "primary":
         raise SystemExit("The active primary physical backend must be kicad")
+
+    try:
+        requirements = json.loads((ROOT / "config/requirements.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Requirements are unavailable or invalid: {exc}") from exc
+    if not isinstance(requirements, dict):
+        raise SystemExit("Requirements must be an object")
+    issues = requirements_problems(requirements, True, gate="physical_start")
+    if issues:
+        raise SystemExit("Requirements are not ready for physical start: " + "; ".join(issues[:8]))
 
     freeze_root = args.freeze_root.resolve()
     freeze_receipt = (args.electrical_freeze or latest_freeze_receipt(freeze_root)).resolve()

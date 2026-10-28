@@ -212,7 +212,7 @@ def receipt() -> dict[str, object]:
     next_action: str | None = None
     required_inputs: list[str] = []
     if stage.get("status") == "blocked_external_dependency":
-        blockers.extend(list(stage.get("open_items", []))[:8])
+        blockers.extend(list(stage.get("open_items", [])))
         next_command = None
         handoff_required_inputs = stage.get("required_inputs", [])
         if isinstance(handoff_required_inputs, list):
@@ -223,9 +223,25 @@ def receipt() -> dict[str, object]:
         next_command = None
     elif stage["stage"] == "requirements":
         requirements = json.loads((ROOT / "config/requirements.json").read_text(encoding="utf-8"))
-        blockers.extend(problems(requirements)[:8])
-        next_action = "validate_requirements"
-        next_command = "py -3.14 scripts/validate_requirements.py" if blockers else "py -3.14 scripts/validate_requirements.py --require-reviewed"
+        input_issues = problems(requirements)
+        review_issues = problems(requirements, require_reviewed=True, gate="electrical_freeze")
+        blockers.extend(review_issues)
+        if input_issues:
+            next_action = 'repair_requirement_inputs'
+            next_command = 'py -3.14 scripts/pcbctl.py verify requirements'
+        elif review_issues:
+            next_action = 'resolve_electrical_review'
+            checks = ROOT / 'config/project-checks.json'
+            try:
+                has_checks = checks.is_file() and bool(json.loads(checks.read_text(encoding='utf-8')).get('checks'))
+            except (OSError, ValueError, AttributeError):
+                has_checks = True  # Let the check entrypoint provide bounded configuration diagnostics.
+            next_command = 'py -3.14 scripts/pcbctl.py verify project --plan' if has_checks else None
+            required_inputs = [str(item.get('id', '')) for item in requirements.get('unknowns', [])
+                               if isinstance(item, dict) and 'electrical_freeze' in item.get('blocks', [])][:8]
+        else:
+            next_action = 'plan_electrical_build'
+            next_command = 'py -3.14 scripts/pcbctl.py build --plan'
     else:
         actions: dict[str, tuple[str, str | None, list[str]]] = {
             "electrical": ("plan_build_or_freeze_electrical", "py -3.14 scripts/pcbctl.py build --plan --backend atopile", []),
@@ -252,7 +268,7 @@ def receipt() -> dict[str, object]:
             policy = compile_policy()
             capability = {"physical": "physical", "routing": "candidate_routing", "release": "release"}[stage["stage"]]
             if not policy["capabilities"][capability]:
-                blockers.extend(list(policy["capability_issues"][capability])[:8])
+                blockers.extend(list(policy["capability_issues"][capability]))
         if stage["stage"] == "release":
             readiness = cached_release_readiness(routing_board)
             if readiness is None:
@@ -261,8 +277,10 @@ def receipt() -> dict[str, object]:
                 blockers.extend([
                     str(item.get("code")) for item in list(readiness.get("blockers") or [])
                     if isinstance(item, dict) and item.get("code")
-                ][:8])
+                ])
+    blocker_count = len(blockers)
     blockers = blockers[:8]
+    open_items = list(stage.get("open_items") or [])
     allowed_commands = {
         "requirements": ["validate_requirements", "create_stage_handoff"],
         "electrical": ["pcbctl build", "pcbctl freeze"],
@@ -272,8 +290,8 @@ def receipt() -> dict[str, object]:
     }.get(stage["stage"], [])
     return {
         "success": not blockers, "stage": stage["stage"], "stage_number": number, "stage_label": label, "status": stage.get("status"),
-        "objective": stage.get("objective"), "open_items": list(stage.get("open_items") or [])[:8],
-        "blockers": blockers, "required_evidence": rules.get("required_evidence", []),
+        "objective": stage.get("objective"), "open_items": open_items[:8], "open_item_count": len(open_items),
+        "blockers": blockers, "blocker_count": blocker_count, "required_evidence": rules.get("required_evidence", []),
         "forbidden": rules.get("forbidden", []), "next_action": next_action,
         "required_inputs": required_inputs, "next_command": next_command,
         "stage_next_actions": list(stage.get("next_actions") or [])[:8],

@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from .requirements import GATES, blocking_unknowns, problems as requirements_problems
+
 
 ROUTING_REQUIRED = {"track_width", "clearance", "via_size", "via_drill"}
 
@@ -28,19 +30,6 @@ def read_json(path: Path, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise SystemExit(f"{label} must be a JSON object: {path}")
     return value
-
-
-def blocking_unknowns(requirements: dict[str, Any]) -> list[str]:
-    values = requirements.get("unknowns", [])
-    if not isinstance(values, list):
-        return ["unknowns must be a list"]
-    blockers: list[str] = []
-    for value in values:
-        if isinstance(value, str):
-            blockers.append(value)
-        elif isinstance(value, dict) and value.get("blocks") not in (None, [], False):
-            blockers.append(str(value.get("item", "unnamed unknown")))
-    return blockers
 
 
 def canonical_routing_values(values: object) -> dict[str, float]:
@@ -95,7 +84,8 @@ def compile_policy(project_root: Path, inputs: Mapping[str, Path]) -> dict[str, 
     signal_layers = [str(layer) for layer in copper if layer not in forbidden]
     outer = ((krt.get("profiles") or {}).get("outer_low_risk") or {}).get("routing", {})
     krt_layers = outer.get("layers") if isinstance(outer, dict) else None
-    requirements_ready = requirements.get("status") == "reviewed" and not blocking_unknowns(requirements)
+    requirement_issues = {gate: requirements_problems(requirements, True, gate=gate) for gate in GATES}
+    requirements_ready = not requirement_issues["physical_start"]
     routing_rules = profile.get("routing_rules") if isinstance(profile.get("routing_rules"), dict) else {}
     reviewed_values = canonical_routing_values(routing_rules.get("values") if isinstance(routing_rules, dict) else {})
     routing_ready = (
@@ -116,10 +106,12 @@ def compile_policy(project_root: Path, inputs: Mapping[str, Path]) -> dict[str, 
         issues.append("krt_signal_layers_do_not_match_active_board_stack")
     if manufacturing_rules.get("schema") != 2 or not isinstance(manufacturing_rules.get("gerber_rules"), list):
         issues.append("manufacturing_rules_invalid")
+    release_issues = list(dict.fromkeys([*issues, *requirement_issues["release"]]))
     capability_issues = {
-        "physical": [item for item in issues if item == "requirements_not_reviewed_or_have_blocking_unknowns"],
-        "candidate_routing": [item for item in issues if item != "manufacturing_rules_invalid"],
-        "release": issues,
+        "physical": requirement_issues["physical_start"],
+        "candidate_routing": list(dict.fromkeys([*requirement_issues["physical_start"], *[item for item in issues if item != "manufacturing_rules_invalid"]])),
+        "release": release_issues,
+        "production_release": list(dict.fromkeys([*release_issues, *requirement_issues["production_release"]])),
     }
     return {
         "schema": 2,
@@ -135,6 +127,10 @@ def compile_policy(project_root: Path, inputs: Mapping[str, Path]) -> dict[str, 
         "requirements": {
             "status": requirements.get("status"),
             "blocking_unknowns": blocking_unknowns(requirements),
+            "blocking_unknowns_by_gate": {gate: blocking_unknowns(requirements, gate) for gate in GATES},
+            "release_target": requirements.get("release_target", "production"),
+            "prototype_validation": requirements.get("prototype_validation"),
+            "open_unknowns": requirements.get("unknowns", []),
             "critical_nets": requirements.get("critical_nets", []),
             "placement_regions": requirements.get("placement_regions", []),
         },
@@ -166,9 +162,10 @@ def compile_policy(project_root: Path, inputs: Mapping[str, Path]) -> dict[str, 
         "capabilities": {
             "physical": requirements_ready,
             "candidate_routing": routing_ready,
-            "release": routing_ready and "manufacturing_rules_invalid" not in issues,
+            "release": routing_ready and not release_issues,
+            "production_release": routing_ready and not capability_issues["production_release"],
         },
-        "issues": issues,
+        "issues": release_issues,
         "capability_issues": capability_issues,
     }
 

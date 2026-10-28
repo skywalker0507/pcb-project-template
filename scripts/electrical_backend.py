@@ -114,6 +114,30 @@ def footprint_table(project_dir: Path, source_root: Path) -> str:
     return "\n".join([*rows, ")", ""])
 
 
+def validate_footprint_identities(source_root: Path) -> None:
+    """Reject copied resources that still address another library or filename."""
+    source_root = source_root.resolve()
+    libraries = footprint_libraries(source_root)
+    for nickname, directory in sorted(libraries.items()):
+        for path in sorted(directory.glob("*.kicad_mod")):
+            with path.open(encoding="utf-8-sig") as stream:
+                header = stream.read(4096)
+            match = re.search(r'\(\s*(?:footprint|module)\s+("(?:\\.|[^"\\])*"|[^\s()]+)', header)
+            if not match:
+                raise ValueError(f"Footprint resource has no readable identity: {path.relative_to(source_root)}")
+            token = match.group(1)
+            identity = json.loads(token) if token.startswith('"') else token
+            library, separator, item = identity.rpartition(":")
+            if not separator:
+                library, item = nickname, identity
+            if library != nickname or item != path.stem:
+                raise ValueError(
+                    f"Footprint resource identity mismatch: {path.relative_to(source_root)} declares {identity!r}; "
+                    f"expected {nickname}:{path.stem} (or unqualified {path.stem}). "
+                    "Correct the source identity; do not substitute a different footprint."
+                )
+
+
 def validate_backend(config: dict[str, Any], name: str, backend: dict[str, Any]) -> dict[str, Any]:
     driver = workspace_path(str(backend["driver"]), "Backend driver")
     source_root = workspace_path(str(backend["source_root"]), "Backend source_root")
@@ -129,6 +153,10 @@ def validate_backend(config: dict[str, Any], name: str, backend: dict[str, Any])
         raise SystemExit(str(exc)) from exc
     canonical_entry = f"{resolved_entry.relative_to(ROOT).as_posix()}{separator}{symbol}"
     if name == "atopile":
+        try:
+            validate_footprint_identities(source_root)
+        except (ValueError, OSError) as exc:
+            raise SystemExit(str(exc)) from exc
         ato_yaml = ROOT / "ato.yaml"
         try:
             text = ato_yaml.read_text(encoding="utf-8")

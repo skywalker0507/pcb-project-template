@@ -11,6 +11,8 @@ import pcbnew
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 from check_electrical_candidate_integrity import audit
+from normalize_atopile_candidate import normalize
+from electrical_backend import sha256
 
 faulthandler.enable()
 
@@ -83,6 +85,7 @@ def run():
         original = root / "base.kicad_pcb"
         pcbnew.SaveBoard(str(original), board)
         results = {"translated_rotated": audit(pcbnew, original, source)}
+        mutated_paths = {}
 
         def changed(name, mutate):
             candidate = pcbnew.LoadBoard(str(original))
@@ -92,6 +95,7 @@ def run():
             pcbnew.SaveBoard(str(path), candidate)
             report = audit(pcbnew, path, source)
             results[name] = report
+            mutated_paths[name] = path
 
         changed("flipped", lambda b, f: f.Flip(f.GetPosition(), False))
         changed("missing_rule_area", lambda b, f: f.Remove(list(f.Zones())[0]))
@@ -114,6 +118,19 @@ def run():
             clone.SetReference(f.GetReference())
             b.Add(clone)
         changed("duplicate_ref", duplicate)
+        raw = mutated_paths["missing_rule_area"]
+        raw_hash = sha256(raw)
+        repaired = root / "repaired.kicad_pcb"
+        recovery = normalize(pcbnew, raw, repaired, source, "0.15.8", root / "recovery-evidence")
+        results["recovered_source_rule_area"] = {"success": recovery["success"] and recovery["restored_rule_area_count"] == 1
+            and recovery["exact_electrical_geometry_parity"] and sha256(raw) == raw_hash}
+        for name, version in (("changed_pad_number", "0.15.8"), ("changed_rule_geometry", "0.15.8"), ("missing_rule_area", "0.15.9")):
+            rejected = False
+            try:
+                normalize(pcbnew, mutated_paths[name], root / f"must-reject-{name}-{version}.kicad_pcb", source, version, root / f"reject-{name}-{version}")
+            except ValueError:
+                rejected = True
+            results[f"normalization_rejects_{name}_{version}"] = {"success": not rejected}
         return results
 
 

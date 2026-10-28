@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pcb-template-engine"
-version = "0.3.0"
+version = "0.4.0"
 description = "Project-independent policy and manufacturing gates for AI PCB templates"
 requires-python = ">=3.14"
 dependencies = []

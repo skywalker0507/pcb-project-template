@@ -827,7 +827,10 @@ class FlowTemplateTests(unittest.TestCase):
                 "krt": root / "krt.json",
                 "acceptance": root / "acceptance.json",
             }
-            files["requirements"].write_text(json.dumps({"schema": 2, "status": "reviewed", "unknowns": [], "critical_nets": [], "placement_regions": []}), encoding="utf-8")
+            requirement_fixture = {"schema": 2, "status": "reviewed", "interfaces": [{"name": "fixture"}],
+                                   "rails": [], "connectors": [], "constraints": [], "mechanical": {},
+                                   "unknowns": [], "critical_nets": [], "placement_regions": []}
+            files["requirements"].write_text(json.dumps(requirement_fixture), encoding="utf-8")
             files["board_stack"].write_text(json.dumps({"active": "two", "profiles": {"two": {"copper_layers": ["F.Cu", "B.Cu"], "forbidden_signal_layers": []}}}), encoding="utf-8")
             files["manufacturing_profile"].write_text(json.dumps({"selected": True, "routing_rules": {"reviewed": True, "values": {"track_width": 0.2, "clearance": 0.2, "via_diameter": 0.6, "via_drill": 0.3}, "evidence": ["card"]}}), encoding="utf-8")
             files["manufacturing_rules"].write_text(json.dumps({"schema": 2, "gerber_file_patterns": {"F.Cu": "*-F_Cu.gtl", "B.Cu": "*-B_Cu.gbl"}, "gerber_rules": []}), encoding="utf-8")
@@ -838,7 +841,7 @@ class FlowTemplateTests(unittest.TestCase):
                 design_policy.INPUTS = files
                 first = design_policy.compile_policy()
                 first_hash = design_policy.policy_sha256(first)
-                files["requirements"].write_text(json.dumps({"schema": 2, "status": "reviewed", "unknowns": [], "critical_nets": [{"net": "USB_DP"}], "placement_regions": []}), encoding="utf-8")
+                files["requirements"].write_text(json.dumps({**requirement_fixture, "critical_nets": [{"net": "USB_DP"}]}), encoding="utf-8")
                 second = design_policy.compile_policy()
             finally:
                 design_policy.INPUTS = original
