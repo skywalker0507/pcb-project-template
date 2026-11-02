@@ -284,6 +284,14 @@ class KrtFlowTests(unittest.TestCase):
         self.assertEqual(drc, ("candidate_drc_regression", False))
         self.assertEqual(no_path, ("structural_no_path_or_incomplete", True))
 
+    def test_native_complete_candidate_with_drc_error_is_not_structural(self):
+        args = dict(accepted=False, router_exit_code=0, output_exists=True,
+                    route_ok=True, router_complete=False, connectivity_complete=True)
+        self.assertEqual(flow.classify_route_outcome(**args, audit_pass=False),
+                         ("candidate_drc_regression", False))
+        self.assertEqual(flow.classify_route_outcome(**args, audit_pass=True),
+                         ("router_summary_mismatch", False))
+
     def test_passing_strategy_resolves_active_route_area_escalation(self):
         prior = [
             {"strategy_signature": "first", "structural_failure": True},

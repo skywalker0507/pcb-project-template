@@ -18,16 +18,16 @@ import electrical_backend as backend
 import electrical_freeze_contract as freeze
 import init_project as initializer
 import prepare_kicad_physical_candidate as physical
+import run_template_checks as template_checks
 from validate_requirements import problems as requirement_problems
 
 
 class ProjectInitializationTests(unittest.TestCase):
     def fixture(self, root):
         (root / "config").mkdir()
-        for name in ("pcb-flow.json", "board-stack.json", "kicad-routing-tools.json", "electrical-backend.json",
-                     "requirements.json", "product-decisions.json", "selected-parts.json", "footprint-provenance.json",
-                     "design-data.json", "jlcpcb-parts.json"):
-            shutil.copy2(ROOT / "config" / name, root / "config" / name)
+        for source in (ROOT / "config").iterdir():
+            if source.suffix in {".json", ".txt"}:
+                shutil.copy2(source, root / "config" / source.name)
         flow = json.loads((root / "config/pcb-flow.json").read_text())
         flow["project"]["board"] = "elec/layout/reviewed/reviewed.kicad_pcb"
         (root / "config/pcb-flow.json").write_text(json.dumps(flow))
@@ -123,6 +123,57 @@ class ProjectInitializationTests(unittest.TestCase):
             scope = json.loads((root / "config/project-initialization.json").read_text())
             self.assertEqual((root / scope["archive"] / "config/electrical-backend.json").read_bytes(), inherited)
 
+    def test_new_project_records_starting_runtime_but_reconfiguration_preserves_inventory(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(initializer, "ROOT", Path(directory).resolve()):
+            root = Path(directory).resolve()
+            self.fixture(root)
+            (root / "scripts").mkdir()
+            (root / "scripts/shared.py").write_text("# initial shared implementation\n")
+            shutil.copytree(ROOT / "template-engine", root / "template-engine", ignore=shutil.ignore_patterns("__pycache__"))
+            inventory = root / initializer.RUNTIME_LOCK
+            inventory.write_text('{"historical":"inventory must be archived before reset"}')
+            old = inventory.read_bytes()
+            initializer.configure_project(None, None, True, False, 4, "atopile", True)
+            self.assertEqual(inventory.read_bytes(), old)
+            initializer.configure_project("fresh", None, True, False, 2, "atopile", False)
+            scope = json.loads((root / "config/project-initialization.json").read_text())
+            self.assertEqual((root / scope["archive"] / initializer.RUNTIME_LOCK).read_bytes(), old)
+            lock = json.loads(inventory.read_text())
+            self.assertEqual(lock, initializer.runtime_inventory(root))
+            self.assertIn("scripts/shared.py", lock["files"])
+
+    def test_new_project_isolates_physical_manufacturing_and_routing_authority(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(initializer, "ROOT", Path(directory).resolve()):
+            root = Path(directory).resolve()
+            _, old_board = self.fixture(root)
+            before = {p.name: p.read_bytes() for p in (root / "config").iterdir()}
+            # Old indexes and reports may remain on disk, but cannot be selected.
+            for name in ("build/CURRENT.json", "build/03-electrical/BUILD.json", "build/07-release/INPUTS.json"):
+                path = root / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_text('{"old":true}')
+            initializer.configure_project("fresh", None, True, False, 2, "atopile", False)
+            load = lambda name: json.loads((root / "config" / name).read_text(encoding="utf-8"))
+            archive = root / load("project-initialization.json")["archive"]
+            for name, content in before.items():
+                self.assertEqual((archive / "config" / name).read_bytes(), content)
+            for name in ("placement-semantics.json", "placement-routability.json", "manufacturing-profile.json", "manufacturing-rules.json", "routing-planner.json"):
+                self.assertEqual(load(name)["status"], "draft")
+            self.assertFalse(load("manufacturing-profile.json")["selected"])
+            self.assertEqual(load("placement-semantics.json")["roles"], [])
+            self.assertEqual(load("pcb-release-baseline.json")["allowed_violation_items"], {})
+            self.assertEqual(set(load("kicad-routing-tools.json")["profiles"]), {"outer_low_risk"})
+            self.assertIsNone(load("kicad-routing-tools.json")["profiles"]["outer_low_risk"]["routing"]["track_width"])
+            flow = load("pcb-flow.json")
+            self.assertFalse(flow["audit"]["require_in1_ground"])
+            self.assertNotEqual(root / flow["project"]["board"], old_board)
+            self.assertNotIn("validate_power_component_review.py", str(flow["checks"]))
+            for path in flow["manufacturing"]["gate_receipts"].values():
+                self.assertFalse((root / path).exists())
+            for name in ("usb-esd-placement-evidence.json", "buck-bootstrap-placement-evidence.json", "jlcpcb-impedance-evidence.json", "krt-fab-overrides.txt"):
+                self.assertFalse((root / "config" / name).exists())
+            for name in ("build/CURRENT.json", "build/03-electrical/BUILD.json", "build/07-release/INPUTS.json"):
+                self.assertFalse((root / name).exists())
+            self.assertEqual(old_board.read_bytes(), b"reviewed-board-fixture")
+
     def test_new_project_archives_reference_manifest_without_removing_reference_files(self):
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(initializer, "ROOT", Path(directory).resolve()):
             root=Path(directory).resolve();self.fixture(root)
@@ -195,6 +246,199 @@ class ProjectInitializationTests(unittest.TestCase):
             self.assertFalse(output.exists())
             self.assertFalse(output.with_suffix(".kicad_pro").exists())
             self.assertEqual(before, table.read_bytes())
+
+
+class FrameworkUpdateTests(unittest.TestCase):
+    def fixture(self, directory):
+        base = Path(directory).resolve()
+        source, target = base / "source", base / "project"
+        for root in (source, target):
+            (root / "scripts").mkdir(parents=True)
+            (root / "config").mkdir()
+            for name in ("pcbctl.py", "session_boot.py", "shared.py"):
+                (root / "scripts" / name).write_text(f"# reviewed {name}\n")
+            (root / "config/pcb-flow.json").write_text('{"project":"preserve me"}')
+            (root / "config/template-engine.json").write_text('{"schema":1,"source":{"type":"installed"},"version":"1"}')
+        (target / "scripts/project_only.py").write_text("# custom checker\n")
+        (target / "board.kicad_pcb").write_bytes(b"CAD fixture must remain unchanged")
+        validation = source / "build/checks.json"
+        self.validate(source, validation)
+        return source, target, validation
+
+    def validate(self, source, validation):
+        validation.parent.mkdir(parents=True, exist_ok=True)
+        validation.write_text(json.dumps({
+            "kind": "template_regression_checks", "success": True,
+            "validation_inputs": initializer.framework_validation_inputs(source),
+            "checks": [{"name": name, "success": True} for name in
+                       ("unit-tests", "template-engine", "backend-architecture", "tool-entrypoints")],
+        }))
+
+    def seed(self, source, target, validation):
+        plan = initializer.framework_sync_plan(source, target, validation)
+        self.assertTrue(plan["validation_current"])
+        initializer.apply_framework_sync(plan, plan["plan_sha256"])
+
+    def tree(self, root):
+        return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+
+    def test_seed_is_target_readonly_until_apply_and_preserves_project_authority(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, target, validation = self.fixture(directory)
+            before = self.tree(target)
+            with mock.patch.object(initializer, "ROOT", source), contextlib.redirect_stdout(io.StringIO()) as stdout:
+                self.assertEqual(initializer.sync_framework_cli(target, validation, False, None), 0)
+            preview = json.loads(stdout.getvalue())
+            self.assertEqual(preview["file_count"], 3)
+            self.assertEqual(preview["update_count"], 0)
+            self.assertEqual(before, self.tree(target))
+            self.assertTrue(Path(preview["details"]).is_file())
+            plan = initializer.framework_sync_plan(source, target, validation)
+            receipt = initializer.apply_framework_sync(plan, plan["plan_sha256"])
+            for name, payload in before.items():
+                self.assertEqual((target / name).read_bytes(), payload)
+            self.assertTrue((target / initializer.RUNTIME_LOCK).is_file())
+            self.assertEqual(receipt["updated"], 0)
+            same = initializer.framework_sync_plan(source, target, validation)
+            self.assertFalse(same["lock_update"])
+            self.assertEqual(initializer.apply_framework_sync(same, same["plan_sha256"])["updated"], 0)
+
+    def test_three_way_updates_and_additions_keep_verified_old_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, target, validation = self.fixture(directory)
+            self.seed(source, target, validation)
+            original = (target / "scripts/shared.py").read_bytes()
+            (source / "scripts/shared.py").write_text("# fixed shared implementation\n")
+            (source / "scripts/new.py").write_text("# new shared entry\n")
+            self.validate(source, validation)
+            plan = initializer.framework_sync_plan(source, target, validation)
+            actions = {p["path"]: p["action"] for p in plan["files"]}
+            self.assertEqual(actions["scripts/shared.py"], "update")
+            self.assertEqual(actions["scripts/new.py"], "add")
+            result = initializer.apply_framework_sync(plan, plan["plan_sha256"])
+            self.assertEqual(result["updated"], 2)
+            receipt = json.loads(Path(result["receipt"]).read_text())
+            self.assertEqual((target / receipt["backup"] / "original/scripts/shared.py").read_bytes(), original)
+            self.assertEqual((target / "scripts/shared.py").read_bytes(), (source / "scripts/shared.py").read_bytes())
+            self.assertEqual((target / "scripts/project_only.py").read_text(), "# custom checker\n")
+
+    def test_missing_baseline_local_change_deletion_and_upstream_removal_block_whole_batch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, target, validation = self.fixture(directory)
+            shared = target / "scripts/shared.py"
+            shared.write_text("# local unreviewed difference\n")
+            plan = initializer.framework_sync_plan(source, target, validation)
+            self.assertIn("conflict_untracked_baseline", [p["action"] for p in plan["files"]])
+            before = self.tree(target)
+            with self.assertRaisesRegex(ValueError, "blocked"):
+                initializer.apply_framework_sync(plan, plan["plan_sha256"])
+            self.assertEqual(before, self.tree(target))
+            shared.write_bytes((source / "scripts/shared.py").read_bytes())
+            self.seed(source, target, validation)
+            (source / "scripts/pcbctl.py").write_text("# eligible shared change\n")
+            for alteration in ("modify", "delete", "remove_upstream"):
+                with self.subTest(alteration=alteration):
+                    shared.write_bytes((source / "scripts/shared.py").read_bytes())
+                    if alteration == "modify":
+                        shared.write_text("# local edit\n")
+                    elif alteration == "delete":
+                        shared.unlink()
+                    else:
+                        (source / "scripts/shared.py").unlink()
+                    self.validate(source, validation)
+                    plan = initializer.framework_sync_plan(source, target, validation)
+                    before = self.tree(target)
+                    with self.assertRaisesRegex(ValueError, "blocked"):
+                        initializer.apply_framework_sync(plan, plan["plan_sha256"])
+                    self.assertEqual(before, self.tree(target))
+
+    def test_stale_preview_source_or_target_and_test_receipt_changes_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, target, validation = self.fixture(directory)
+            self.seed(source, target, validation)
+            (source / "scripts/shared.py").write_text("# new version\n")
+            self.validate(source, validation)
+            plan = initializer.framework_sync_plan(source, target, validation)
+            (target / "scripts/shared.py").write_text("# concurrent local edit\n")
+            with self.assertRaisesRegex(ValueError, "stale"):
+                initializer.apply_framework_sync(plan, plan["plan_sha256"])
+            (target / "scripts/shared.py").write_text("# reviewed shared.py\n")
+            (source / "scripts/shared.py").write_text("# changed after preview\n")
+            with self.assertRaisesRegex(ValueError, "stale"):
+                initializer.apply_framework_sync(plan, plan["plan_sha256"])
+            plan = initializer.framework_sync_plan(source, target, validation)
+            self.assertFalse(plan["validation_current"])
+            with self.assertRaisesRegex(ValueError, "blocked"):
+                initializer.apply_framework_sync(plan, plan["plan_sha256"])
+            self.validate(source, validation)
+            proof = json.loads(validation.read_text()); proof["checks"] = proof["checks"][1:]
+            validation.write_text(json.dumps(proof))
+            self.assertFalse(initializer.framework_sync_plan(source, target, validation)["validation_current"])
+
+    def test_engine_mismatch_and_malformed_lock_do_not_mutate_project(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, target, validation = self.fixture(directory)
+            (target / "config/template-engine.json").write_text('{"source":{"type":"installed"},"version":"2"}')
+            plan = initializer.framework_sync_plan(source, target, validation)
+            self.assertFalse(plan["engine_compatible"])
+            before = self.tree(target)
+            with self.assertRaisesRegex(ValueError, "blocked"):
+                initializer.apply_framework_sync(plan, plan["plan_sha256"])
+            self.assertEqual(before, self.tree(target))
+            (target / initializer.RUNTIME_LOCK).write_text('{"schema":1,"files":{"../escape.py":"A"}}')
+            with self.assertRaisesRegex(ValueError, "runtime lock"):
+                initializer.framework_sync_plan(source, target, validation)
+            with self.assertRaisesRegex(ValueError, "Invalid managed"):
+                initializer.safe_runtime_path(target, "scripts/../escape.py")
+
+    def test_linked_script_and_artifact_paths_cannot_escape_project(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, target, validation = self.fixture(directory)
+            original = Path.is_junction
+            with mock.patch.object(Path, "is_junction", lambda p: p == target / "scripts" or original(p)):
+                with self.assertRaisesRegex(ValueError, "linked"):
+                    initializer.framework_sync_plan(source, target, validation)
+
+    def test_partial_write_is_rolled_back_with_original_lock_and_no_success_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, target, validation = self.fixture(directory)
+            self.seed(source, target, validation)
+            for name in ("pcbctl.py", "shared.py"):
+                (source / "scripts" / name).write_text("# updated version\n")
+            self.validate(source, validation)
+            plan = initializer.framework_sync_plan(source, target, validation)
+            before = {p: data for p, data in self.tree(target).items() if not p.startswith("tmp/")}
+            replace = initializer.os.replace
+            count = 0
+            def fail_once(src, dst):
+                nonlocal count
+                count += 1
+                if count == 2:
+                    raise OSError("simulated second write failure")
+                return replace(src, dst)
+            with mock.patch.object(initializer.os, "replace", side_effect=fail_once):
+                with self.assertRaisesRegex(OSError, "second write"):
+                    initializer.apply_framework_sync(plan, plan["plan_sha256"])
+            self.assertEqual(before, {p: data for p, data in self.tree(target).items() if not p.startswith("tmp/")})
+
+    def test_cli_never_reconfigures_and_template_checks_reject_midrun_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, target, validation = self.fixture(directory)
+            with mock.patch.object(initializer, "ROOT", source), mock.patch.object(initializer, "configure_project") as configure:
+                argv = ["init", "--sync-framework", str(target), "--plan", "--validation-receipt", str(validation)]
+                with mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(initializer.main(), 0)
+                configure.assert_not_called()
+            output = source / "build/new-validation.json"
+            def check(name, command, log_dir):
+                (source / "scripts/shared.py").write_text("# changed during validation\n")
+                return {"name": name, "success": True}
+            with mock.patch.object(template_checks, "ROOT", source), mock.patch.object(template_checks, "run_check", side_effect=check):
+                with mock.patch.object(sys, "argv", ["checks", "--output", str(output)]), contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(template_checks.main(), 1)
+            receipt = json.loads(output.read_text())
+            self.assertFalse(receipt["inputs_unchanged"])
+            self.assertIn("template_inputs_changed_during_validation", receipt["failed_checks"])
 
 
 if __name__ == "__main__":

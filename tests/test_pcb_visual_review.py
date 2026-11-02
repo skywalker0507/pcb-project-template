@@ -1,9 +1,11 @@
 import importlib.util
+import sys
 from pathlib import Path
 import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
 SPEC = importlib.util.spec_from_file_location("record_pcb_visual_review", ROOT / "scripts/record_pcb_visual_review.py")
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None

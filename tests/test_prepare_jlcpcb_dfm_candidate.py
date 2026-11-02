@@ -6,6 +6,8 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
+import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +21,63 @@ SPEC.loader.exec_module(MODULE)
 
 
 class PrepareJlcpcbDfmCandidateTests(unittest.TestCase):
+    def test_rejects_invalid_order_before_native_preflight_or_exports(self):
+        self.write_audit()
+        root = Path(self.directory.name).resolve()
+        profile = root / "profile.json"
+        profile.write_text(json.dumps({"manufacturer": "demo", "cost_review": {"currency": "CNY"},
+                                       "order_profile": {"status": "draft"}}), encoding="utf-8")
+        output = root / "build/07-release/tmp/candidate"
+        argv = ["prepare", "--board", str(self.board), "--audit-json", str(self.audit),
+                "--output-dir", str(output), "--receipt", str(root / "receipt.json"),
+                "--manufacturing-profile", str(profile)]
+        with mock.patch.object(MODULE, "ROOT", root), mock.patch.object(sys, "argv", argv), \
+             mock.patch.object(MODULE, "configured_layers", return_value="F.Cu,B.Cu"), \
+             mock.patch.object(MODULE, "preflight_parts") as preflight, mock.patch.object(MODULE, "run") as export:
+            with self.assertRaisesRegex(SystemExit, "reviewed order_profile"):
+                MODULE.main()
+        preflight.assert_not_called()
+        export.assert_not_called()
+        self.assertFalse(output.exists())
+
+    def test_failed_native_parts_preflight_keeps_candidate_directory_absent(self):
+        self.write_audit()
+        root = Path(self.directory.name).resolve()
+        parts = root / "parts.json"
+        parts.write_text(json.dumps({"parts": [{"refs": ["J1"], "lcsc": None}]}), encoding="utf-8")
+        output = root / "build/07-release/tmp/candidate"
+        argv = ["prepare", "--board", str(self.board), "--audit-json", str(self.audit),
+                "--output-dir", str(output), "--receipt", str(root / "receipt.json"),
+                "--assembly-parts", str(parts)]
+        with mock.patch.object(MODULE, "ROOT", root), mock.patch.object(sys, "argv", argv), \
+             mock.patch.object(MODULE, "configured_layers", return_value="F.Cu,B.Cu"), \
+             mock.patch.object(MODULE, "reviewed_vendor_and_currency", return_value=("demo", "CNY")), \
+             mock.patch.object(MODULE, "reviewed_order_parameters", return_value={}), \
+             mock.patch.object(MODULE.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "invalid MPN/LCSC")), \
+             mock.patch.object(MODULE, "run") as export:
+            with self.assertRaisesRegex(SystemExit, "before export"):
+                MODULE.main()
+        export.assert_not_called()
+        self.assertFalse(output.exists())
+        self.assertIn("invalid MPN/LCSC", (root / "receipt.preflight.log").read_text())
+
+    def test_plan_does_not_export_or_create_a_candidate(self):
+        self.write_audit()
+        root = Path(self.directory.name).resolve()
+        output = root / "build/07-release/tmp/candidate"
+        argv = ["prepare", "--board", str(self.board), "--audit-json", str(self.audit),
+                "--output-dir", str(output), "--receipt", str(root / "receipt.json"), "--plan"]
+        with mock.patch.object(MODULE, "ROOT", root), mock.patch.object(sys, "argv", argv), \
+             mock.patch.object(MODULE, "configured_layers", return_value="F.Cu,B.Cu"), \
+             mock.patch.object(MODULE, "reviewed_vendor_and_currency", return_value=("demo", "CNY")), \
+             mock.patch.object(MODULE, "reviewed_order_parameters", return_value={}), \
+             mock.patch.object(MODULE, "preflight_parts", return_value={"success": True}), \
+             mock.patch.object(MODULE, "run") as export, mock.patch("builtins.print"):
+            self.assertEqual(MODULE.main(), 0)
+        export.assert_not_called()
+        self.assertFalse(output.exists())
+        self.assertFalse((root / "receipt.json").exists())
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)

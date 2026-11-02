@@ -7,11 +7,13 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+from pcb_policy import configured_drc_baseline
 import subprocess
 import sys
 from typing import Any
 
 from engine_runtime import activate
+from manufacturing_work_packet import reviewed_order_parameters, verify_work_packet
 
 activate()
 
@@ -116,6 +118,45 @@ def first_action(blockers: list[dict[str, Any]]) -> tuple[str, str | None, list[
     return str(first["action"]), first.get("command"), required
 
 
+def dfm_work_packet_state(flow: dict[str, Any], board_hash: str, registry_hash: str | None) -> tuple[dict[str, Any], list[Path]]:
+    """Describe local preparation versus external work; never approve manufacturing."""
+    path, candidate, _ = resolve_release_input(flow, "jlcpcb_dfm_candidate")
+    paths = [path] if path is not None else []
+    result: dict[str, Any] = {"state": "work_packet_required", "issues": []}
+    if not candidate or candidate.get("success") is not True or candidate.get("board_sha256") != board_hash:
+        result["issues"] = ["missing_or_stale_candidate"]
+        return result, paths
+    manifest_path = resolve_path(candidate.get("work_packet_manifest"))
+    snapshot_path = resolve_path(candidate.get("assembly_parts_snapshot"))
+    gate_path = resolve_path(candidate.get("manufacturing_registry_gerber_gate"))
+    parts_path = resolve_path((flow.get("manufacturing") or {}).get("assembly_parts", "config/jlcpcb-parts.json"))
+    paths.extend(p for p in (manifest_path, snapshot_path, gate_path, parts_path) if p is not None)
+    try:
+        if manifest_path is None or sha256(manifest_path) != candidate.get("work_packet_manifest_sha256"):
+            raise ValueError("work_packet_manifest_sha256")
+        manifest, files = verify_work_packet(manifest_path)
+        paths.extend(files.values())
+        if manifest["files"]["board"]["sha256"] != board_hash or manifest["content_sha256"] != candidate.get("work_packet_content_sha256"):
+            raise ValueError("work_packet_board_or_content")
+        if manifest.get("order_parameters") != reviewed_order_parameters(ROOT / "config/manufacturing-profile.json"):
+            raise ValueError("work_packet_order_parameters")
+        if snapshot_path is None or sha256(snapshot_path) != candidate.get("assembly_parts_snapshot_sha256"):
+            raise ValueError("assembly_snapshot_sha256")
+        snapshot = load_json(snapshot_path)
+        if not snapshot or parts_path is None or snapshot.get("derived_from_sha256") != sha256(parts_path):
+            raise ValueError("assembly_parts_changed")
+        gate = load_json(gate_path) if gate_path is not None else None
+        if not gate or gate.get("success") is not True or gate.get("registry_sha256") != registry_hash:
+            raise ValueError("manufacturing_registry_gerber_gate")
+    except (OSError, ValueError, SystemExit) as exc:
+        result["issues"] = [str(exc)[:300]]
+        return result, paths
+    return {"state": "awaiting_factory_result", "work_packet": relative(manifest_path),
+            "upload_files": {name: relative(files[name]) for name in ("gerber_zip", "bom", "cpl")},
+            "observation_template": candidate.get("dfm_observation"),
+            "limits": "Preparation only; factory acceptance and PCB/SMT DFM remain required."}, paths
+
+
 def build_receipt(board: Path) -> dict[str, Any]:
     board = board.resolve()
     if not board.is_file():
@@ -132,6 +173,8 @@ def build_receipt(board: Path) -> dict[str, Any]:
         ROOT / "config/manufacturing-rules.json", ROOT / "config/pcb-acceptance.json",
         ROOT / "config/release-debt-policy.json", ROOT / "config/toolchain-policy.json",
         Path(__file__).resolve(), ROOT / "scripts/release_inputs.py",
+        ROOT / "scripts/manufacturing_work_packet.py",
+        ROOT / "scripts/pcb_policy.py",
         ROOT / "scripts/summarize_kicad_drc.py",
     ]
     review_packet_path, review_packet, _ = resolve_release_input(flow, "release_review_packet")
@@ -216,7 +259,7 @@ def build_receipt(board: Path) -> dict[str, Any]:
         add_blocker(blockers, "unconnected_items", "connectivity", "return_to_routing", detail=unconnected)
     if copper_fatal:
         add_blocker(blockers, "fatal_copper_drc", "drc", "fix_copper_drc", detail=copper_fatal)
-    baseline_path = ROOT / "config/pcb-release-baseline.json"
+    baseline_path = configured_drc_baseline(ROOT, flow)
     baseline = load_json(baseline_path)
     if baseline_path.is_file():
         used_paths.append(baseline_path)
@@ -303,9 +346,15 @@ def build_receipt(board: Path) -> dict[str, Any]:
             )
         else:
             mismatches = list(((value or {}).get("registry_gate") or {}).get("mismatches", []))
+            packet_state, packet_paths = dfm_work_packet_state(flow, board_hash, registry_hash)
+            used_paths.extend(packet_paths)
+            checks["dfm_work_packet"] = packet_state
+            prepared = packet_state["state"] == "awaiting_factory_result"
+            action = ("replace_mismatched_factory_dfm" if value else "await_factory_pcb_and_smt_dfm") if prepared else "prepare_dfm_work_packet"
             add_blocker(
                 blockers, "manufacturing_dfm_missing_stale_or_mismatched", "manufacturing",
-                "rerun_dfm_with_reviewed_order_profile", detail=mismatches or issues, external=True,
+                action, detail={"receipt_issues": mismatches or issues, **packet_state}, external=prepared,
+                required_input="exact_package_factory_pcb_and_smt_dfm" if prepared else "passing_exact_board_dfm_work_packet",
             )
     checks["release_evidence"] = evidence
 

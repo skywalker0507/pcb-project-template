@@ -5,6 +5,9 @@ import faulthandler
 from pathlib import Path
 import sys
 import tempfile
+import contextlib
+import io
+import gc
 
 import pcbnew
 
@@ -13,6 +16,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from check_electrical_candidate_integrity import audit
 from normalize_atopile_candidate import normalize
 from electrical_backend import sha256
+import check_kicad_footprint_equivalence as physical_equivalence
+from prepare_kicad_physical_candidate import normalize_duplicate_footprint_uuids
 
 faulthandler.enable()
 
@@ -118,7 +123,38 @@ def run():
             clone.SetReference(f.GetReference())
             b.Add(clone)
         changed("duplicate_ref", duplicate)
+        shared = pcbnew.LoadBoard(str(original))
+        first_fp = list(shared.GetFootprints())[0]
+        for index in range(2, 12):
+            copy_fp = pcbnew.FOOTPRINT(first_fp)
+            copy_fp.SetReference(f"U{index}")
+            copy_fp.Move(pcbnew.VECTOR2I(pcbnew.FromMM(12*index), 0))
+            shared.Add(copy_fp)
+        fixed_path = root / "fixed-object-ids.kicad_pcb"
+        pcbnew.SaveBoard(str(fixed_path), shared)
+        repair = normalize_duplicate_footprint_uuids(pcbnew, fixed_path)
+        unique = normalize_duplicate_footprint_uuids(pcbnew, fixed_path)
+        repaired_audit = audit(pcbnew, fixed_path, source)
+        results['unique_object_ids'] = {'success': bool(repair['duplicate_uuid_groups'])
+            and unique['duplicate_uuid_groups'] == 0 and repaired_audit['success']}
         raw = mutated_paths["missing_rule_area"]
+        (root / "fp-lib-table").write_text(
+            '(fp_lib_table (lib (name "Fixture") (type "KiCad") (uri "' + library.as_posix() + '") (options "") (descr "")))',
+            encoding="utf-8")
+        physical_equivalence.load_pcbnew = lambda: pcbnew  # Native module is already initialized.
+        for name, path in [("posed", original), ("flipped", mutated_paths["flipped"]),
+                           ("changed_zone", mutated_paths["changed_rule_geometry"]),
+                           ("changed_custom", mutated_paths["changed_custom_pad"]),
+                           ("missing_zone", mutated_paths["missing_rule_area"])]:
+            previous_argv = sys.argv
+            output = root / f"physical-{name}.json"
+            try:
+                sys.argv = ["equivalence", "--board", str(path), "--ref", "U1", "--output", str(output)]
+                with contextlib.redirect_stdout(io.StringIO()):
+                    physical_equivalence.main()
+            finally:
+                sys.argv = previous_argv
+            results[f"physical_{name}"] = json.loads(output.read_text())
         raw_hash = sha256(raw)
         repaired = root / "repaired.kicad_pcb"
         recovery = normalize(pcbnew, raw, repaired, source, "0.15.8", root / "recovery-evidence")

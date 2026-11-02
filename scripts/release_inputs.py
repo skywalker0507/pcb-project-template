@@ -23,6 +23,7 @@ EXPECTED_KINDS = {
     "physical_review": "physical_review",
     "jlcpcb_dfm_candidate": "jlcpcb_dfm_candidate",
     "release_review_packet": "release_review_packet",
+    "release_review_progress": "artifact_run",
     "release_visual_review": "pcb_visual_review",
     "kicad_drc_review": "kicad_drc_review",
 }

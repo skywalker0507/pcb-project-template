@@ -88,6 +88,8 @@ def filesystem_profile(build: Path) -> dict[str, Any]:
 
 def artifact_run_profile(build: Path) -> dict[str, Any]:
     operations: dict[str, list[tuple[bool, float]]] = defaultdict(list)
+    execution_times: dict[str, list[float]] = defaultdict(list)
+    cache_counts: dict[str, list[tuple[int, int]]] = defaultdict(list)
     stale_by_operation: Counter[str] = Counter()
     now = datetime.now(timezone.utc)
     for path in build.glob("*/evidence/*/run.json"):
@@ -107,6 +109,13 @@ def artifact_run_profile(build: Path) -> dict[str, Any]:
             status == "complete" and value.get("success") is True,
             max(0.0, (finished - started).total_seconds()),
         ))
+        measured = value.get("execution_duration_ms")
+        if isinstance(measured, (int, float)) and not isinstance(measured, bool) and measured >= 0:
+            execution_times[operation].append(measured / 1000)
+        metrics = value.get('metrics') or {}
+        executed, reused = metrics.get('executed_steps'), metrics.get('reused_steps')
+        if type(executed) is int and type(reused) is int:
+            cache_counts[operation].append((executed, reused))
     rows = []
     for operation, values in operations.items():
         durations = [duration for _, duration in values]
@@ -116,6 +125,13 @@ def artifact_run_profile(build: Path) -> dict[str, Any]:
             "failures": sum(not success for success, _ in values),
             "failure_rate": round(sum(not success for success, _ in values) / len(values), 3),
             "total_seconds": round(sum(durations), 3),
+            "timing_scope": "lifecycle; may include delayed closure",
+            "recorded_execution_seconds": round(sum(execution_times[operation]), 3),
+            "measured_execution_runs": len(execution_times[operation]),
+            "legacy_timing_runs": len(values) - len(execution_times[operation]),
+            'cache_observed_runs': len(cache_counts[operation]),
+            'recorded_executed_steps': sum(executed for executed, _ in cache_counts[operation]),
+            'recorded_reused_steps': sum(reused for _, reused in cache_counts[operation]),
             "median_seconds": round(statistics.median(durations), 3),
             "p90_seconds": round(percentile(durations, 0.9), 3),
         })
@@ -187,9 +203,8 @@ def findings(profile: dict[str, Any], policy: dict[str, Any]) -> tuple[list[dict
     def record(item: dict[str, Any]) -> None:
         mitigation = implemented.get(item["code"])
         if isinstance(mitigation, dict) and mitigation.get("status") == "implemented":
-            mitigated.append({**item, "status": "mitigated", "implemented_mitigation": mitigation})
-        else:
-            result.append(item)
+            item = {**item, "status": "implementation_declared_effect_unverified", "implemented_mitigation": mitigation}
+        result.append(item)
 
     storage = profile["storage"]
     tmp = next((item for item in storage["by_lane"] if item["name"] == "tmp"), {"bytes": 0})
@@ -278,7 +293,12 @@ def stdout_index(profile: dict[str, Any], output: Path) -> dict[str, Any]:
         "stale_in_progress_runs": profile["artifact_runs"].get("stale_in_progress_runs", 0),
         "hotspots": [{
             "operation": item["operation"],
-            "total_seconds": item["total_seconds"],
+            "lifecycle_seconds": item["total_seconds"],
+            "recorded_execution_seconds": item.get("recorded_execution_seconds"),
+            "measured_execution_runs": item.get("measured_execution_runs", 0),
+            "legacy_timing_runs": item.get("legacy_timing_runs", item["runs"]),
+            'recorded_executed_steps': item.get('recorded_executed_steps'),
+            'recorded_reused_steps': item.get('recorded_reused_steps'),
             "failure_rate": item["failure_rate"],
         } for item in operations[:3]],
         "recommendations": [item["code"] for item in profile["recommendations"]],

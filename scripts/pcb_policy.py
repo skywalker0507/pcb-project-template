@@ -28,6 +28,18 @@ def configured_board(root: Path, flow_path: Path | None = None) -> Path:
     return board.resolve() if board.is_absolute() else (root / board).resolve()
 
 
+def configured_drc_baseline(root: Path, flow: dict[str, object] | None = None) -> Path:
+    flow = flow if flow is not None else read_object(root / "config/pcb-flow.json", "PCB flow")
+    audit = flow.get("audit", {})
+    if not isinstance(audit, dict):
+        raise SystemExit("audit must be an object")
+    value = audit.get("baseline", "config/pcb-release-baseline.json")
+    if not isinstance(value, str) or not value.strip():
+        raise SystemExit("audit.baseline must name the reviewed project DRC baseline")
+    path = Path(value)
+    return path.resolve() if path.is_absolute() else (root / path).resolve()
+
+
 def load_acceptance(path: Path, section: str, required_rules: set[str]) -> dict[str, object]:
     policy = read_object(path, "Acceptance policy")
     rules = policy.get(section)

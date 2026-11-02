@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Apply one bounded, SHA-guarded inner copper plane to the KiCad board."""
+"""Apply one bounded, SHA-guarded copper plane; outer layers use isolated candidates."""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 import subprocess
 import sys
@@ -38,8 +39,8 @@ def load_plan(path: Path) -> dict[str, object]:
         raise SystemExit(f"Plane plan is unavailable or invalid: {path}: {exc}") from exc
     if not isinstance(plan, dict) or plan.get("schema") != 1 or plan.get("kind") != "kicad_plane_plan":
         raise SystemExit("Plane plan must be schema-1 kicad_plane_plan")
-    if plan.get("layer") not in {"In1.Cu", "In2.Cu"}:
-        raise SystemExit("Plane plans are restricted to inner copper layers")
+    if plan.get("layer") not in {"F.Cu", "B.Cu", "In1.Cu", "In2.Cu"}:
+        raise SystemExit("Plane plans require an explicit supported copper layer")
     if not isinstance(plan.get("net"), str) or not plan["net"]:
         raise SystemExit("Plane plan requires a net")
     if plan.get("action", "create") not in {"create", "update"}:
@@ -52,28 +53,51 @@ def load_plan(path: Path) -> dict[str, object]:
     for point in points:
         if not isinstance(point, list) or len(point) != 2:
             raise SystemExit("Each plane outline point must be [x_mm, y_mm]")
-        float(point[0]); float(point[1])
+        try:
+            valid = all(not isinstance(value, bool) and math.isfinite(float(value)) for value in point)
+        except (TypeError, ValueError, OverflowError):
+            valid = False
+        if not valid:
+            raise SystemExit("Plane coordinates must be finite numbers")
     return plan
+
+
+def candidate_paths(source: Path | None, output: Path | None, layer: str) -> tuple[Path, Path]:
+    if (source is None) != (output is None):
+        raise SystemExit("Plane candidate edits require both --input and --output")
+    if source is None:
+        if layer in {"F.Cu", "B.Cu"}:
+            raise SystemExit("Outer planes require an isolated --input/--output candidate")
+        active = configured_board(ROOT).resolve()
+        return active, active
+    source, output = source.resolve(), output.resolve()
+    if not source.is_file():
+        raise SystemExit("Plane input board is missing")
+    if source == output or output.exists():
+        raise SystemExit("Plane output must be a new isolated candidate")
+    return source, output
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", type=Path, required=True)
+    parser.add_argument("--input", type=Path)
+    parser.add_argument("--output", type=Path)
     parser.add_argument("--policy", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--run-id")
     args = parser.parse_args()
     if current_stage().get("stage") != "physical":
         raise SystemExit("Plane plans are allowed only during the physical stage")
-    board_path = configured_board(ROOT).resolve()
     plan_path = args.plan.resolve()
     plan = load_plan(plan_path)
+    board_path, output = candidate_paths(args.input, args.output, str(plan["layer"]))
     before = sha256(board_path)
     if plan.get("board_sha256") != before:
         raise SystemExit("Plane plan board SHA-256 does not match the active candidate")
     policy = require_policy("physical", args.policy.resolve())
     reviewed_clearance = float(policy["manufacturing"]["routing_values"]["clearance"])
     requested_clearance = float(plan.get("clearance_mm", reviewed_clearance))
-    if requested_clearance != reviewed_clearance:
+    if not math.isfinite(requested_clearance) or requested_clearance <= 0 or requested_clearance != reviewed_clearance:
         raise SystemExit("Plane clearance must match the reviewed resolved policy")
 
     ensure_kicad_python()
@@ -110,14 +134,21 @@ def main() -> int:
     pcbnew.ZONE_FILLER(board).Fill(board.Zones())
 
     run = create_run("physical", "kicad-plane", args.run_id)
-    pcbnew.SaveBoard(str(board_path), board)
+    if output != board_path:
+        # Reuse the trace editor's tested project/rule/library-table rebasing.
+        from apply_kicad_trace_plan import copy_candidate
+        copy_candidate(board_path, output)
+    pcbnew.SaveBoard(str(output), board)
     receipt = {
         "schema": 1,
         "kind": "kicad_plane",
         "success": True,
-        "board": relative(board_path),
+        "input": relative(board_path),
+        "board": relative(output),
         "before_sha256": before,
-        "board_sha256": sha256(board_path),
+        "board_sha256": sha256(output),
+        "isolated_candidate": output != board_path,
+        "plan_sha256": sha256(plan_path),
         "plan": relative(plan_path),
         "layer": str(plan["layer"]),
         "net": str(plan["net"]),

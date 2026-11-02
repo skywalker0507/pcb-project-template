@@ -33,6 +33,26 @@ def load_object(path: Path, label: str) -> dict[str, Any]:
     return value
 
 
+def reviewed_order_parameters(profile_path: Path) -> dict[str, Any]:
+    profile = load_object(profile_path, "Manufacturing profile")
+    order = profile.get("order_profile")
+    if not isinstance(order, dict) or order.get("status") != "reviewed":
+        raise SystemExit("Manufacturing profile needs a reviewed order_profile")
+    fabrication, assembly = order.get("fabrication"), order.get("assembly")
+    if not isinstance(fabrication, dict) or not isinstance(assembly, dict):
+        raise SystemExit("Reviewed order_profile needs fabrication and assembly objects")
+    finish, mask, service = fabrication.get("surface_finish"), fabrication.get("solder_mask_color"), assembly.get("service")
+    modules = assembly.get("required_dfm_modules")
+    if not all(isinstance(value, str) and value.strip() for value in (finish, mask, service)):
+        raise SystemExit("Reviewed order_profile is missing finish, mask, or assembly service")
+    if not isinstance(modules, list) or not all(isinstance(item, str) and item.strip() for item in modules):
+        raise SystemExit("Reviewed order_profile required_dfm_modules is invalid")
+    if service == "smt" and not {"pcb", "smt"}.issubset(modules):
+        raise SystemExit("SMT order_profile requires both pcb and smt DFM modules")
+    return {"surface_finish": finish, "solder_mask_color": mask.lower(),
+            "assembly_service": service, "required_dfm_modules": sorted(set(modules))}
+
+
 def _copy_record(source: Path, destination: Path, root: Path) -> dict[str, Any]:
     source = source.resolve()
     if not source.is_file():

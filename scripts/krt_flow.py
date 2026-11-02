@@ -631,10 +631,12 @@ def classify_route_outcome(
         return "tool_failure", False
     if not route_ok:
         return "guardrail_or_candidate_integrity_failure", False
-    if not router_complete or not connectivity_complete:
+    if not connectivity_complete:
         return "structural_no_path_or_incomplete", True
     if audit_pass is False:
         return "candidate_drc_regression", False
+    if not router_complete:
+        return "router_summary_mismatch", False
     return "audit_or_policy_failure", False
 
 

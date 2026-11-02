@@ -28,6 +28,9 @@ class ElectricalCandidateGateTests(unittest.TestCase):
         flipped = result.pop("flipped")
         self.assertTrue(flipped["success"], flipped)
         self.assertTrue(result.pop("recovered_source_rule_area")["success"])
+        self.assertTrue(result.pop("unique_object_ids")["success"])
+        for name in ("physical_posed", "physical_flipped"):
+            self.assertTrue(result.pop(name)["success"], name)
         self.assertTrue(result)
         self.assertTrue(all(value["success"] is False for value in result.values()), result)
 

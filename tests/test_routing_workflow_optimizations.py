@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import contextlib
+import io
 import importlib.util
 import json
 from pathlib import Path
@@ -34,9 +36,136 @@ krt_flow = load("krt_flow_stdout_optimizations", "scripts/krt_flow.py")
 trace_plan = load("trace_plan_stdout_optimizations", "scripts/apply_kicad_trace_plan.py")
 release_review = load("release_review_prepare_optimizations", "scripts/prepare_release_review.py")
 process_confirmation = load("process_confirmation_optimizations", "scripts/confirm_special_process.py")
+checkpoint_finalize = load("checkpoint_finalize_optimizations", "scripts/finalize_routing_checkpoint.py")
+drc_review = load("drc_review_project_baseline", "scripts/record_kicad_drc_review.py")
 
 
 class RoutingWorkflowOptimizationTests(unittest.TestCase):
+    def test_dfm_navigation_distinguishes_valid_package_from_changed_or_tampered_inputs(self):
+        from manufacturing_work_packet import create_work_packet
+        for mutation in (None, "parts", "bom", "order", "registry", "board"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder).resolve()
+                (root / "config").mkdir()
+                board = root / "board.kicad_pcb"
+                board.write_bytes(b"exact board")
+                parts = root / "config/parts.json"
+                parts.write_text('{"parts": []}')
+                profile = root / "config/manufacturing-profile.json"
+                profile.write_text(json.dumps({"order_profile": {"status": "reviewed",
+                    "fabrication": {"surface_finish": "ENIG", "solder_mask_color": "green"},
+                    "assembly": {"service": "smt", "required_dfm_modules": ["pcb", "smt"]}}}))
+                inputs = {}
+                for role in ("audit", "gerber", "bom", "cpl"):
+                    inputs[role] = root / role
+                    inputs[role].write_bytes(role.encode())
+                manifest_path, manifest = create_work_packet(root / "packet", board=board,
+                    audit=inputs["audit"], gerber_zip=inputs["gerber"], bom=inputs["bom"], cpl=inputs["cpl"],
+                    vendor="demo", quote_currency="CNY", order_parameters=release_readiness.reviewed_order_parameters(profile))
+                snapshot = root / "snapshot.json"
+                snapshot.write_text(json.dumps({"derived_from_sha256": release_readiness.sha256(parts)}))
+                gate = root / "gate.json"
+                gate.write_text(json.dumps({"success": True, "registry_sha256": "REGISTRY"}))
+                candidate = {"success": True, "board_sha256": release_readiness.sha256(board),
+                    "work_packet_manifest": str(manifest_path), "work_packet_manifest_sha256": release_readiness.sha256(manifest_path),
+                    "work_packet_content_sha256": manifest["content_sha256"], "assembly_parts_snapshot": str(snapshot),
+                    "assembly_parts_snapshot_sha256": release_readiness.sha256(snapshot), "manufacturing_registry_gerber_gate": str(gate)}
+                if mutation == "parts": parts.write_text("changed parts")
+                if mutation == "bom": (manifest_path.parent / manifest["files"]["bom"]["path"]).write_text("tampered")
+                if mutation == "order":
+                    value = json.loads(profile.read_text()); value["order_profile"]["fabrication"]["surface_finish"] = "HASL"
+                    profile.write_text(json.dumps(value))
+                if mutation == "board": board.write_bytes(b"changed board")
+                flow = {"manufacturing": {"assembly_parts": str(parts)}}
+                with mock.patch.object(release_readiness, "ROOT", root), \
+                     mock.patch.object(release_readiness, "resolve_release_input", return_value=(root / "candidate.json", candidate, "test")):
+                    result, dependencies = release_readiness.dfm_work_packet_state(
+                        flow, release_readiness.sha256(board), "CHANGED" if mutation == "registry" else "REGISTRY")
+                self.assertEqual(result["state"], "awaiting_factory_result" if mutation is None else "work_packet_required")
+                if mutation is None:
+                    self.assertEqual(set(result["upload_files"]), {"gerber_zip", "bom", "cpl"})
+                    self.assertIn(parts, dependencies)
+
+    def test_readiness_follows_the_project_drc_baseline_not_inherited_default(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder).resolve()
+            self.assertEqual(release_readiness.configured_drc_baseline(root, {}), root / "config/pcb-release-baseline.json")
+            custom = root / "config/project-drc-review.json"
+            self.assertEqual(release_readiness.configured_drc_baseline(root, {"audit": {"baseline": "config/project-drc-review.json"}}), custom)
+            self.assertEqual(release_readiness.configured_drc_baseline(root, {"audit": {"baseline": str(custom)}}), custom)
+            for value in (None, "", {}):
+                with self.subTest(value=value), self.assertRaisesRegex(SystemExit, "audit.baseline"):
+                    release_readiness.configured_drc_baseline(root, {"audit": {"baseline": value}})
+
+    def test_drc_review_default_updates_only_the_configured_project_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder).resolve()
+            def write(name, value):
+                path = root / name; path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(value), encoding="utf-8")
+                return path
+            board = write("board.kicad_pcb", "unit fixture")
+            board_hash = drc_review.sha256(board)
+            report = write("drc.rpt", "no violation categories")
+            audit = write("audit.json", {"board_sha256": board_hash, "drc_report": str(report), "drc_categories": {}})
+            visual = write("visual.json", {"success": True, "review_pass": True, "tier": "release", "board_sha256": board_hash})
+            custom = write("config/project-baseline.json", {"required_zones": [{"layer": "F.Cu", "net": "GND"}]})
+            legacy = write("config/pcb-release-baseline.json", {"reviewed_board_sha256": "ANOTHER_PROJECT"})
+            original = legacy.read_bytes()
+            write("config/pcb-flow.json", {"audit": {"baseline": "config/project-baseline.json"}})
+            write("scripts/export_jlcpcb_release.py", "fixture")
+            argv = ["review", "--board", str(board), "--drc-report", str(report), "--audit", str(audit), "--visual-review", str(visual), "--output", str(root / "receipt.json")]
+            with mock.patch.object(drc_review, "ROOT", root), mock.patch.object(sys, "argv", argv), mock.patch.object(drc_review, "register_release_input"), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(drc_review.main(), 0)
+            self.assertEqual(json.loads(custom.read_text())["reviewed_board_sha256"], board_hash)
+            self.assertEqual(legacy.read_bytes(), original)
+
+    def test_finalize_rejects_physical_stage_before_creating_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            stage_path = Path(folder) / "stage.json"
+            stage_path.write_text(json.dumps({"stage": "physical"}), encoding="utf-8")
+            from stage_policy import require_operation
+            with (
+                mock.patch.object(sys, "argv", ["finalize", "--board", "unused", "--audit", "unused", "--visual-review", "unused"]),
+                mock.patch.object(checkpoint_finalize, "require_operation", side_effect=lambda operation: require_operation(operation, stage_path)),
+                mock.patch.object(checkpoint_finalize, "create_run") as create,
+                mock.patch.object(checkpoint_finalize, "publish_stage_artifact") as publish,
+            ):
+                with self.assertRaisesRegex(SystemExit, "stage_operation_forbidden"):
+                    checkpoint_finalize.main()
+                create.assert_not_called()
+                publish.assert_not_called()
+
+    def test_finalize_preserves_project_debt_and_required_inputs(self) -> None:
+        stage = {"open_items": ["Real-card compatibility remains unverified", "Assembly clearance review"],
+                 "required_inputs": ["assembled_fit_receipt", "profile_switch_test"]}
+        items, required = checkpoint_finalize.handoff_obligations(
+            stage, {"unconnected_items": 0, "lib_footprint_mismatch": 1}, 8,
+        )
+        self.assertEqual(items[:2], stage["open_items"])
+        self.assertIn("lib_footprint_mismatch", items[2])
+        self.assertEqual(required, stage["required_inputs"])
+        self.assertEqual(len(stage["open_items"]), 2)
+
+    def test_finalize_refuses_to_truncate_excess_debt(self) -> None:
+        with self.assertRaisesRegex(SystemExit, "cannot discard debt"):
+            checkpoint_finalize.handoff_obligations(
+                {"open_items": ["Mechanical fit", "Real-card test"]}, {"lib_footprint_mismatch": 1}, 2,
+            )
+
+    def test_finalize_refuses_malformed_handoff_obligations(self) -> None:
+        for stage in ({"required_inputs": "test"}, {"open_items": [None]}):
+            with self.subTest(stage=stage), self.assertRaisesRegex(SystemExit, "invalid"):
+                checkpoint_finalize.handoff_obligations(stage, {"unconnected_items": 0}, 8)
+
+    def test_finalize_deduplicates_without_dropping_distinct_obligations(self) -> None:
+        items, required = checkpoint_finalize.handoff_obligations(
+            {"open_items": ["fit", "fit", "SMS"], "required_inputs": ["measurement", "measurement"]},
+            {"unconnected_items": 0}, 2,
+        )
+        self.assertEqual(items, ["fit", "SMS"])
+        self.assertEqual(required, ["measurement"])
+
     def test_checkpoint_reuse_is_decided_before_artifact_run_creation(self) -> None:
         source = (ROOT / "scripts/run_pcb_pipeline.py").read_text(encoding="utf-8")
         main_source = source[source.index("def main()") :]

@@ -98,6 +98,9 @@ it does not replace KRT and must not author the schematic or approve release.
 Use `--new-project` in a separate project checkout. It archives inherited
 requirements, decisions, selected parts, footprint provenance and adoption
 pointers under `tmp/project-initialization/`, then creates unreviewed drafts.
+Placement, routing and manufacturing inputs are reset to project drafts too;
+old routing strategies, fabrication overrides and approval references are
+archived. The new board path and future review paths belong to the new project.
 Existing CAD and release artifacts remain on disk; a different project's freeze
 cannot be adopted. Project-specific placement, routing and manufacturing inputs
 still require review for the new design. Without `--new-project`, initialization
@@ -167,12 +170,39 @@ semantics must bump that version. `--force-rebuild` remains an explicit override
 Reusable policy compilation and manufacturing gates live in the independently
 versioned `template-engine/` Python package. The project owns only reviewed
 inputs, board sources, evidence and artifact paths. `config/template-engine.json`
-pins the engine API, version and source digest; `scripts/` contains thin project
-adapters. The path source can later be replaced by an installed engine package
+pins the engine API, version and source digest. `scripts/` currently contains
+both project adapters and shared workflow code. Checkpoint evidence validation
+and restoration now live in `pcb_template_engine.checkpoint`, shared by placement
+checkpoints and release-review preparation. Its callers supply explicit project
+and artifact roots. The path source can later be replaced by an installed engine package
 without changing the PCB command surface.
 
 Run `py -3.14 scripts/check_template_engine.py` to verify the lock. An engine
 source change fails closed until its version/digest is intentionally reviewed.
+
+Framework script updates use the existing initializer, without reconfiguring the
+PCB project. Run full template checks, then preview the target:
+
+```powershell
+py -3.14 scripts/pcbctl.py --local verify template
+py -3.14 scripts/init_project.py --sync-framework ../my-board --plan
+py -3.14 scripts/init_project.py --sync-framework ../my-board --apply --expect-plan-sha256 <preview-digest>
+```
+
+The preview lists counts and writes the complete change plan under the source
+template's `tmp/framework-update/`; it does not change the target. Apply requires
+a current full-test receipt, the exact preview digest and an identical pinned
+engine. It updates only managed Python scripts, with verified backups and rollback
+on a failed write. `template-runtime.lock.json` records their content hashes for
+the next three-way comparison; it is a software inventory, not PCB approval.
+Project-local modifications, local deletions and upstream removals stop the whole
+update. Extra project scripts remain untouched. Existing projects can establish
+their first inventory only when every source script already matches; differences
+without a previous inventory require explicit review and reconciliation first.
+`--new-project` initialization records the starting script inventory automatically;
+ordinary reconfiguration preserves any existing inventory.
+Engine upgrades and configuration migrations remain separate reviewed changes.
+Use `--validation-receipt PATH` when full checks were saved at a nondefault path.
 
 ## Authority and gates
 
@@ -192,6 +222,17 @@ source change fails closed until its version/digest is intentionally reviewed.
 - `pcbctl release prepare-dfm` therefore creates an isolated, non-release
   Gerber + JLC BOM + JLC CPL candidate bound to one audited board SHA. This
   breaks the SMT-DFM dependency cycle without weakening final export gates.
+- Reviewed assembly entries can declare `sourcing: "customer_supplied"` with
+  an exact manufacturer and MPN. Their catalog ID may be blank; all populated
+  designators remain in BOM and CPL, with the sourcing route and exact identity
+  included in the hash-bound BOM. Catalog entries still require a valid C-code.
+  File generation does not confirm consignment acceptance, inventory or the
+  factory's assembly selection; both PCB and SMT DFM gates still apply.
+- `pcbctl release prepare-dfm ... --plan` validates the exact audit, reviewed
+  order and native assembly coverage before any export. It creates no candidate.
+  Actual export repeats the same preflight before producing Gerbers or drills.
+  Readiness distinguishes a missing/stale work packet from a verified packet
+  awaiting factory PCB/SMT results; the latter includes the exact upload paths.
 - Release also compares reviewed critical embedded footprints with their pinned
   libraries; missing rule areas require explicit board-level compensation.
 - Under-component holes whose Excellon class does not itself prove plugging or
@@ -223,9 +264,81 @@ Validation has three tiers, defined in `config/validation-tiers.json`:
 - `release`: full pipeline, exact-board placement semantics, four-view visual
   review, parity and manufacturing gates.
 
+For a placement checkpoint, one existing command plans and runs integrity,
+placement semantics, routability, electrical parity, DRC/connectivity and
+front/back copper rendering:
+
+```powershell
+py -3.14 scripts/pcbctl.py verify --placement-state moved --board <candidate> `
+  --baseline-board <placement-baseline> --plan
+py -3.14 scripts/pcbctl.py verify --placement-state moved --board <candidate> `
+  --baseline-board <placement-baseline>
+```
+
+Use `--placement-state unchanged` with the actual predecessor after copper or
+silkscreen edits: native placement immutability replaces semantics/scoring.
+Exact unchanged checkpoints automatically reuse hash-bound evidence without
+starting another run. Board/project rules, source resources, freeze contents,
+producers, policies, native tools and generated evidence must remain unchanged;
+reuse is conservative for the whole batch. `--plan` creates no run or approval.
+The compact result names pending visual review and critical probes. Generated
+images are review inputs; this command never adopts a board, completes a stage
+or approves release. Existing DRC-only checkpoint usage remains available.
+
+For formal adoption after copper edits, `place immutability --input <reviewed-layout>
+--candidate <routed-board> --inherit-checkpoint <passing-placement-summary>
+--output <proof>` can reuse the original placement semantics and routability
+comparison. It requires equal native footprint/pad/net/outline inputs, unchanged
+metric rules and checker/runtime hashes. If only probe coverage grew, supply an
+original `--reference-policy <archive>` matching the checkpoint's recorded hash;
+current probe requirements still apply. Pass the proof as `--placement-inheritance`
+to `place review` (with original `--placement-semantics`) and `place promote`
+(with original `--routability`), then as `--placement-evidence` to physical review.
+The proof tracks rule-file absence as well as content; release reviews still
+require their exact-board semantics. No original receipt is rewritten.
+
 Before the full release tier, run `pcbctl.py verify readiness --board <adopted
 board>`. It aggregates cached DRC, parity, physical review, DFM and special
-process status in one compact receipt. `pcbctl.py release` fails immediately if
+process status in one compact receipt. Readiness and the DRC-review writer use
+`config/pcb-flow.json` → `audit.baseline`, matching the guarded release audit;
+an unrelated example baseline is not project approval. Standalone audit calls
+can select their baseline explicitly with `--baseline`.
+
+Release navigation retains all open-item counts, including deferred hardware
+acceptance. These notes do not become release blockers unless the reviewed gate
+requires them. Review preparation/finalization close failed runs automatically.
+Workflow profiling reports measured synchronous execution separately from run
+lifecycle and labels legacy records without execution timing. Declaring a
+mitigation implemented does not suppress an observed efficiency finding.
+
+Aggregate placement checkpoints and release review preparation also reuse
+individual native checks. Each record binds its normalized command, producer
+closure, toolchain, conservative configuration/resource inventory, upstream
+file contents and output hashes. Missing contracts, dynamic imports or unknown
+producers disable step reuse. Supplier mappings are omitted only for audited
+native producers that do not read them; electrical identity stays bound.
+
+After a failure, repeat the same command with a new/default run ID to resume
+valid steps. The existing checkpoint index distinguishes a passing `receipt`
+from a `resume_receipt`; release progress uses the existing run manifest and
+release-input index. Progress never approves a stage or release. Materialized
+outputs retain hashes of their original proof files as well as current copies.
+Final review rejects changed inputs, missing files or tampered source evidence.
+
+`pcbctl verify prepare-review --plan` reports per-check run/reuse decisions;
+`--refresh-step footprint-equivalence` recomputes just that check. `--refresh`
+still recomputes the entire review packet. Full DRC/connectivity and exact-board
+release placement/visual/manufacturing requirements remain in force. Workflow
+metrics expose recorded executed/reused step counts; these are command counts,
+not token measurements.
+
+Native Python dependencies used by cached checks are declared in
+`config/toolchain-policy.json` under `kicad.python_modules` (currently `PIL`).
+Their package files and native library directories are fingerprinted; imports
+without a known dependency binding disable step reuse. Artifact cleanup follows
+JSON receipt references transitively, including path keys in hash maps, and
+refuses to prune through malformed referenced JSON.
+`pcbctl.py release` fails immediately if
 that receipt is missing, stale or blocked, avoiding repeated partial pipelines.
 Current exact-board evidence is selected through `build/07-release/INPUTS.json`;
 the index records failed receipts too and never implies approval.
@@ -304,6 +417,22 @@ configuration and data fanout must not be deferred until after a power trunk
 occupies the same escape corridor. Explicit trace plans reject approximate
 existing-copper conflicts before creating a candidate, but KiCad DRC remains
 the exact acceptance check.
+
+Project-specific trace scopes live in a routing profile's reviewed
+`explicit_trace` block: finite `nets`, `via_nets` and matching outer `layers`.
+Geometry must match the reviewed manufacturing defaults. Use stable
+`--route-area` and `--strategy-class`; no project net names need engine edits.
+Exact copper repairs retain independent anchor-connectivity and DRC checks.
+Replacement preflight resolves the exact textual removals without writing
+the input, then excludes only their unique native copper UUIDs. Missing or
+ambiguous matches fail closed; retained copper and pads stay obstacles.
+
+`physical-start plane --input <board> --output <candidate> --plan <plan>`
+also supports enabled outer copper layers without changing the active board.
+Outer planes require a new isolated output. Plans bind the input SHA and use
+the reviewed clearance; creating/filling copper does not approve routing.
+Copper previews show the native stored fills and holes, and reject unfilled
+zones. A zone-fill change also expands an automatic changed-copper crop.
 
 Long KRT runs use a persistent checkpoint instead of keeping an Agent call open:
 

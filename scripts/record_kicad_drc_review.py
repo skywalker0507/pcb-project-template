@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import re
 from release_inputs import register_release_input
+from pcb_policy import configured_drc_baseline
 
 from audit_kicad_release import FATAL_CATEGORIES, violation_items
 
@@ -49,7 +50,7 @@ def main() -> int:
     parser.add_argument("--visual-review", type=Path, required=True)
     parser.add_argument("--footprint-equivalence", type=Path)
     parser.add_argument(
-        "--baseline", type=Path, default=ROOT / "config/pcb-release-baseline.json",
+        "--baseline", type=Path, default=configured_drc_baseline(ROOT),
     )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()

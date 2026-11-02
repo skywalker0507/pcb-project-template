@@ -27,7 +27,10 @@
   },
   "kicad": {
     "major": 10,
-    "cli": "C:/Program Files/KiCad/10.0/bin/kicad-cli.exe"
+    "cli": "C:/Program Files/KiCad/10.0/bin/kicad-cli.exe",
+    "python_modules": [
+      "PIL"
+    ]
   },
   "gerber_parser": {
     "package": "gerbonara",

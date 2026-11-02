@@ -13,6 +13,7 @@ from design_policy import DEFAULT_OUTPUT, require_policy
 from pcb_policy import configured_board
 from release_inputs import register_release_input
 from stage_policy import current_stage, require_operation
+from check_kicad_placement_immutability import validate_inheritance
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,7 +39,10 @@ def load_evidence(value: str, label: str) -> tuple[Path, dict[str, object]]:
     return path, payload
 
 
-def placement_evidence_matches(payload: dict[str, object], board_hash: str) -> bool:
+def placement_evidence_matches(payload: dict[str, object], board_hash: str, path: Path | None = None) -> bool:
+    if payload.get("kind") == "kicad_placement_immutability" and path is not None:
+        validate_inheritance(path, board_hash)
+        return True
     return bool(
         payload.get("kind") == "kicad_placement_semantics"
         and payload.get("success") is True
@@ -108,7 +112,7 @@ def main() -> int:
     for value in evidence["placement"]:
         path, payload = load_evidence(value, "Placement")
         evidence_hashes["placement"].append(sha256(path))
-        placement_valid = placement_valid or placement_evidence_matches(payload, board_hash)
+        placement_valid = placement_valid or placement_evidence_matches(payload, board_hash, path)
     audit_valid: dict[str, bool] = {"critical_nets": False, "return_paths": False}
     for category in audit_valid:
         for value in evidence[category]:

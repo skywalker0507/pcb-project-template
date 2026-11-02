@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 import zipfile
 
 from check_jlcpcb_release import package_report
@@ -17,6 +18,7 @@ from export_jlcpcb_release import configured_layers
 from manufacturing_work_packet import (
     create_work_packet,
     load_object,
+    reviewed_order_parameters,
     write_observation_skeleton,
     write_quote_skeleton,
 )
@@ -139,31 +141,6 @@ def bind_assembly_parts_source(source: Path, destination: Path, board_sha256: st
     return bound
 
 
-def reviewed_order_parameters(profile_path: Path) -> dict[str, object]:
-    profile = load_object(profile_path, "Manufacturing profile")
-    order_profile = profile.get("order_profile")
-    if not isinstance(order_profile, dict) or order_profile.get("status") != "reviewed":
-        raise SystemExit("Manufacturing profile needs a reviewed order_profile")
-    fabrication = order_profile.get("fabrication")
-    assembly = order_profile.get("assembly")
-    if not isinstance(fabrication, dict) or not isinstance(assembly, dict):
-        raise SystemExit("Reviewed order_profile needs fabrication and assembly objects")
-    finish = fabrication.get("surface_finish")
-    mask = fabrication.get("solder_mask_color")
-    service = assembly.get("service")
-    modules = assembly.get("required_dfm_modules")
-    if not all(isinstance(value, str) and value for value in (finish, mask, service)):
-        raise SystemExit("Reviewed order_profile is missing finish, mask, or assembly service")
-    if not isinstance(modules, list) or not all(isinstance(item, str) and item for item in modules):
-        raise SystemExit("Reviewed order_profile required_dfm_modules is invalid")
-    return {
-        "surface_finish": finish,
-        "solder_mask_color": str(mask).lower(),
-        "assembly_service": service,
-        "required_dfm_modules": sorted(set(modules)),
-    }
-
-
 def reviewed_vendor_and_currency(profile_path: Path) -> tuple[str, str]:
     profile = load_object(profile_path, "Manufacturing profile")
     manufacturer = profile.get("manufacturer")
@@ -174,6 +151,27 @@ def reviewed_vendor_and_currency(profile_path: Path) -> tuple[str, str]:
     if not isinstance(currency, str) or not currency.strip():
         raise SystemExit("Manufacturing profile cost_review needs a currency")
     return manufacturer.strip().lower(), currency.strip().upper()
+
+
+def preflight_parts(board: Path, source: Path, log_path: Path | None = None) -> dict[str, object]:
+    """Use the real assembly validator before any KiCad export or output directory."""
+    with tempfile.TemporaryDirectory(prefix="pcb-dfm-preflight-") as folder:
+        bound = Path(folder) / "assembly-parts-bound.json"
+        bind_assembly_parts_source(source, bound, sha256(board))
+        completed = subprocess.run([
+            str(KICAD_PYTHON), str(ROOT / "scripts/generate-jlcpcb-assembly.py"),
+            "--validate-only", "--parts-source", str(bound), "--board-source", str(board),
+        ], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
+    output = completed.stdout + completed.stderr
+    if log_path is not None:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(output, encoding="utf-8")
+    if completed.returncode:
+        raise SystemExit("Assembly preflight failed before export: " + output[-800:])
+    value = json.loads(completed.stdout)
+    if value.get("kind") != "assembly_parts_preflight" or value.get("success") is not True:
+        raise SystemExit("Assembly preflight did not return a passing validation")
+    return value
 
 
 def stdout_index(payload: dict[str, object]) -> dict[str, object]:
@@ -205,6 +203,7 @@ def main() -> int:
     parser.add_argument("--board-stack", type=Path, default=ROOT / "config/board-stack.json")
     parser.add_argument("--assembly-parts", type=Path, default=DEFAULT_ASSEMBLY_PARTS)
     parser.add_argument("--manufacturing-profile", type=Path, default=DEFAULT_MANUFACTURING_PROFILE)
+    parser.add_argument("--plan", action="store_true", help="Validate inputs and show the export plan without creating a candidate.")
     args = parser.parse_args()
 
     board = args.board.resolve()
@@ -218,6 +217,19 @@ def main() -> int:
 
     layers = configured_layers(board, args.board_stack.resolve())
     board_hash = sha256(board)
+    vendor, quote_currency = reviewed_vendor_and_currency(args.manufacturing_profile.resolve())
+    order_parameters = reviewed_order_parameters(args.manufacturing_profile.resolve())
+    parts_preflight = preflight_parts(
+        board, args.assembly_parts.resolve(),
+        None if args.plan else args.receipt.resolve().with_suffix(".preflight.log"),
+    )
+    if args.plan:
+        print(json.dumps({"success": True, "kind": "dfm_candidate_plan", "release_approved": False,
+                          "board_sha256": board_hash, "order_parameters": order_parameters,
+                          "assembly_preflight": parts_preflight,
+                          "steps": ["gerbers", "drill", "positions", "assembly", "work_packet", "manufacturing_registry"],
+                          "output_dir": str(output)}, separators=(",", ":")))
+        return 0
     gerber = output / "gerber"
     assembly = output / "assembly"
     gerber.mkdir(parents=True)
@@ -257,7 +269,6 @@ def main() -> int:
     normalize_kicad_export_metadata(gerber)
     archive = output / "jlcpcb-dfm-candidate-gerber.zip"
     write_deterministic_zip(gerber, archive)
-    vendor, quote_currency = reviewed_vendor_and_currency(args.manufacturing_profile.resolve())
     work_packet_path, work_packet = create_work_packet(
         output,
         board=board,
@@ -267,7 +278,7 @@ def main() -> int:
         cpl=assembly / "CPL_JLCPCB.csv",
         vendor=vendor,
         quote_currency=quote_currency,
-        order_parameters=reviewed_order_parameters(args.manufacturing_profile.resolve()),
+        order_parameters=order_parameters,
     )
     observation_path = write_observation_skeleton(output, work_packet)
     quote_observation_path = write_quote_skeleton(output, work_packet)
@@ -314,6 +325,7 @@ def main() -> int:
         "assembly_validation": str(assembly / "assembly-validation.json"),
         "assembly_parts_snapshot": str(bound_parts),
         "assembly_parts_snapshot_sha256": sha256(bound_parts),
+        "assembly_preflight": parts_preflight,
         "silkscreen_soldermask_subtracted": True,
         "limits": "PCB/SMT DFM upload input only. BOM/CPL are unapproved candidate evidence, not release files.",
     }

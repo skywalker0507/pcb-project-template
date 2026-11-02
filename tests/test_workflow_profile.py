@@ -28,6 +28,27 @@ artifact_store = load("artifact_store_reference_tests", "scripts/artifact_store.
 
 
 class WorkflowProfileTests(unittest.TestCase):
+    def test_pruning_follows_current_receipts_to_original_proof_hash_map_keys(self):
+        for pointer in ('release', 'checkpoint'):
+            with self.subTest(pointer=pointer), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder).resolve()
+                origin = root / 'build/07-release/tmp/old-origin'; origin.mkdir(parents=True)
+                image = origin / 'proof.png'; image.write_bytes(b'original proof')
+                proof = root / 'build/07-release/evidence/new/proof.json'; proof.parent.mkdir(parents=True)
+                proof.write_text(json.dumps({'origin_files': {str(image): 'HASH'}}))
+                index = root / ('build/07-release/INPUTS.json' if pointer == 'release'
+                                else 'build/07-release/evidence/checkpoint-cache.json')
+                index.write_text(json.dumps({'receipt': str(proof)}))
+                os.utime(origin, (1, 1))
+                settings = {'root': 'build', 'stages': {'release': '07-release'}, 'lanes': {'tmp': 'tmp'},
+                            'retention': {'tmp_max_age_hours': 0}, 'legacy': {'archive_root': 'archive'}}
+                with mock.patch.object(artifact_store, 'ROOT', root), \
+                     mock.patch.object(artifact_store, 'CURRENT_INDEX', root / 'build/CURRENT.json'), \
+                     mock.patch.object(artifact_store, 'STAGE_RESULTS_INDEX', root / 'build/STAGE_RESULTS.json'):
+                    report = artifact_store.prune_tmp(settings, apply=False)
+                self.assertEqual(report['protected_run_count'], 1)
+                self.assertEqual(report['run_count'], 0)
+
     def test_filesystem_profile_uses_metadata_only(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             build = Path(folder) / "build"
@@ -54,7 +75,7 @@ class WorkflowProfileTests(unittest.TestCase):
         self.assertEqual([item["code"] for item in result], ["routing_candidate_churn", "expired_tmp_pressure"])
         self.assertEqual(mitigated, [])
 
-    def test_implemented_mitigation_is_not_recommended_repeatedly(self) -> None:
+    def test_declaring_mitigation_does_not_hide_observed_repetition(self) -> None:
         value = {
             "storage": {"by_lane": [{"name": "tmp", "bytes": 0}], "tmp_run_dirs": 0},
             "routing": {"recent_rejection_rate": 0.0},
@@ -67,8 +88,50 @@ class WorkflowProfileTests(unittest.TestCase):
                 "repeated_full_board_verification": {"status": "implemented"},
             },
         })
-        self.assertEqual(recommendations, [])
-        self.assertEqual([item["code"] for item in mitigated], ["repeated_full_board_verification"])
+        self.assertEqual(mitigated, [])
+        self.assertEqual([item["code"] for item in recommendations], ["repeated_full_board_verification"])
+        self.assertEqual(recommendations[0]["status"], "implementation_declared_effect_unverified")
+
+    def test_execution_time_does_not_include_delayed_closure_or_invent_legacy_timing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            build = Path(folder)
+            for name, measured in (("measured", 250), ("legacy", None)):
+                run = build / "07-release/evidence" / name / "run.json"
+                run.parent.mkdir(parents=True)
+                run.write_text(json.dumps({"operation": "review", "status": "failed", "success": False,
+                                           "created_at": "2026-01-01T00:00:00+00:00",
+                                           "updated_at": "2026-01-01T01:00:00+00:00",
+                                           'metrics': {'executed_steps': 1, 'reused_steps': 3} if measured else {},
+                                           "execution_duration_ms": measured}), encoding="utf-8")
+            result = profile.artifact_run_profile(build)["operations"][0]
+        self.assertEqual(result["total_seconds"], 7200)
+        self.assertEqual(result["recorded_execution_seconds"], .25)
+        self.assertEqual(result["measured_execution_runs"], 1)
+        self.assertEqual(result["legacy_timing_runs"], 1)
+        self.assertEqual(result['recorded_executed_steps'], 1)
+        self.assertEqual(result['recorded_reused_steps'], 3)
+        self.assertEqual(result['cache_observed_runs'], 1)
+
+    def test_guarded_run_closes_system_exit_and_preserves_original_exception(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder).resolve()
+            settings = {"root": "build", "stages": {"release": "07-release"}}
+            with mock.patch.object(artifact_store, "ROOT", root), \
+                 mock.patch.object(artifact_store, "CURRENT_INDEX", root / "build/CURRENT.json"):
+                run = artifact_store.create_run("release", "review", settings=settings)
+                with self.assertRaisesRegex(SystemExit, "bad baseline"):
+                    with artifact_store.guard_run(run):
+                        raise SystemExit("bad baseline")
+                value = json.loads(run.manifest.read_text(encoding="utf-8"))
+                self.assertEqual(value["status"], "failed")
+                self.assertFalse(value["success"])
+                self.assertEqual(value["metrics"]["reason"], "bad baseline")
+                self.assertIsInstance(value["execution_duration_ms"], int)
+
+                with self.assertRaisesRegex(RuntimeError, "later failure"):
+                    with artifact_store.guard_run(run):
+                        raise RuntimeError("later failure")
+                self.assertEqual(json.loads(run.manifest.read_text())["metrics"], value["metrics"])
 
     def test_stale_in_progress_run_is_not_counted_as_failure(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

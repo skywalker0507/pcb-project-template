@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -14,6 +15,7 @@ import re
 import shutil
 import stat
 import sys
+import time
 from typing import Any
 import zipfile
 
@@ -82,6 +84,7 @@ class ArtifactRun:
     evidence: Path
     release: Path
     manifest: Path
+    execution_started: float | None = None
 
     def as_dict(self) -> dict[str, str]:
         return {
@@ -118,7 +121,8 @@ def create_run(
     tmp.mkdir(parents=True, exist_ok=True)
     evidence.mkdir(parents=True, exist_ok=True)
     manifest = evidence / "run.json"
-    run = ArtifactRun(stage, stage_label, run_id, operation, tmp, evidence, release, manifest)
+    run = ArtifactRun(stage, stage_label, run_id, operation, tmp, evidence, release, manifest,
+                      time.perf_counter() if not manifest.exists() else None)
     if not manifest.exists():
         write_manifest(run, "in_progress", success=None)
     CURRENT_INDEX.parent.mkdir(parents=True, exist_ok=True)
@@ -154,6 +158,11 @@ def write_manifest(
         "success": success,
         "created_at": previous.get("created_at") or datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
+        "execution_duration_ms": (
+            round((time.perf_counter() - run.execution_started) * 1000)
+            if status in {"complete", "failed"} and run.execution_started is not None
+            else previous.get("execution_duration_ms")
+        ),
         "lanes": {
             "tmp": relative(run.tmp),
             "evidence": relative(run.evidence),
@@ -179,6 +188,19 @@ def finish_run(
     metrics: dict[str, Any] | None = None,
 ) -> None:
     write_manifest(run, "complete" if success else "failed", success=success, artifacts=artifacts, metrics=metrics)
+
+
+@contextmanager
+def guard_run(run: ArtifactRun):
+    """Close failed synchronous runs without changing explicit success gates."""
+    try:
+        yield run
+    except BaseException as exc:
+        value = read_json(run.manifest)
+        if value.get("status") == "in_progress":
+            finish_run(run, False, metrics={**(value.get('metrics') or {}),
+                                           "exception": type(exc).__name__, "reason": str(exc)[:800]})
+        raise
 
 
 def publish_stage_artifact(
@@ -212,7 +234,11 @@ def publish_stage_artifact(
     table = source.parent / "fp-lib-table"
     if table.is_file():
         target = run.release / "fp-lib-table"
-        shutil.copy2(table, target)
+        def rebase_library(match: re.Match[str]) -> str:
+            library = (source.parent / match.group(1)).resolve()
+            return "${KIPRJMOD}/" + Path(os.path.relpath(library, run.release)).as_posix()
+        target.write_text(re.sub(r'\$\{KIPRJMOD\}/([^\")]+)', rebase_library,
+                                 table.read_text(encoding="utf-8")), encoding="utf-8")
         copied["fp_lib_table"] = relative(target)
     if sha256(destination) != sha256(source):
         raise SystemExit("Published stage artifact SHA differs from the accepted source")
@@ -309,21 +335,49 @@ def protected_reference_text() -> str:
         *list((ROOT / "handoff").rglob("*")),
         *list((ROOT / "build").glob("*/CURRENT.json")),
         *list((ROOT / "build").glob("*/INPUTS.json")),
+        *list((ROOT / 'build').glob('*/evidence/checkpoint-cache.json')),
         *list((ROOT / "build").glob("*/tmp/*CURRENT.json")),
         *list((ROOT / "build/00-shared/krt-async").glob("*.json")),
         *list((ROOT / "manufacturing").rglob("manifest.json")),
     ]
     chunks: list[str] = []
     seen: set[Path] = set()
-    for path in paths:
+    pending = list(paths)
+    while pending:
+        path = pending.pop()
         resolved = path.resolve()
         if resolved in seen or not resolved.is_file():
             continue
         seen.add(resolved)
         try:
-            chunks.append(resolved.read_text(encoding="utf-8", errors="replace"))
+            content = resolved.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
+        chunks.append(content)
+        if resolved.suffix.lower() != '.json':
+            continue
+        try:
+            value = json.loads(content)
+        except (ValueError, RecursionError) as exc:
+            raise SystemExit(f'Cannot safely inspect referenced JSON before pruning: {resolved}') from exc
+        def strings(item):
+            if isinstance(item, str):
+                yield item
+            elif isinstance(item, dict):
+                for key, child in item.items():
+                    yield str(key)
+                    yield from strings(child)
+            elif isinstance(item, list):
+                for child in item:
+                    yield from strings(child)
+        for text in strings(value):
+            chunks.append(text)  # Decode Windows escapes in paths, including hash-map keys.
+            if not text.endswith('.json') or '\n' in text:
+                continue
+            candidate = Path(text)
+            candidate = candidate.resolve() if candidate.is_absolute() else (ROOT / candidate).resolve()
+            if candidate.is_relative_to(ROOT.resolve()) and candidate.is_file():
+                pending.append(candidate)
     return "\n".join(chunks).replace("\\", "/").lower()
 
 

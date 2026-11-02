@@ -80,7 +80,7 @@ def workset(receipt: dict[str, object]) -> dict[str, object]:
     work = dict(receipt.get("work") or {})
     release_stage = stage.get("name") == "release"
     blocker_count = work.get("blocker_count", len(work.get("blockers") or []))
-    open_item_count = 0 if release_stage else work.get("open_item_count", len(work.get("open_items") or []))
+    open_item_count = work.get("open_item_count", len(work.get("open_items") or []))
     result = {
         "schema": 1,
         "stage": stage.get("name"),
@@ -90,10 +90,11 @@ def workset(receipt: dict[str, object]) -> dict[str, object]:
         "blockers": list(work.get("blockers") or [])[:4],
         "blocker_count": blocker_count,
         "blockers_truncated": blocker_count > len(list(work.get("blockers") or [])[:4]),
-        "open_items": [] if release_stage else list(work.get("open_items") or [])[:4],
+        "open_items": list(work.get("open_items") or [])[:4],
         "open_item_count": open_item_count,
         "open_items_truncated": open_item_count > len(list(work.get("open_items") or [])[:4]),
         "next_actions": list(work.get("next_actions") or [])[:3],
+        "next_action": receipt.get("next_action"),
         "next_command": receipt.get("next_command"),
         "required_inputs": list(receipt.get("required_inputs") or [])[:3],
         "details_if_needed": "build/07-release/tmp/release-readiness/current.json" if release_stage else None,
@@ -121,7 +122,7 @@ def stdout_index(receipt: dict[str, object]) -> dict[str, object]:
         "stage": stage.get("name"),
         "status": stage.get("status"),
         "blocker_count": work.get("blocker_count", len(work.get("blockers") or [])),
-        "open_item_count": 0 if stage.get("name") == "release" else work.get("open_item_count", len(work.get("open_items") or [])),
+        "open_item_count": work.get("open_item_count", len(work.get("open_items") or [])),
         "next_action": receipt.get("next_action"),
         "next_command": receipt.get("next_command"),
         "read_now": ["build/WORKSET.json"],

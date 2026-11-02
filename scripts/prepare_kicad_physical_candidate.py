@@ -11,6 +11,9 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from collections import Counter
+import re
+import uuid
 
 from artifact_store import create_run, finish_run, relative
 from electrical_freeze_contract import DEFAULT_FREEZE_ROOT, load_release_freeze
@@ -27,6 +30,42 @@ FLOW_PATH = ROOT / "config/pcb-flow.json"
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest().upper()
+
+
+def normalize_duplicate_footprint_uuids(pcbnew, board_path: Path) -> dict:
+    """Repair only duplicate UUID definitions in canonical, unrouted PCB text.
+
+    No object cloning or numeric CAD edits. Group/generator references are
+    deliberately unsupported because duplicate identities are ambiguous there.
+    Native parity and integrity gates remain mandatory after this transformation.
+    """
+    text = board_path.read_text(encoding="utf-8")
+    pattern = re.compile(r'(^[ \t]*\(uuid[ \t]+)("?)([0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})\2([ \t]*\))', re.MULTILINE)
+    counts = Counter(match.group(3) for match in pattern.finditer(text))
+    duplicate_ids = {value for value, count in counts.items() if count > 1}
+    changed = 0
+    if duplicate_ids:
+        board = pcbnew.LoadBoard(str(board_path))
+        if (list(board.GetTracks()) or any(not z.GetIsRuleArea() for z in board.Zones())
+                or re.search(r'^\s*\((?:group|generated)\b', text, re.MULTILINE)):
+            raise SystemExit("Duplicate UUID repair requires an unrouted board without group/generator references")
+        used = set()
+        reserved = set(counts)
+        def replace(match):
+            nonlocal changed
+            value = match.group(3)
+            if value in used:
+                while True:
+                    value = str(uuid.uuid4())
+                    if value not in reserved:
+                        break
+                reserved.add(value)
+                changed += 1
+            used.add(value)
+            return match.group(1) + match.group(2) + value + match.group(2) + match.group(4)
+        board_path.write_text(pattern.sub(replace, text), encoding="utf-8", newline="\n")
+    return {"duplicate_uuid_groups": len(duplicate_ids), "reassigned_objects": changed,
+            "scope": "Duplicate UUID definition tokens only; exact native geometry/connectivity parity remains mandatory"}
 
 
 def latest_freeze_receipt(freeze_root: Path = DEFAULT_FREEZE_ROOT) -> Path:
@@ -130,6 +169,15 @@ def main() -> int:
     frozen_source = freeze_receipt.parent / "provenance/source"
     if not frozen_source.is_dir() or source_sha256(frozen_source) != freeze.get("source_sha256"):
         raise SystemExit("Immutable freeze source resources are missing or changed")
+    # Reject debt/stale inputs before selecting a native runtime or creating
+    # anything. Existing tables can be validated without modifying them.
+    if (output.parent / "fp-lib-table").is_file():
+        ensure_reviewed_fp_table(output.parent, frozen_source)
+    try:
+        import pcbnew
+    except ImportError:
+        interpreter = Path(r"C:\Program Files\KiCad\10.0\bin\python.exe")
+        raise SystemExit(subprocess.call([str(interpreter), str(Path(__file__).resolve()), *sys.argv[1:]]))
     output.parent.mkdir(parents=True, exist_ok=True)
     # Resolve/validate libraries before creating a board or a run. A stale
     # physical table must not leave a partial candidate that blocks a retry.
@@ -137,9 +185,12 @@ def main() -> int:
     run = create_run("physical", "kicad-physical-candidate", args.run_id)
     shutil.copy2(artifacts["frozen_board"], output)
     frozen_copy_sha = sha256(output)
+    uuid_normalization = normalize_duplicate_footprint_uuids(pcbnew, output)
     minimal_project(project)
     kicad_cli = Path(r"C:\Program Files\KiCad\10.0\bin\kicad-cli.exe")
-    subprocess.run([str(kicad_cli), "pcb", "upgrade", "--force", str(output)], cwd=ROOT, check=True)
+    # The mandatory native extraction below validates parser compatibility.
+    # Keep the frozen bytes unchanged instead of launching an unconditional
+    # CLI upgrade (which may initialize slow desktop/plugin services).
     manifest = run.evidence / "kicad-physical-candidate-manifest.json"
     parity = run.evidence / "kicad-physical-candidate-parity.json"
     subprocess.run([
@@ -178,7 +229,9 @@ def main() -> int:
         "frozen_board_sha256": freeze["frozen_board_sha256"],
         "candidate_initial_sha256": frozen_copy_sha,
         "candidate_sha256": sha256(output),
-        "format_upgraded_by_kicad_cli": True,
+        "format_upgraded_by_kicad_cli": False,
+        "format_validated_by": "native_kicad_manifest_and_integrity",
+        "uuid_normalization": uuid_normalization,
         "parity_receipt": relative(parity),
         "physical_integrity_receipt": relative(integrity),
         "candidate_board": relative(output),

@@ -128,6 +128,9 @@ PROFILES = {
 }
 
 
+LEGACY_TRACE_PROFILES = frozenset(PROFILES)
+
+
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest().upper()
 
@@ -176,7 +179,7 @@ def sexpr_field(block: str, name: str) -> str:
 
 
 def remove_exact_copper_blocks(
-    path: Path, plan: dict[str, object], tolerance_mm: float = 0.005,
+    path: Path, plan: dict[str, object], tolerance_mm: float = 0.005, *, dry_run: bool = False,
 ) -> dict[str, list[dict[str, object]]]:
     """Remove reviewed track/via blocks textually, avoiding KiCad 10 SWIG deletion hangs."""
     text = path.read_text(encoding="utf-8")
@@ -214,13 +217,15 @@ def remove_exact_copper_blocks(
                 (near(actual_start, wanted_start) and near(actual_end, wanted_end))
                 or (near(actual_start, wanted_end) and near(actual_end, wanted_start))
             ):
-                matches.append((start, end))
+                matches.append((start, end, block))
         if len(matches) != 1:
             raise SystemExit(f"Exact textual removed segment {index} is missing or ambiguous")
-        spans.append(matches[0])
+        start, end, block = matches[0]
+        spans.append((start, end))
         removed_segments.append({
             "index": index, "net": item["net"], "layer": item["layer"],
             "start_mm": item["start_mm"], "end_mm": item["end_mm"],
+            "uuid": sexpr_field(block, "uuid").strip('"'),
         })
     for index, item in enumerate(plan.get("remove_vias", [])):
         wanted = tuple(float(value) for value in item["at_mm"])
@@ -237,23 +242,31 @@ def remove_exact_copper_blocks(
             "index": index, "net": item["net"], "at_mm": item["at_mm"],
             "diameter_mm": float(sexpr_field(block, "size")),
             "drill_mm": float(sexpr_field(block, "drill")),
+            "uuid": sexpr_field(block, "uuid").strip('"'),
         })
     for index, value in enumerate(plan.get("existing_return_vias", [])):
         wanted = tuple(float(component) for component in value)
         matches = [
-            1 for _, _, block in sexpr_block_spans(text, "via")
+            (start, end) for start, end, block in sexpr_block_spans(text, "via")
             if net_name(block) == "GND"
             and near(point(sexpr_field(block, "at")), wanted)
         ]
         if len(matches) != 1:
             raise SystemExit(f"Reviewed existing GND return via {index} is missing or ambiguous")
+        if matches[0] in spans:
+            raise SystemExit("A reviewed existing return via cannot also be removed")
     for span in spans:
         if span in used:
             raise SystemExit("A copper block was selected for removal more than once")
         used.add(span)
-    for start, end in sorted(spans, reverse=True):
-        text = text[:start] + text[end:]
-    path.write_text(text, encoding="utf-8", newline="")
+    if dry_run:
+        ids = [item["uuid"] for item in [*removed_segments, *removed_vias]]
+        if any(not value for value in ids) or len(ids) != len(set(ids)):
+            raise SystemExit("Preflight removals require unique copper UUIDs")
+    else:
+        for start, end in sorted(spans, reverse=True):
+            text = text[:start] + text[end:]
+        path.write_text(text, encoding="utf-8", newline="")
     return {"segments": removed_segments, "vias": removed_vias}
 
 
@@ -352,6 +365,33 @@ def run_candidate_audit(source: Path, candidate: Path, output: Path) -> dict[str
     return report
 
 
+def configured_trace_profile(name: object) -> dict[str, object]:
+    """Admit bounded project nets without adding board identities to the engine."""
+    if not isinstance(name, str):
+        raise SystemExit("Trace profile must be a name")
+    if name in LEGACY_TRACE_PROFILES:
+        return PROFILES[name]
+    config = json.loads((ROOT / "config/kicad-routing-tools.json").read_text(encoding="utf-8"))
+    profile = config.get("profiles", {}).get(name, {})
+    scope = profile.get("explicit_trace", {})
+    if scope.get("reviewed") is not True:
+        raise SystemExit("Trace profile requires a reviewed explicit_trace scope")
+    for key in ("nets", "layers", "via_nets"):
+        values = scope.get(key)
+        if not isinstance(values, list) or not all(isinstance(v, str) and v and "*" not in v and "?" not in v for v in values):
+            raise SystemExit("Explicit trace scopes require finite net/layer lists")
+    if not scope["nets"] or not scope["layers"] or not set(scope["layers"]) <= {"F.Cu", "B.Cu"}:
+        raise SystemExit("Explicit trace scopes require nets and enabled outer layers")
+    if not set(scope["via_nets"]) <= set(scope["nets"]):
+        raise SystemExit("Trace via nets must be in the reviewed net scope")
+    if scope["layers"] != profile.get("routing", {}).get("layers"):
+        raise SystemExit("Trace layers must match the configured routing profile")
+    result = {key: set(scope[key]) for key in ("nets", "layers", "via_nets")}
+    result.update(min_segments=0, max_vias=12, requires_return_vias=True)
+    PROFILES[name] = result
+    return result
+
+
 def load_plan(path: Path) -> dict[str, object]:
     try:
         plan = json.loads(path.read_text(encoding="utf-8"))
@@ -360,9 +400,7 @@ def load_plan(path: Path) -> dict[str, object]:
     if not isinstance(plan, dict) or plan.get("schema") != 1 or plan.get("kind") != "kicad_trace_plan":
         raise SystemExit("Trace plan must be schema-1 kicad_trace_plan")
     profile_name = plan.get("profile")
-    if profile_name not in PROFILES:
-        raise SystemExit("Trace plan profile is not supported")
-    profile = PROFILES[str(profile_name)]
+    profile = configured_trace_profile(profile_name)
     segments = plan.get("segments", [])
     vias = plan.get("vias", [])
     remove_segments = plan.get("remove_segments", [])
@@ -377,6 +415,8 @@ def load_plan(path: Path) -> dict[str, object]:
         raise SystemExit("A bounded trace plan may remove at most 20 exact segments")
     if not isinstance(remove_vias, list) or len(remove_vias) > 8:
         raise SystemExit("A bounded trace plan may remove at most 8 exact vias")
+    if not any((segments, vias, remove_segments, remove_vias)):
+        raise SystemExit("A trace plan must change explicit copper")
     for item in segments:
         if not isinstance(item, dict) or item.get("net") not in profile["nets"]:
             raise SystemExit("Every segment must use a net allowed by its trace profile")
@@ -653,12 +693,19 @@ def copper_clearance_violations(
     return violations
 
 
-def board_copper_obstacles(board) -> list[dict[str, object]]:
+def board_copper_obstacles(board, removed_copper_uuids: set[str] | None = None) -> list[dict[str, object]]:
     """Extract compact outer-layer track, via and rectangular-pad obstacles."""
     import pcbnew
 
     obstacles: list[dict[str, object]] = []
+    excluded = removed_copper_uuids or set()
+    skipped = []
     for track in board.GetTracks():
+        if excluded:
+            identifier = str(track.m_Uuid.AsString())
+            if identifier in excluded:
+                skipped.append(identifier)
+                continue
         net = track.GetNetname() or None
         if isinstance(track, pcbnew.PCB_VIA):
             position = track.GetPosition()
@@ -680,6 +727,8 @@ def board_copper_obstacles(board) -> list[dict[str, object]]:
             "radius": pcbnew.ToMM(track.GetWidth()) / 2,
             "label": f"{layer} track {net or '<no-net>'}",
         })
+    if len(skipped) != len(excluded) or set(skipped) != excluded:
+        raise SystemExit("Preflight removals must match unique native copper UUIDs")
     layer_ids = {name: board.GetLayerID(name) for name in ("F.Cu", "B.Cu")}
     for footprint in board.GetFootprints():
         for pad in footprint.Pads():
@@ -776,7 +825,7 @@ def hole_clearance_violations(
     return violations
 
 
-def trace_plan_geometry_preflight(board, plan: dict[str, object], geometry: dict[str, float]) -> dict[str, object]:
+def trace_plan_geometry_preflight(board, plan: dict[str, object], geometry: dict[str, float], *, removed_copper_uuids: set[str] | None = None) -> dict[str, object]:
     """Check existing copper, holes and board-edge containment before creating a candidate."""
     import pcbnew
 
@@ -806,7 +855,7 @@ def trace_plan_geometry_preflight(board, plan: dict[str, object], geometry: dict
         hole_clearance_mm=hole_clearance_mm,
         hole_to_hole_mm=hole_to_hole_mm,
     )
-    copper_obstacles = board_copper_obstacles(board)
+    copper_obstacles = board_copper_obstacles(board, removed_copper_uuids)
     violations.extend(copper_clearance_violations(
         plan, geometry, copper_obstacles,
         clearance_mm=float(geometry["clearance_mm"]),
@@ -882,6 +931,7 @@ def trace_plan_geometry_preflight(board, plan: dict[str, object], geometry: dict
             "vias": len(plan["vias"]),
             "drilled_holes": len(holes),
             "copper_obstacles": len(copper_obstacles),
+            "removed_copper_items": len(removed_copper_uuids or ()),
         },
         "constraints_mm": {
             "hole_clearance": hole_clearance_mm,
@@ -900,6 +950,15 @@ def reviewed_geometry(profile_name: str) -> dict[str, float]:
     config = json.loads((ROOT / "config/kicad-routing-tools.json").read_text(encoding="utf-8"))
     profile = config["profiles"][profile_name]
     routing = profile["routing"]
+    if profile.get("explicit_trace", {}).get("reviewed") is True:
+        evidence = json.loads((ROOT / profile["manufacturing_evidence"]).read_text(encoding="utf-8"))
+        if evidence.get("selected") is not True or evidence.get("routing_rules", {}).get("reviewed") is not True:
+            raise SystemExit("Explicit trace geometry requires reviewed manufacturer values")
+        values = evidence["routing_rules"]["values"]
+        keys = {"track_width_mm": "track_width", "clearance_mm": "clearance", "via_diameter_mm": "via_size", "via_drill_mm": "via_drill"}
+        if any(float(routing.get(key, -1)) != float(values[key]) or float(values[key]) <= 0 for key in keys.values()):
+            raise SystemExit("Explicit trace geometry must match reviewed manufacturer defaults")
+        return {out: float(values[key]) for out, key in keys.items()}
     if profile_name == "high_current_ground_return":
         manufacturing = json.loads((ROOT / profile["manufacturing_evidence"]).read_text(encoding="utf-8"))
         values = manufacturing["routing_rules"]["values"]
@@ -1111,6 +1170,8 @@ def main() -> int:
     parser.add_argument("--probe-component")
     parser.add_argument("--placement-sha256")
     parser.add_argument("--run-id")
+    parser.add_argument("--route-area")
+    parser.add_argument("--strategy-class")
     args = parser.parse_args()
     if args.critical_probe:
         probe_group, probe_component = validate_critical_probe(args.probe_group, args.probe_component)
@@ -1133,6 +1194,13 @@ def main() -> int:
     if plan.get("board_sha256") != before:
         raise SystemExit("Trace plan board SHA-256 does not match its input candidate")
     profile_name = str(plan["profile"])
+    if profile_name not in LEGACY_TRACE_PROFILES and (not args.route_area or not args.strategy_class):
+        raise SystemExit("Project trace profiles require --route-area and --strategy-class")
+    for value in (args.route_area, args.strategy_class):
+        if value is not None and not re.fullmatch(r"[A-Za-z0-9_.-]+", value):
+            raise SystemExit("Route area and strategy class require stable identifier names")
+    if args.route_area and args.critical_probe and args.route_area != probe_group:
+        raise SystemExit("Trace route area must match the reviewed probe group")
     reviewed = reviewed_geometry(profile_name)
     for key, value in reviewed.items():
         if abs(float(plan.get(key, -1)) - value) > 1e-12:
@@ -1159,7 +1227,9 @@ def main() -> int:
             "error": "routing_order_prerequisite_incomplete",
             "planner": planner,
         }, ensure_ascii=False, separators=(",", ":")))
-    geometry_preflight = trace_plan_geometry_preflight(source_board, plan, reviewed)
+    removal_preview = remove_exact_copper_blocks(source, plan, dry_run=True)
+    removed_uuids = {str(item["uuid"]) for item in [*removal_preview["segments"], *removal_preview["vias"]]}
+    geometry_preflight = trace_plan_geometry_preflight(source_board, plan, reviewed, removed_copper_uuids=removed_uuids)
     if geometry_preflight["success"] is not True:
         raise SystemExit(json.dumps({
             "success": False,
@@ -1279,7 +1349,8 @@ def main() -> int:
         "accepted": accepted,
         "critical_probe": args.critical_probe,
         "probe_group": probe_group,
-        "route_area": probe_group,
+        "route_area": args.route_area or probe_group,
+        "strategy_class": args.strategy_class or plan.get("strategy_class"),
         "probe_component": probe_component,
         "placement_sha256": args.placement_sha256.upper() if args.placement_sha256 else None,
         "input": relative(source), "input_sha256": before,

@@ -205,6 +205,51 @@ def render_manufacturer_stackup(
     return "\n".join(lines), summary
 
 
+def two_layer_order(profile: dict[str, Any], requirements: dict[str, Any]) -> dict[str, Any]:
+    order = profile.get("order_profile", {})
+    fabrication = order.get("fabrication", {})
+    if profile.get("selected") is not True or order.get("status") != "reviewed" or fabrication.get("layers") != 2:
+        raise SystemExit("Two-layer physical setup requires a reviewed selected two-layer order profile")
+    if requirements.get("controlled_impedance"):
+        raise SystemExit("Controlled-impedance requirements need exact manufacturer stack evidence")
+    number(fabrication.get("board_thickness_mm"))
+    return fabrication
+
+
+def apply_two_layer(args: argparse.Namespace, board_path: Path, before: str) -> int:
+    profile_path = args.manufacturing_profile.resolve()
+    profile = json.loads(profile_path.read_text(encoding="utf-8"))
+    requirements = json.loads((ROOT / "config/requirements.json").read_text(encoding="utf-8"))
+    fabrication = two_layer_order(profile, requirements)
+    ensure_kicad_python()
+    import pcbnew
+    board = pcbnew.LoadBoard(str(board_path))
+    # This branch initializes an existing two-layer board; it cannot silently
+    # discard inner copper or substitute for an impedance-controlled stack.
+    if board.GetCopperLayerCount() != 2:
+        raise SystemExit("Two-layer setup cannot remove existing copper layers")
+    board.GetDesignSettings().SetBoardThickness(pcbnew.FromMM(float(fabrication["board_thickness_mm"])))
+    board.SetLayerType(pcbnew.F_Cu, pcbnew.LT_SIGNAL)
+    board.SetLayerType(pcbnew.B_Cu, pcbnew.LT_SIGNAL)
+    run = create_run("physical", "kicad-stack", args.run_id)
+    pcbnew.SaveBoard(str(board_path), board)
+    receipt = {
+        "schema": 2, "kind": "kicad_stack", "success": True,
+        "board": relative(board_path), "before_sha256": before,
+        "board_sha256": sha256(board_path), "profile": args.profile,
+        "before_copper_layer_count": 2, "after_copper_layer_count": 2,
+        "copper_layers": ["F.Cu", "B.Cu"],
+        "nominal_board_thickness_mm": fabrication["board_thickness_mm"],
+        "manufacturing_profile": relative(profile_path), "manufacturing_profile_sha256": sha256(profile_path),
+        "limits": "Layer presence and selected nominal thickness only. KiCad default dielectric/finish fields are not exact manufacturer stack evidence or impedance approval; order-profile and DFM gates remain required.",
+    }
+    evidence = run.evidence / "kicad-stack.json"
+    evidence.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    finish_run(run, True, artifacts={"receipt": relative(evidence)}, metrics={"copper_layers": 2})
+    print(json.dumps({**receipt, "receipt": relative(evidence)}, separators=(",", ":")))
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--board-sha256", required=True)
@@ -235,6 +280,8 @@ def main() -> int:
     if not isinstance(profile, dict):
         raise SystemExit("Requested board-stack profile is missing")
     expected = profile.get("copper_layers")
+    if expected == ["F.Cu", "B.Cu"]:
+        return apply_two_layer(args, board_path, before)
     if expected != ["F.Cu", "In1.Cu", "In2.Cu", "B.Cu"]:
         raise SystemExit("This bounded adapter currently supports only the reviewed four-layer stack")
     manufacturer_path = args.manufacturer_stack.resolve()

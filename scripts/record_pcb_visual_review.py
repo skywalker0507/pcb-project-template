@@ -11,6 +11,7 @@ from pathlib import Path
 from artifact_store import create_run, finish_run, relative
 from release_inputs import register_release_input
 from stage_policy import current_stage
+from check_kicad_placement_immutability import validate_inheritance
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -79,6 +80,7 @@ def main() -> int:
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--assessment", type=Path, required=True)
     parser.add_argument("--placement-semantics", type=Path)
+    parser.add_argument("--placement-inheritance", type=Path, help="Native unchanged-placement proof binding reference semantics to this board.")
     parser.add_argument("--placement-state", choices=("unchanged", "moved"), default="unchanged")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--run-id")
@@ -102,7 +104,14 @@ def main() -> int:
     if semantic_required and (ROOT / "config" / "placement-semantics.json").is_file() and semantic_path is None:
         raise SystemExit(f"A {tier} review with placement state {args.placement_state} requires SHA-bound placement semantics")
     semantic = load_json(semantic_path, "Placement semantic review") if semantic_path else None
-    semantic_pass = validate_semantic_review(semantic, board_hash, str(assessment["verdict"])) if semantic else False
+    inheritance_path = args.placement_inheritance.resolve() if args.placement_inheritance else None
+    inherited = None
+    if inheritance_path:
+        if args.placement_state != "unchanged" or tier == "release" or semantic_path is None:
+            raise SystemExit("Placement inheritance is only for unchanged non-release reviews with reference semantics")
+        inherited = validate_inheritance(inheritance_path, board_hash, semantic=semantic_path)
+    semantic_hash = str(inherited["reference_sha256"]) if inherited else board_hash
+    semantic_pass = validate_semantic_review(semantic, semantic_hash, str(assessment["verdict"])) if semantic else False
     if bundle.get("kind") != "pcb_visual_bundle" or bundle.get("success") is not True or bundle.get("board_sha256") != board_hash:
         raise SystemExit("Visual bundle does not match the reviewed board SHA-256")
     images = bundle.get("images")
@@ -136,6 +145,8 @@ def main() -> int:
         "placement_semantics": relative(semantic_path) if semantic_path else None,
         "placement_semantics_sha256": sha256(semantic_path) if semantic_path else None,
         "placement_semantics_pass": semantic_pass,
+        "placement_inheritance": relative(inheritance_path) if inheritance_path else None,
+        "placement_inheritance_sha256": sha256(inheritance_path) if inheritance_path else None,
         "ratings": assessment.get("ratings"), "summary": str(assessment.get("summary", "")),
         "findings": assessment["findings"],
         "limits": "Visual review is mandatory complementary evidence; it does not replace deterministic electrical or manufacturing gates.",

@@ -21,3 +21,12 @@ adapters and opaque external reports remain project-owned.
 The engine never embeds vendor prices; observations and approvals remain in the
 project. This boundary keeps the engine project-independent while still allowing
 the project to aggregate blockers before expensive tool execution.
+
+`pcb_template_engine.checkpoint` owns checkpoint evidence hashing, output contracts,
+freshness checks and byte-identical restoration. Its API version is 1. Callers
+provide project and artifact roots; the engine neither selects boards nor reads
+project policies or grants release approval. Project adapters retain native
+checker selection, producer discovery, run lifecycle and stage publication.
+The initial extraction is an API-compatible source revision of the current 0.4.0
+checkout, pinned by the reviewed source digest. Existing policy/manufacturing
+implementations, output schemas and engine API/version bindings are unchanged.

@@ -59,8 +59,8 @@ def main() -> int:
 
     board = pcbnew.LoadBoard(str(output))
     edges = [item for item in board.GetDrawings() if item.GetLayer() == pcbnew.Edge_Cuts]
-    if len(edges) != 4 or any(item.GetShape() != pcbnew.SHAPE_T_SEGMENT for item in edges):
-        raise SystemExit("Candidate outline replacement requires exactly four existing straight Edge.Cuts")
+    if len(edges) not in (0, 4) or any(item.GetShape() != pcbnew.SHAPE_T_SEGMENT for item in edges):
+        raise SystemExit("Candidate outline requires no existing outline or exactly four straight Edge.Cuts")
     for item in edges:
         board.Remove(item)
     x1, y1, x2, y2 = args.x, args.y, args.x + args.width, args.y + args.height

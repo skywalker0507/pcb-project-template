@@ -15,6 +15,7 @@ import sys
 
 from artifact_store import create_run, finish_run, relative
 from stage_policy import current_stage
+from prepare_kicad_physical_candidate import normalize_duplicate_footprint_uuids
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,6 +50,8 @@ def load_plan(path: Path) -> dict[str, object]:
     lock_references = plan.get("lock_references", [])
     if not isinstance(placements, list) or len(placements) > 20:
         raise SystemExit("A bounded placement plan may contain at most 20 placements")
+    if any(not isinstance(item, dict) or item.get("side") not in (None, "F.Cu", "B.Cu") for item in placements):
+        raise SystemExit("Placement side must be F.Cu or B.Cu when supplied")
     if not isinstance(translations, list) or len(translations) > 12:
         raise SystemExit("A bounded placement plan may contain at most 12 translations")
     if not isinstance(lock_references, list) or len(lock_references) > 100:
@@ -123,6 +126,7 @@ def main() -> int:
 
     import pcbnew
 
+    uuid_normalization = normalize_duplicate_footprint_uuids(pcbnew, board_path)
     board = pcbnew.LoadBoard(str(board_path))
     by_ref = {str(item.GetReference()): item for item in board.GetFootprints()}
     placements = plan.get("placements", [])
@@ -166,14 +170,18 @@ def main() -> int:
         locked = bool(item.get("locked", False))
         footprint = by_ref[str(item["reference"])]
         old = footprint.GetPosition()
+        old_side = str(board.GetLayerName(footprint.GetLayer()))
+        side = item.get("side") or old_side
         changes.append({
             "reference": str(item["reference"]),
             "before": {"x_mm": old.x / 1_000_000, "y_mm": old.y / 1_000_000,
-                       "rotation_deg": footprint.GetOrientationDegrees(), "locked": footprint.IsLocked()},
-            "after": {"x_mm": x, "y_mm": y, "rotation_deg": rotation, "locked": locked},
+                       "rotation_deg": footprint.GetOrientationDegrees(), "locked": footprint.IsLocked(), "side": old_side},
+            "after": {"x_mm": x, "y_mm": y, "rotation_deg": rotation, "locked": locked, "side": side},
             "reason": str(item.get("reason", "")),
         })
         footprint.SetPosition(pcbnew.VECTOR2I(pcbnew.FromMM(x), pcbnew.FromMM(y)))
+        if (side == "B.Cu") != footprint.IsFlipped():
+            footprint.Flip(footprint.GetPosition(), pcbnew.FLIP_DIRECTION_LEFT_RIGHT)
         footprint.SetOrientationDegrees(rotation)
         footprint.SetLocked(locked)
     locked_changes = []
@@ -191,6 +199,7 @@ def main() -> int:
         "source": relative(source_path), "isolated_candidate": bool(args.output),
         "board_sha256": sha256(board_path), "plan": relative(plan_path),
         "placements": changes,
+        "uuid_normalization": uuid_normalization,
         "locked_references": locked_changes,
         "limits": "Placement geometry only; final electrical parity, DRC, return-path and physical review remain mandatory.",
     }

@@ -24,6 +24,19 @@ boot = load("session_boot_counts", "scripts/session_boot.py")
 
 
 class StageNavigationCountTests(unittest.TestCase):
+    def test_release_preserves_open_debt_without_turning_it_into_blockers(self):
+        receipt = {"stage": {"name": "release", "status": "in_progress"},
+                   "work": {"blockers": ["factory_dfm"], "blocker_count": 1,
+                            "open_items": [f"debt-{i}" for i in range(4)], "open_item_count": 6},
+                   "next_action": "await_factory_pcb_and_smt_dfm"}
+        result = boot.workset(receipt)
+        self.assertEqual(result["open_item_count"], 6)
+        self.assertEqual(result["open_items"], [f"debt-{i}" for i in range(4)])
+        self.assertTrue(result["open_items_truncated"])
+        self.assertEqual(result["blocker_count"], 1)
+        self.assertEqual(result["next_action"], "await_factory_pcb_and_smt_dfm")
+        self.assertEqual(boot.stdout_index(receipt)["open_item_count"], 6)
+
     def project(self, root, status="draft", unknowns=None):
         (root / "config").mkdir()
         payloads = {

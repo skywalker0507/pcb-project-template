@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 
+from init_project import framework_validation_inputs
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "build/00-shared/template-checks/current.json"
@@ -41,6 +42,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--skip-tests", action="store_true", help="Run static template checks only.")
     args = parser.parse_args()
+    inputs = framework_validation_inputs(ROOT)
     output = args.output.resolve()
     log_dir = output.parent / "logs"
     commands: list[tuple[str, list[str]]] = []
@@ -54,13 +56,16 @@ def main() -> int:
     started = time.perf_counter()
     checks = [run_check(name, command, log_dir) for name, command in commands]
     failed = [item for item in checks if item["success"] is not True]
+    inputs_unchanged = inputs == framework_validation_inputs(ROOT)
     receipt = {
         "schema": 1,
         "kind": "template_regression_checks",
-        "success": not failed,
+        "success": not failed and inputs_unchanged,
+        "validation_inputs": inputs,
+        "inputs_unchanged": inputs_unchanged,
         "duration_ms": round((time.perf_counter() - started) * 1000),
         "checks": checks,
-        "failed_checks": [item["name"] for item in failed],
+        "failed_checks": [item["name"] for item in failed] + ([] if inputs_unchanged else ["template_inputs_changed_during_validation"]),
         "limits": "Template regression evidence only; this never substitutes for PCB checkpoint or release gates.",
     }
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -72,7 +77,7 @@ def main() -> int:
         "duration_ms": receipt["duration_ms"],
         "output": output.relative_to(ROOT).as_posix(),
     }, ensure_ascii=False, separators=(",", ":")))
-    return 0 if not failed else 1
+    return 0 if receipt["success"] else 1
 
 
 if __name__ == "__main__":

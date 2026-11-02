@@ -120,6 +120,9 @@ def main() -> int:
     if not args.ref:
         raise SystemExit("At least one --ref is required; whole-board footprint output is forbidden")
     pcbnew = load_pcbnew()
+    # Reuse the electrical gate's canonical polygon/hole and effective-layer
+    # signatures so physical review cannot miss custom pads or inner cutouts.
+    from check_electrical_candidate_integrity import area_signatures, resource_pad_signature
     board_path = args.board.resolve()
     table = board_path.parent / "fp-lib-table"
     if not board_path.is_file() or not table.is_file():
@@ -144,13 +147,20 @@ def main() -> int:
         library = pcbnew.FootprintLoad(str(directory), name)
         if library is None:
             raise SystemExit(f"KiCad could not load footprint library item: {nickname}:{name}")
-        embedded_pads = sorted(pad_signature(pcbnew, pad) for pad in embedded.Pads())
-        library_pads = sorted(pad_signature(pcbnew, pad) for pad in library.Pads())
+        # Compare the same physical pose. Footprint rule-area outlines use board
+        # coordinates; the source must also share the candidate's layer context.
+        library.SetParent(board)
+        if library.IsFlipped() != embedded.IsFlipped():
+            library.Flip(library.GetPosition(), False)
+        library.SetOrientation(embedded.GetOrientation())
+        library.SetPosition(embedded.GetPosition())
+        embedded_pads = sorted(resource_pad_signature(pcbnew, pad) for pad in embedded.Pads())
+        library_pads = sorted(resource_pad_signature(pcbnew, pad) for pad in library.Pads())
         pad_equal = embedded_pads == library_pads
         embedded_graphics = graphic_counts(embedded, board)
         library_graphics = graphic_counts(library, board)
-        embedded_rule_areas = rule_area_signatures(pcbnew, embedded)
-        library_rule_areas = rule_area_signatures(pcbnew, library)
+        embedded_rule_areas = area_signatures(embedded, board)
+        library_rule_areas = area_signatures(library, board)
         rule_areas_equal = embedded_rule_areas == library_rule_areas
         rule_area_compensated = rule_areas_equal or (
             bool(library_rule_areas) and not embedded_rule_areas

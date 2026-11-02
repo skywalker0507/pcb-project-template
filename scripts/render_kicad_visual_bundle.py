@@ -32,11 +32,20 @@ def ensure_kicad_python() -> None:
         raise SystemExit(subprocess.call([str(KICAD_PYTHON), str(Path(__file__).resolve()), *sys.argv[1:]]))
 
 
-def render_3d(board: Path, output: Path, side: str) -> None:
+def render_frame(aspect_ratio: float) -> tuple[int, int, float]:
+    if aspect_ratio <= 0:
+        raise SystemExit("3D review requires a nonempty board outline")
+    # KiCad's camera scales with viewport height. A portrait canvas clipped
+    # wide boards even at the previous fixed zoom; bound both projected axes.
+    return 1400, 1400, 0.75 / max(1.0, aspect_ratio)
+
+
+def render_3d(board: Path, output: Path, side: str, aspect_ratio: float = 1.0) -> None:
+    width, height, zoom = render_frame(aspect_ratio)
     result = subprocess.run([
         str(KICAD_CLI), "pcb", "render", "--output", str(output),
-        "--width", "1200", "--height", "1800", "--side", side,
-        "--quality", "basic", "--background", "opaque", "--zoom", "0.75",
+        "--width", str(width), "--height", str(height), "--side", side,
+        "--quality", "basic", "--background", "opaque", "--zoom", str(zoom),
         str(board),
     ], capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
     if result.returncode or not output.is_file():
@@ -44,6 +53,39 @@ def render_3d(board: Path, output: Path, side: str) -> None:
             "success": False, "error": "kicad_3d_render_failed", "side": side,
             "exit_code": result.returncode, "stderr": result.stderr[-500:],
         }, ensure_ascii=False, separators=(",", ":")))
+
+
+def filled_zone_polygons(board, layer_id: int):
+    """Read actual stored native fills, never substitute a zone's outline."""
+    def vertices(chain):
+        return tuple((chain.CPoint(i).x, chain.CPoint(i).y) for i in range(chain.PointCount()))
+
+    for zone in board.Zones():
+        if zone.GetIsRuleArea() or not zone.GetLayerSet().Contains(layer_id):
+            continue
+        if not zone.IsFilled():
+            raise SystemExit("Copper preview requires filled zones; refill the candidate before review")
+        polygons = zone.GetFilledPolysList(layer_id)
+        for index in range(polygons.OutlineCount()):
+            yield (
+                str(zone.GetNetname()), vertices(polygons.COutline(index)),
+                tuple(vertices(polygons.CHole(index, hole)) for hole in range(polygons.HoleCount(index))),
+            )
+
+
+def fill_mask(size, polygons, transform):
+    """Union filled regions while keeping holes local to their own polygon."""
+    from PIL import Image, ImageChops, ImageDraw
+
+    mask = Image.new("L", size, 0)
+    for _, outer, holes in polygons:
+        local = Image.new("L", size, 0)
+        draw = ImageDraw.Draw(local)
+        draw.polygon([transform(point) for point in outer], fill=255)
+        for hole in holes:
+            draw.polygon([transform(point) for point in hole], fill=0)
+        mask = ImageChops.lighter(mask, local)
+    return mask
 
 
 def copper_preview(board, layer_name: str, output: Path, bounds_mm: tuple[float, float, float, float] | None = None) -> None:
@@ -80,6 +122,10 @@ def copper_preview(board, layer_name: str, output: Path, bounds_mm: tuple[float,
     draw.rectangle(board_box, fill="#0c2520", outline="#d0d4d8", width=3)
     layer_id = board.GetLayerID(layer_name)
     copper = "#e45f35" if layer_name == "F.Cu" else "#3b82d0"
+    polygons = list(filled_zone_polygons(board, layer_id))
+    mask = fill_mask(image.size, polygons, lambda p: (ox + (p[0] - x0) * scale, oy + (p[1] - y0) * scale))
+    image.paste("#376a4c" if layer_name == "F.Cu" else "#254f78", (0, 0, width, height), mask)
+    draw = ImageDraw.Draw(image)
     for item in board.GetTracks():
         if isinstance(item, pcbnew.PCB_VIA):
             continue
@@ -169,6 +215,12 @@ def copper_geometry(board, layer_name: str) -> dict[tuple[object, ...], tuple[fl
                 box.GetX(), box.GetY(), box.GetRight(), box.GetBottom(),
             )
         result[key] = bounds
+    for net, outer, holes in filled_zone_polygons(board, layer_id):
+        digest = hashlib.sha256(repr((outer, holes)).encode("utf-8")).hexdigest()
+        result[("zone_fill", net, layer_name, digest)] = (
+            pcbnew.ToMM(min(p[0] for p in outer)), pcbnew.ToMM(min(p[1] for p in outer)),
+            pcbnew.ToMM(max(p[0] for p in outer)), pcbnew.ToMM(max(p[1] for p in outer)),
+        )
     return result
 
 
@@ -176,6 +228,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--board", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--receipt", type=Path, help="Receipt path when using an explicit output directory.")
     parser.add_argument("--run-id")
     parser.add_argument("--tier", choices=("local", "checkpoint", "release"), default="release")
     parser.add_argument("--layer", choices=("F.Cu", "B.Cu"), default="F.Cu", help="Copper layer for a local review.")
@@ -184,6 +237,8 @@ def main() -> int:
     parser.add_argument("--crop-padding-mm", type=float, default=2.0, help="Visual-only padding around actual changed copper (default: 2.0 mm).")
     parser.add_argument("--trigger", action="append", choices=sorted(LOCAL_TRIGGERS | CHECKPOINT_TRIGGERS), default=[])
     args = parser.parse_args()
+    if args.receipt and not args.output_dir:
+        raise SystemExit("--receipt requires --output-dir")
     stage = str(current_stage().get("stage"))
     if stage not in {"physical", "routing", "release"}:
         raise SystemExit("PCB visual bundles are allowed only during physical, routing, or release stages")
@@ -261,8 +316,10 @@ def main() -> int:
                 "bottom_3d": output_dir / "bottom-3d.png",
                 **artifacts,
             }
-            render_3d(board_path, artifacts["top_3d"], "top")
-            render_3d(board_path, artifacts["bottom_3d"], "bottom")
+            outline = board.GetBoardEdgesBoundingBox()
+            aspect = outline.GetWidth() / max(1, outline.GetHeight())
+            render_3d(board_path, artifacts["top_3d"], "top", aspect)
+            render_3d(board_path, artifacts["bottom_3d"], "bottom", aspect)
     images = {
         name: {"path": relative(path), "sha256": sha256(path), "bytes": path.stat().st_size}
         for name, path in artifacts.items()
@@ -273,6 +330,7 @@ def main() -> int:
         "triggers": args.trigger,
         "board": relative(board_path), "board_sha256": sha256(board_path),
         "images": images,
+        "copper_rendering": "native_stored_zone_fills_with_holes_tracks_pads_vias_v2",
         "crop": crop_receipt,
         "review_dimensions": [
             "overall density and functional partitioning", "connector and control accessibility",
@@ -281,7 +339,8 @@ def main() -> int:
         ],
         "limits": "Images are bounded review aids. DRC, connectivity, electrical parity, return-path and manufacturing gates remain authoritative.",
     }
-    receipt_path = (run.evidence if run else output_dir) / "visual-bundle.json"
+    receipt_path = args.receipt.resolve() if args.receipt else (run.evidence if run else output_dir) / "visual-bundle.json"
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
     receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if run:
         finish_run(run, True, artifacts={"receipt": relative(receipt_path), **{key: relative(value) for key, value in artifacts.items()}}, metrics={"board_sha256": receipt["board_sha256"], "image_count": len(images)})

@@ -50,8 +50,9 @@ no checkpoint runners/duplicated status JSON. Screening never approves freeze.
 - `release`: run the full pipeline, exact-board placement semantics, four-view
   visual review, parity and manufacturing gates.
 
-Do not rerun placement semantics when footprints did not move. Do not render
-3D or run the release pipeline after every trace.
+Skip placement semantics when footprints did not move. Do not render
+3D or run release pipelines after every trace.
+Placement checkpoints: `verify --placement-state` (README).
 
 At a functional checkpoint, after two related rejections, or before a third
 same-board full verification, run `pcbctl verify workflow`. Finish the bounded

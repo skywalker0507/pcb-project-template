@@ -21,7 +21,7 @@ def board_footprint_name(footprint: object) -> str:
     return f"{nickname}:{item}" if nickname else item
 
 
-def load_parts_source(path: Path, board_path: Path, pos_by_ref: dict[str, dict[str, str]]) -> list[dict[str, str]]:
+def load_parts_source(path: Path, board_path: Path, pos_by_ref: dict[str, dict[str, str]] | None = None) -> list[dict[str, str]]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -58,6 +58,8 @@ def load_parts_source(path: Path, board_path: Path, pos_by_ref: dict[str, dict[s
             raise SystemExit(f"Assembly part {index} needs non-empty refs")
         clean_refs = [ref.strip() for ref in refs]
         duplicate = sorted(mapped_refs.intersection(clean_refs))
+        if len(set(clean_refs)) != len(clean_refs):
+            raise SystemExit(f"Assembly part {index} repeats a designator")
         if duplicate:
             raise SystemExit("Assembly refs are mapped more than once: " + ", ".join(duplicate))
         mapped_refs.update(clean_refs)
@@ -84,11 +86,18 @@ def load_parts_source(path: Path, board_path: Path, pos_by_ref: dict[str, dict[s
             )
         physical_footprint = next(iter(physical_footprints))
 
-        lcsc = str(part.get("lcsc", "")).strip()
-        partnumber = str(part.get("mpn", "")).strip()
+        lcsc = str(part.get("lcsc") or "").strip()
+        partnumber = str(part.get("mpn") or "").strip()
+        manufacturer = str(part.get("manufacturer") or "").strip()
+        sourcing = part.get("sourcing", "catalog")
         comment = str(part.get("comment", "")).strip() or expected_value or partnumber
-        if not lcsc.startswith("C") or not lcsc[1:].isdigit() or not partnumber:
+        if sourcing not in ("catalog", "customer_supplied"):
+            raise SystemExit(f"Assembly part {index} has an unsupported sourcing mode")
+        valid_lcsc = lcsc.startswith("C") and lcsc[1:].isdigit()
+        if not partnumber or (lcsc and not valid_lcsc) or (sourcing == "catalog" and not valid_lcsc):
             raise SystemExit(f"Assembly part {index} has invalid MPN/LCSC data")
+        if sourcing == "customer_supplied" and not manufacturer:
+            raise SystemExit(f"Customer-supplied assembly part {index} needs an exact manufacturer/MPN")
         source_bom.append(
             {
                 "Designator": ",".join(sorted(clean_refs)),
@@ -99,16 +108,20 @@ def load_parts_source(path: Path, board_path: Path, pos_by_ref: dict[str, dict[s
                 "Value": comment,
                 "Partnumber": partnumber,
                 "LCSC Part #": lcsc,
+                "Manufacturer": manufacturer,
+                "Sourcing": sourcing,
             }
         )
 
     dnp_refs = payload.get("dnp_refs", [])
     if not isinstance(dnp_refs, list) or not all(isinstance(ref, str) for ref in dnp_refs):
         raise SystemExit("Assembly dnp_refs must be a list of strings")
+    if mapped_refs.intersection(ref.strip() for ref in dnp_refs):
+        raise SystemExit("Assembly refs cannot be both populated and DNP")
     expected_position_refs = mapped_refs.union(ref.strip() for ref in dnp_refs)
     board_smd_refs = {ref for ref, item in inventory.items() if item["is_smd"]}
     missing_mappings = sorted(board_smd_refs - expected_position_refs)
-    stale_mappings = sorted(mapped_refs - set(pos_by_ref))
+    stale_mappings = sorted(mapped_refs - set(inventory if pos_by_ref is None else pos_by_ref))
     if missing_mappings:
         raise SystemExit("Physical SMD refs missing from assembly parts source: " + ", ".join(missing_mappings))
     if stale_mappings:
@@ -122,14 +135,27 @@ def main() -> None:
     source_group.add_argument("--bom-source", type=Path)
     source_group.add_argument("--parts-source", type=Path)
     parser.add_argument("--board-source", type=Path)
-    parser.add_argument("--pos-source", type=Path, required=True)
-    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--pos-source", type=Path)
+    parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--validate-only", action="store_true", help="Validate exact-board parts coverage without exporting files.")
     args = parser.parse_args()
 
     if not args.bom_source and not args.parts_source and not args.board_source:
         parser.error("one of --bom-source, --parts-source, or --board-source is required")
     if args.parts_source and not args.board_source:
         parser.error("--parts-source requires --board-source for SHA and footprint validation")
+    if args.validate_only:
+        if not args.parts_source or not args.board_source:
+            parser.error("--validate-only requires --parts-source and --board-source")
+        rows = load_parts_source(args.parts_source, args.board_source)
+        print(json.dumps({"success": True, "kind": "assembly_parts_preflight",
+                          "bom_groups": len(rows),
+                          "assembly_designators": sum(len(split_designators(row['Designator'])) for row in rows),
+                          "customer_supplied_designators": sorted(ref for row in rows if row['Sourcing'] == 'customer_supplied'
+                                                                 for ref in split_designators(row['Designator']))}))
+        return
+    if not args.pos_source or not args.output_dir:
+        parser.error("export requires --pos-source and --output-dir")
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -197,18 +223,35 @@ def main() -> None:
 
     bom_rows: list[dict[str, str]] = []
     assembly_refs: set[str] = set()
+    customer_supplied_refs: set[str] = set()
     for row in source_bom:
         lcsc = row["LCSC Part #"].strip()
         refs = split_designators(row["Designator"])
-        if not lcsc or not refs:
+        sourcing = row.get("Sourcing", "catalog").strip()
+        mpn = row["Partnumber"].strip()
+        manufacturer = row.get("Manufacturer", "").strip()
+        if sourcing not in {"catalog", "customer_supplied"}:
+            raise SystemExit(f"Unsupported BOM sourcing mode: {sourcing!r}")
+        # Blank catalog IDs require an explicit consignment declaration. Keep
+        # these placements in both BOM and CPL; factory matching is still due.
+        if not refs or (lcsc and not (lcsc.startswith("C") and lcsc[1:].isdigit())) or (
+            not lcsc and sourcing != "customer_supplied"
+        ) or (sourcing == "customer_supplied" and not (mpn and manufacturer)):
             raise SystemExit(f"Invalid BOM row: {row!r}")
+        if assembly_refs.intersection(refs):
+            raise SystemExit("Assembly designators occur in multiple BOM rows")
         assembly_refs.update(refs)
+        if sourcing == "customer_supplied":
+            customer_supplied_refs.update(refs)
         bom_rows.append(
             {
                 "Comment": row["Value"].strip() or row["Partnumber"].strip(),
                 "Designator": ",".join(refs),
                 "Footprint": row["Footprint"].strip(),
                 "LCSC Part #": lcsc,
+                "Manufacturer": manufacturer,
+                "Manufacturer Part Number": mpn,
+                "Sourcing": sourcing,
             }
         )
 
@@ -242,7 +285,8 @@ def main() -> None:
     with bom_path.open("w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.DictWriter(
             handle,
-            fieldnames=["Comment", "Designator", "Footprint", "LCSC Part #"],
+            fieldnames=["Comment", "Designator", "Footprint", "LCSC Part #",
+                        "Manufacturer", "Manufacturer Part Number", "Sourcing"],
         )
         writer.writeheader()
         writer.writerows(bom_rows)
@@ -268,6 +312,9 @@ def main() -> None:
         "position_rows_excluded_not_in_bom": excluded_position_refs,
         "physical_footprints_from_exact_board": True,
         "reviewed_identity_source_preserved": True,
+        "customer_supplied_designators": sorted(customer_supplied_refs),
+        "factory_matching_required": bool(customer_supplied_refs),
+        "limits": "BOM/CPL coverage only; consignment acceptance, stock and factory assembly selection are not verified.",
     }
     validation_path = args.output_dir / "assembly-validation.json"
     validation_path.write_text(

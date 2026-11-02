@@ -13,6 +13,7 @@ import subprocess
 import sys
 
 from artifact_store import config as artifact_config, create_run, finish_run, publish_stage_artifact, prune_checkpoint_runs, relative
+from stage_policy import require_operation
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +40,24 @@ def portable(path: Path) -> str:
         return str(path.resolve())
 
 
+def handoff_obligations(stage: dict[str, object], counts: dict[str, object], limit: int) -> tuple[list[str], list[str]]:
+    """Carry project obligations forward; never silently truncate release debt."""
+    preserved: dict[str, list[str]] = {}
+    for key in ("open_items", "required_inputs"):
+        values = stage.get(key, [])
+        if not isinstance(values, list) or any(not isinstance(item, str) or not item.strip() for item in values):
+            raise SystemExit(f"Current handoff has invalid {key}")
+        preserved[key] = list(dict.fromkeys(values))
+    for name, count in sorted(counts.items()):
+        if name != "unconnected_items" and int(count) > 0:
+            item = f"Resolve or independently review exact-board DRC category {name} ({count} item(s)); do not regenerate the baseline."
+            if item not in preserved["open_items"]:
+                preserved["open_items"].append(item)
+    if any(len(values) > limit for values in preserved.values()):
+        raise SystemExit("Consolidate reviewed handoff obligations before finalizing; checkpoint publication cannot discard debt to fit the handoff limit")
+    return preserved["open_items"], preserved["required_inputs"]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--board", type=Path, required=True)
@@ -46,6 +65,9 @@ def main() -> int:
     parser.add_argument("--visual-review", type=Path, required=True)
     parser.add_argument("--run-id")
     args = parser.parse_args()
+    # Candidate routing is allowed during physical review, but completion must
+    # not jump over physical promotion and its placement/probe evidence.
+    stage = require_operation("route")
     board = args.board.resolve()
     audit_path = args.audit.resolve()
     visual_path = args.visual_review.resolve()
@@ -72,6 +94,9 @@ def main() -> int:
         or visual.get("board_sha256") != board_hash
     ):
         raise SystemExit("Routing checkpoint requires a matching passing checkpoint visual review")
+    flow = load(ROOT / "config/pcb-flow.json", "PCB flow config")
+    limit = int((flow.get("handoff") or {}).get("max_open_items", 8))
+    open_items, required_inputs = handoff_obligations(stage, counts, limit)
     run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ-routing-checkpoint-finalize")
     run = create_run("routing", "routing-checkpoint-finalize", run_id)
     evidence_dir = run.evidence
@@ -102,6 +127,7 @@ def main() -> int:
         "audit": portable(audit_path), "audit_sha256": sha256(audit_path),
         "visual_review": portable(visual_path), "visual_review_sha256": sha256(visual_path),
         "candidate_receipt": portable(candidate_path),
+        "open_items": open_items, "required_inputs": required_inputs,
         "limits": "Routing completion does not prove release or manufacturing readiness.",
     }
     candidate_path.write_text(json.dumps(candidate, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -113,8 +139,10 @@ def main() -> int:
         "--objective", "Resolve reviewed release debt, run exact-board release gates, and export the reproducible manufacturing package.",
         "--board", str(published_board), "--candidate-receipt", str(candidate_path), "--skip-pipeline",
     ]
-    for name, count in sorted(debt.items()):
-        command += ["--open-item", f"Resolve or independently review exact-board DRC category {name} ({count} item(s)); do not regenerate the baseline."]
+    for item in open_items:
+        command += ["--open-item", item]
+    for item in required_inputs:
+        command += ["--required-input", item]
     command += ["--next-action", "Run the compact release-readiness preview, resolve classified debt, then execute the guarded release pipeline."]
     handoff = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
     if handoff.returncode != 0:
@@ -136,6 +164,7 @@ def main() -> int:
         "schema": 1, "kind": "routing_checkpoint_finalize", "success": True,
         "board_sha256": board_hash, "unconnected_items": 0,
         "release_debt": dict(sorted(debt.items())),
+        "open_items": open_items, "required_inputs": required_inputs,
         "candidate_receipt": portable(candidate_path), "checkpoint_receipt": portable(checkpoint_path),
         "published_board": portable(published_board),
         "handoff_stage": "release", "handoff_status": "in_progress",

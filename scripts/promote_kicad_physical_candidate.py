@@ -13,6 +13,7 @@ from pathlib import Path
 
 from artifact_store import create_run, finish_run, publish_stage_artifact, relative
 from stage_policy import current_stage
+from check_kicad_placement_immutability import validate_inheritance
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -90,6 +91,14 @@ def copper_item_count(path: Path) -> int:
     return sum(1 for _ in pcbnew.LoadBoard(str(path)).GetTracks())
 
 
+def validate_companions(candidate: Path, target: Path) -> None:
+    for suffix in (".kicad_pcb", ".kicad_pro"):
+        if not candidate.with_suffix(suffix).is_file():
+            raise SystemExit(f"Required candidate companion is missing: {candidate.with_suffix(suffix)}")
+    if target.with_suffix(".kicad_dru").is_file() and not candidate.with_suffix(".kicad_dru").is_file():
+        raise SystemExit("Candidate omits active custom rules; review the rule transition before promotion")
+
+
 def validate_routability_and_probes(
     routability: dict[str, object], probes: list[dict[str, object]],
     candidate_hash: str, required_groups: list[str],
@@ -165,6 +174,7 @@ def main() -> int:
     parser.add_argument("--electrical-parity", type=Path, required=True)
     parser.add_argument("--physical-integrity", type=Path, required=True)
     parser.add_argument("--placement-receipt", type=Path)
+    parser.add_argument("--placement-inheritance", type=Path, help="Verified reference placement evidence for an unchanged routed candidate.")
     parser.add_argument("--routability", type=Path, required=True)
     parser.add_argument("--critical-probe", action="append", type=Path, default=[], required=True)
     parser.add_argument(
@@ -202,6 +212,8 @@ def main() -> int:
     placement = load_json(placement_path, "Placement receipt") if placement_path else None
     routability = load_json(routability_path, "Placement routability")
     probes = [load_json(path, "Critical route probe") for path in probe_paths]
+    inheritance_path = args.placement_inheritance.resolve() if args.placement_inheritance else None
+    inherited = validate_inheritance(inheritance_path, candidate_hash, routability=routability_path) if inheritance_path else None
     if (
         integrity.get("kind") != "kicad_physical_integrity"
         or integrity.get("success") is not True
@@ -218,14 +230,21 @@ def main() -> int:
         if isinstance(values, list)
     }
     routability_gate = validate_routability_and_probes(
-        routability, probes, candidate_hash, required_probe_groups, required_probe_components,
+        routability, probes, str(inherited["reference_sha256"]) if inherited else candidate_hash,
+        required_probe_groups, required_probe_components,
     )
     if visual.get("review_pass") is not True or visual.get("board_sha256") != candidate_hash:
         raise SystemExit("A passing visual review bound to the candidate is required")
     if visual.get("placement_semantics_pass") is not True:
         raise SystemExit("Physical promotion requires passing placement semantics bound through visual review")
+    if inherited and (visual.get("placement_inheritance_sha256") != sha256(inheritance_path)
+                      or visual.get("placement_semantics_sha256") != sha256(Path(inherited["source_semantics"]))):
+        raise SystemExit("Visual review does not bind the same inherited placement evidence")
     if drc.get("candidate_sha256") != candidate_hash:
         raise SystemExit("DRC comparison is not bound to the candidate")
+    if (drc.get("success") is not True or drc.get("baseline_pass") is not True
+            or drc.get("candidate_project_sha256") != sha256(candidate.with_suffix(".kicad_pro"))):
+        raise SystemExit("Physical promotion requires a passing audit for the exact candidate project rules")
     new_violations = drc.get("new_violations")
     if not isinstance(new_violations, list):
         raise SystemExit("DRC comparison has no bounded new-violation list")
@@ -246,6 +265,7 @@ def main() -> int:
     if parity.get("final_electrical_parity_pass") is not True or parity.get("final_board_sha256") != candidate_hash:
         raise SystemExit("Passing final electrical parity bound to the candidate is required")
 
+    validate_companions(candidate, target)
     run = create_run("physical", "kicad-physical-promotion", args.run_id)
     backup_dir = run.tmp / "pre-promotion-backup"
     backup_dir.mkdir(parents=True, exist_ok=True)
@@ -264,11 +284,12 @@ def main() -> int:
             destination = target.with_suffix(suffix)
             if source.is_file():
                 shutil.copy2(source, destination)
-            elif suffix in {".kicad_pcb", ".kicad_pro", ".kicad_dru"}:
+            elif suffix in {".kicad_pcb", ".kicad_pro"}:
                 raise RuntimeError(f"Required candidate companion is missing: {source}")
     except Exception:
         for suffix, backup_value in backups.items():
             shutil.copy2(ROOT / backup_value, target.with_suffix(suffix))
+        finish_run(run, False, artifacts={"backups": backups}, metrics={"rolled_back": True})
         raise
 
     promoted_hash = sha256(target)
@@ -289,6 +310,8 @@ def main() -> int:
         "electrical_parity": relative(parity_path),
         "physical_integrity": relative(integrity_path),
         "placement_receipt": relative(placement_path) if placement_path else None,
+        "placement_inheritance": relative(inheritance_path) if inheritance_path else None,
+        "placement_inheritance_sha256": sha256(inheritance_path) if inheritance_path else None,
         "routability": relative(routability_path),
         "critical_probes": [relative(path) for path in probe_paths],
         "routability_gate": routability_gate,

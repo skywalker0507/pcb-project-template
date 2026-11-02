@@ -10,11 +10,30 @@ import subprocess
 import sys
 from typing import Any
 
-from artifact_store import create_run, finish_run, relative
+from artifact_store import create_run, finish_run, guard_run, relative
 from release_inputs import adopted_routing_board, dependencies_fresh, load_json, resolve_path, sha256
+from run_pcb_pipeline import checkpoint_dependencies, reusable_step
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def require_current_review_inputs(packet: dict[str, Any], board: Path) -> None:
+    if 'checkpoint_inputs' not in packet:
+        return  # Legacy packets retain their existing producer/artifact guards.
+    baseline = resolve_path(packet.get('placement_baseline'))
+    if baseline is None or not baseline.is_file() or sha256(baseline) != packet.get('placement_baseline_sha256'):
+        raise SystemExit('Review placement baseline changed; prepare a new packet')
+    flow = load_json(ROOT / 'config/pcb-flow.json') or {}
+    freeze = resolve_path((flow.get('manufacturing') or {}).get('gate_receipts', {}).get('electrical_freeze'))
+    current = checkpoint_dependencies(board, baseline, ROOT / 'config/pcb-flow.json', freeze)
+    if current != packet['checkpoint_inputs']:
+        raise SystemExit('Review inputs changed; prepare a new packet and reuse valid checks')
+    records = packet.get('step_records')
+    if not isinstance(records, dict) or not all(isinstance(record, dict)
+            and isinstance(record.get('inputs'), dict) and reusable_step(record, record['inputs'])
+            and dependencies_fresh(record['inputs'].get('dependencies')) for record in records.values()):
+        raise SystemExit('Review step evidence is stale or incomplete; prepare a new packet')
 
 
 def packet_artifact(packet: dict[str, Any], name: str, *, required: bool = True) -> Path | None:
@@ -60,6 +79,7 @@ def main() -> int:
         or sha256(board) != packet.get("board_sha256")
     ):
         raise SystemExit("Release review packet does not match the adopted routing artifact")
+    require_current_review_inputs(packet, board)
     if not assessment.is_file() or assessment == packet_artifact(packet, "assessment_template"):
         raise SystemExit("Complete a separate visual assessment file; the generated template is not approval")
     audit = packet_artifact(packet, "audit")
@@ -70,7 +90,11 @@ def main() -> int:
     semantics_receipt = load_json(semantics)
     placement_state = "moved" if list((semantics_receipt or {}).get("moved_components") or []) else "unchanged"
 
-    run = create_run("release", "release-review-finalize", args.run_id)
+    with guard_run(create_run("release", "release-review-finalize", args.run_id)) as run:
+        return execute_review(run, board, packet, packet_path, assessment, audit, drc_report, semantics, visual_bundle, footprint, placement_state)
+
+
+def execute_review(run, board: Path, packet: dict[str, Any], packet_path: Path, assessment: Path, audit: Path, drc_report: Path, semantics: Path, visual_bundle: Path, footprint: Path | None, placement_state: str) -> int:
     visual_review = run.evidence / "visual-review.json"
     drc_review = run.evidence / "drc-review.json"
     physical_review = run.evidence / "physical-review.json"

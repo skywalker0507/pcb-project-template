@@ -4,6 +4,8 @@ from pathlib import Path
 import tempfile
 import unittest
 import sys
+from types import SimpleNamespace
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,6 +17,96 @@ SPEC.loader.exec_module(MODULE)
 
 
 class KicadTracePlanTests(unittest.TestCase):
+    def test_removal_preview_binds_exact_uuid_without_touching_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "board.kicad_pcb"
+            original = '(kicad_pcb (segment (start 1 1) (end 2 2) (width 0.2) (layer "F.Cu") (net "OLD") (uuid "delete-me")))\n'
+            path.write_text(original, encoding="utf-8")
+            plan = {"remove_segments": [{"net": "OLD", "layer": "F.Cu", "start_mm": [2, 2], "end_mm": [1, 1]}]}
+            preview = MODULE.remove_exact_copper_blocks(path, plan, dry_run=True)
+            self.assertEqual(preview["segments"][0]["uuid"], "delete-me")
+            self.assertEqual(path.read_text(encoding="utf-8"), original)
+            self.assertEqual(MODULE.remove_exact_copper_blocks(path, plan), preview)
+            self.assertNotIn('(segment ', path.read_text(encoding="utf-8"))
+
+    def test_removal_preview_rejects_missing_uuid_or_ambiguous_geometry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "board.kicad_pcb"
+            segment = '(segment (start 1 1) (end 2 2) (width 0.2) (layer "F.Cu") (net "OLD") {uuid})'
+            plan = {"remove_segments": [{"net": "OLD", "layer": "F.Cu", "start_mm": [1, 1], "end_mm": [2, 2]}]}
+            for text in (segment.format(uuid=""), segment.format(uuid='(uuid "a")') + segment.format(uuid='(uuid "b")')):
+                path.write_text(text, encoding="utf-8")
+                with self.assertRaises(SystemExit):
+                    MODULE.remove_exact_copper_blocks(path, plan, dry_run=True)
+                self.assertEqual(path.read_text(encoding="utf-8"), text)
+
+    def test_preflight_excludes_only_unique_resolved_native_copper(self):
+        def via(identifier, net):
+            item = mock.Mock()
+            item.m_Uuid.AsString.return_value = identifier
+            item.GetNetname.return_value = net
+            item.GetPosition.return_value = SimpleNamespace(x=1.0, y=1.0)
+            item.GetWidth.return_value = 0.6
+            return item
+        deleted, retained = via("delete-me", "OLD"), via("keep-me", "NEARBY")
+        board = mock.Mock()
+        board.GetTracks.return_value = [deleted, retained]
+        board.GetFootprints.return_value = []
+        native = SimpleNamespace(PCB_VIA=mock.Mock, F_Cu=0, ToMM=lambda value: value)
+        with mock.patch.dict(sys.modules, {"pcbnew": native}):
+            result = MODULE.board_copper_obstacles(board, {"delete-me"})
+            self.assertEqual([item["net"] for item in result], ["NEARBY"])
+            with self.assertRaises(SystemExit):
+                MODULE.board_copper_obstacles(board, {"not-on-board"})
+            retained.m_Uuid.AsString.return_value = "delete-me"
+            with self.assertRaises(SystemExit):
+                MODULE.board_copper_obstacles(board, {"delete-me"})
+
+    def test_removed_ground_via_cannot_count_as_a_retained_return(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "board.kicad_pcb"
+            text = '(via (at 1 2) (size 0.6) (drill 0.3) (layers "F.Cu" "B.Cu") (net "GND") (uuid "gnd"))'
+            path.write_text(text, encoding="utf-8")
+            with self.assertRaises(SystemExit):
+                MODULE.remove_exact_copper_blocks(path, {"remove_vias": [{"net": "GND", "at_mm": [1, 2]}], "existing_return_vias": [[1, 2]]}, dry_run=True)
+            self.assertEqual(path.read_text(encoding="utf-8"), text)
+
+    def test_project_trace_scope_and_manufacturer_geometry_are_enforced(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(MODULE, "ROOT", Path(directory)):
+            root = Path(directory); (root / "config").mkdir()
+            values = {"track_width": 0.2, "clearance": 0.2, "via_size": 0.6, "via_drill": 0.3}
+            scope = {"reviewed": True, "nets": ["PROJECT_POWER"], "via_nets": ["PROJECT_POWER"], "layers": ["F.Cu"]}
+            profile = {"explicit_trace": scope, "manufacturing_evidence": "config/fab.json", "routing": {**values, "layers": ["F.Cu"]}}
+            config = root / "config/kicad-routing-tools.json"
+            config.write_text(json.dumps({"profiles": {"project_test": profile}}))
+            (root / "config/fab.json").write_text(json.dumps({"selected": True, "routing_rules": {"reviewed": True, "values": values}}))
+            plan = {"schema": 1, "kind": "kicad_trace_plan", "profile": "project_test", "segments": [], "vias": [], "remove_vias": [{"net": "PROJECT_POWER", "at_mm": [1, 2]}]}
+            path = root / "plan.json"; path.write_text(json.dumps(plan))
+            self.assertEqual(MODULE.load_plan(path)["profile"], "project_test")
+            self.assertEqual(MODULE.reviewed_geometry("project_test")["via_diameter_mm"], 0.6)
+            plan["remove_vias"][0]["net"] = "UNREVIEWED_NET"; path.write_text(json.dumps(plan))
+            with self.assertRaisesRegex(SystemExit, "allowed by its trace profile"):
+                MODULE.load_plan(path)
+            profile["routing"]["via_size"] = 0.45; config.write_text(json.dumps({"profiles": {"project_test": profile}}))
+            with self.assertRaisesRegex(SystemExit, "match reviewed manufacturer"):
+                MODULE.reviewed_geometry("project_test")
+            scope["reviewed"] = False; config.write_text(json.dumps({"profiles": {"project_test": profile}}))
+            with self.assertRaisesRegex(SystemExit, "reviewed explicit_trace"):
+                MODULE.load_plan(path)
+
+    def test_project_trace_scope_rejects_wildcards_and_nonmatching_layers(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(MODULE, "ROOT", Path(directory)):
+            root = Path(directory); (root / "config").mkdir()
+            scope = {"reviewed": True, "nets": ["*"], "via_nets": [], "layers": ["F.Cu"]}
+            profile = {"explicit_trace": scope, "routing": {"layers": ["B.Cu"]}}
+            path = root / "config/kicad-routing-tools.json"
+            path.write_text(json.dumps({"profiles": {"project_invalid": profile}}))
+            with self.assertRaisesRegex(SystemExit, "finite net/layer"):
+                MODULE.configured_trace_profile("project_invalid")
+            scope["nets"] = ["PWR"]; path.write_text(json.dumps({"profiles": {"project_invalid": profile}}))
+            with self.assertRaisesRegex(SystemExit, "layers must match"):
+                MODULE.configured_trace_profile("project_invalid")
+
     def write_plan(self, plan):
         directory = tempfile.TemporaryDirectory()
         path = Path(directory.name) / "plan.json"

@@ -322,6 +322,7 @@ def main() -> int:
         isinstance(pipeline, dict)
         and pipeline.get("success") is True
         and pipeline.get("board_sha256") == board_sha256
+        and pipeline.get("stage_complete") is not False
         and (
             args.stage in {"physical", "routing"}
             or (args.stage == "release" and pipeline.get("release_pass") is True)

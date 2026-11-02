@@ -6,13 +6,14 @@
   "source": {
     "type": "path",
     "path": "template-engine",
-    "sha256": "7E38ABD1F00BFB168E99BF9D126A2A684F0AAAAF868C3E31522ABA8662793347"
+    "sha256": "08921127CCEA26CB64D8AC3C2F4A0A31D029D346E80EACB9A7D0F60DB697DABB"
   },
   "boundary": {
     "engine_owns": [
       "policy_compilation",
       "manufacturing_registry_compilation",
-      "manufacturing_rule_evaluation"
+      "manufacturing_rule_evaluation",
+      "checkpoint_evidence_reuse"
     ],
     "project_owns": [
       "reviewed_inputs",

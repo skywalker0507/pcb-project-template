@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
+import ast
 import json
 from pathlib import Path
 import shutil
@@ -18,38 +18,71 @@ from electrical_backend import read_config as read_electrical_config, selected_b
 from pcb_policy import load_acceptance, require_no_prohibited_evidence
 from release_inputs import adopted_routing_board as resolve_adopted_routing_board, fresh_release_readiness, resolve_release_input
 from stage_policy import ROOT, current_stage
+from engine_runtime import activate
+
+activate()
+from pcb_template_engine import checkpoint  # noqa: E402
+from pcb_template_engine.checkpoint import (  # noqa: E402
+    canonical_step_path, last_json, sha256, step_files, step_record,
+)
 
 
-def last_json(output: str) -> dict[str, object] | None:
-    for line in reversed(output.splitlines()):
-        try:
-            candidate = json.loads(line)
-        except json.JSONDecodeError:
+def toolchain_module_roots() -> dict[str, list[Path]]:
+    policy = ROOT / 'config/toolchain-policy.json'
+    if not policy.is_file():
+        return {}
+    kicad = json.loads(policy.read_text(encoding='utf-8')).get('kicad') or {}
+    cli = kicad.get('cli')
+    modules = kicad.get('python_modules', [])
+    if not isinstance(cli, str) or not isinstance(modules, list):
+        return {}
+    packages = Path(cli).parent / 'Lib/site-packages'
+    result = {}
+    for module in modules:
+        if not isinstance(module, str) or not module.isidentifier():
             continue
-        if isinstance(candidate, dict):
-            return candidate
-    return None
+        package, single = packages / module, packages / (module + '.py')
+        if package.is_dir() or single.is_file():
+            result[module] = [package if package.is_dir() else single, *sorted(packages.glob('*.libs'))]
+    return result
 
 
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest().upper()
-
-
-def checkpoint_dependencies(board: Path, baseline: Path | None, config_path: Path) -> dict[str, str]:
+def checkpoint_dependencies(board: Path, baseline: Path | None, config_path: Path, freeze: Path | None = None) -> dict[str, str]:
     """Conservatively bind reusable checkpoint evidence to all local producers and policies."""
     paths = [board.resolve(), config_path.resolve()]
     if baseline is not None:
         paths.append(baseline.resolve())
+    for pcb in (board, baseline):
+        if pcb is not None:
+            paths.extend(pcb.with_suffix(suffix) for suffix in (".kicad_pro", ".kicad_dru"))
+            paths.append(pcb.parent / "fp-lib-table")
     paths.extend(sorted((ROOT / "scripts").glob("*.py")))
     paths.extend(sorted((ROOT / "config").glob("*.json")))
     paths.extend(sorted((ROOT / "template-engine/src").rglob("*.py")))
+    for roots in toolchain_module_roots().values():
+        for path in roots:
+            paths.extend(p for p in (path.rglob('*') if path.is_dir() else [path])
+                         if p.is_file() and '__pycache__' not in p.parts and p.suffix not in {'.pyc', '.pyo'})
     for optional in (ROOT / "template-engine/pyproject.toml", ROOT / "build/00-shared/evidence/toolchain/toolchain-resolved.json"):
         if optional.is_file():
             paths.append(optional)
+    # Native integrity uses live source resources; parity also consumes the
+    # immutable bundle. Include file inventories so additions invalidate reuse.
+    backend_path = ROOT / "config/electrical-backend.json"
+    if backend_path.is_file():
+        backend = json.loads(backend_path.read_text(encoding="utf-8"))
+        source = backend.get("backends", {}).get(backend.get("active"), {}).get("source_root")
+        if isinstance(source, str):
+            paths.extend(path for path in (ROOT / source).rglob("*") if path.is_file())
+    if freeze is not None:
+        paths.extend(path for path in freeze.parent.rglob("*") if path.is_file())
+    toolchain = ROOT / "config/toolchain-policy.json"
+    if toolchain.is_file():
+        cli = json.loads(toolchain.read_text(encoding="utf-8")).get("kicad", {}).get("cli")
+        if isinstance(cli, str):
+            binary = Path(cli)
+            paths.extend([binary, binary.with_name("python.exe")])
+            paths.extend((binary.parent / "Lib/site-packages").glob("*pcbnew*"))
     unique: dict[str, str] = {}
     for path in paths:
         resolved = path.resolve()
@@ -63,13 +96,7 @@ def checkpoint_dependencies(board: Path, baseline: Path | None, config_path: Pat
 
 
 def dependencies_fresh(dependencies: object) -> bool:
-    if not isinstance(dependencies, dict) or not dependencies:
-        return False
-    for value, expected in dependencies.items():
-        path = (ROOT / str(value)).resolve()
-        if not path.is_file() or sha256(path) != str(expected).upper():
-            return False
-    return True
+    return checkpoint.dependencies_fresh(dependencies, ROOT)
 
 
 def reusable_checkpoint(receipt_path: Path, board: Path, baseline: Path | None) -> dict[str, object] | None:
@@ -131,6 +158,102 @@ def run_step(name: str, command: list[str], log_dir: Path) -> dict[str, object]:
     }
 
 
+def step_inputs(command: list[str], snapshot: dict[str, str], evidence: Path, work: Path,
+                available: dict | None = None) -> dict:
+    """Bind an audited native step to its producers and conservative data inputs.
+
+    Local imports and literal child-script names form the producer closure.
+    Dynamic imports or unreadable producers retain the complete snapshot.
+    Configuration/resource inventories remain conservative; assembly sourcing
+    is excluded only when no producer names that input.
+    """
+    pending = [Path(command[1]).resolve()]
+    producers, texts = set(), []
+    runtime_modules, used_modules = toolchain_module_roots(), set()
+    complete = Path(command[1]).name in {
+        'check_kicad_physical_integrity.py', 'check_kicad_footprint_equivalence.py',
+        'check_kicad_placement_semantics.py', 'check_kicad_placement_routability.py',
+        'check_kicad_placement_immutability.py', 'extract_kicad_parity_manifest.py',
+        'check_final_electrical_parity.py', 'krt_candidate_audit.py',
+        'audit_kicad_release.py', 'render_kicad_visual_bundle.py',
+    }
+    while pending:
+        path = pending.pop()
+        if path in producers:
+            continue
+        producers.add(path)
+        try:
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source)
+        except (OSError, SyntaxError, UnicodeError):
+            complete = False
+            break
+        texts.append(source)
+        for node in ast.walk(tree):
+            modules = []
+            if isinstance(node, ast.Import):
+                modules = [item.name for item in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                modules = [node.module]
+                if node.level:
+                    complete = False
+            if any(name.split('.')[0] == 'importlib' for name in modules):
+                complete = False
+            for module in modules:
+                local = ROOT / "scripts" / (module.replace('.', '/') + ".py")
+                if local.is_file():
+                    pending.append(local.resolve())
+                elif module.split('.')[0] in runtime_modules:
+                    used_modules.add(module.split('.')[0])
+                elif module.split('.')[0] not in sys.stdlib_module_names | {'pcbnew', '_pcbnew', 'pcb_template_engine'}:
+                    complete = False
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"__import__", "exec", "eval"}:
+                complete = False
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.endswith('.py'):
+                local = ROOT / "scripts" / Path(node.value).name
+                if local.is_file():
+                    pending.append(local.resolve())
+    dependencies = dict(snapshot)
+    if complete:
+        dependencies = {key: value for key, value in snapshot.items()
+                        if not key.replace('\\', '/').startswith('scripts/') or (ROOT / key).resolve() in producers}
+        unused_roots = [path.resolve() for name, roots in runtime_modules.items() if name not in used_modules for path in roots]
+        used_roots = [path.resolve() for name, roots in runtime_modules.items() if name in used_modules for path in roots]
+        dependencies = {key: value for key, value in dependencies.items()
+                        if not any((ROOT / key).resolve().is_relative_to(path) for path in unused_roots)
+                        or any((ROOT / key).resolve().is_relative_to(path) for path in used_roots)}
+        # These native checks consume the physical board and reviewed electrical
+        # identity, never a supplier's catalog mapping. Unknown consumers keep it.
+        flow = json.loads((ROOT / "config/pcb-flow.json").read_text(encoding="utf-8"))
+        assembly = (flow.get("manufacturing") or {}).get("assembly_parts", "config/jlcpcb-parts.json")
+        if isinstance(assembly, str) and not any("assembly_parts" in text or Path(assembly).name in text for text in texts):
+            dependencies = {key: value for key, value in dependencies.items()
+                            if (ROOT / key).resolve() != (ROOT / assembly).resolve()}
+    # The executor itself is part of the cache contract, without walking its
+    # unrelated command definitions into each check's producer closure.
+    for path in (Path(__file__).resolve(), Path(sys.executable).resolve(), *sorted(producers)):
+        if path.is_file():
+            dependencies[str(path)] = sha256(path)
+    normalized = [canonical_step_path(arg, evidence, work) for arg in command]
+    output_flags = {'--output', '--report', '--receipt', '--audit-json', '--drc-report',
+                    '--output-dir', '--work-dir', '--cache-dir', '--log-dir'}
+    upstream = {}
+    for index, arg in enumerate(normalized[1:], 1):
+        if arg.startswith(('{evidence}/', '{work}/')) and command[index - 1] not in output_flags:
+            path = Path(command[index])
+            upstream[arg] = sha256(path) if path.is_file() else (available or {}).get(arg, '<missing>')
+    return {'schema': 1, 'command': normalized, 'dependencies': dict(sorted(dependencies.items())),
+            'upstream_inputs': upstream, 'cacheable': complete}
+
+
+def reusable_step(record: object, inputs: dict) -> bool:
+    return checkpoint.reusable_step(record, inputs, ROOT)
+
+
+def restore_step(record: dict, evidence: Path, work: Path) -> tuple[dict, dict]:
+    return checkpoint.restore_step(record, evidence, work, ROOT / 'build')
+
+
 def stdout_index(summary: dict[str, object]) -> dict[str, object]:
     failed = summary.get("failed_step")
     run = summary.get("run") if isinstance(summary.get("run"), dict) else {}
@@ -159,6 +282,10 @@ def stdout_index(summary: dict[str, object]) -> dict[str, object]:
         "pipeline_summary": artifacts.get("pipeline_summary"),
         "run_id": run.get("run_id"),
         "reused": summary.get("reused", False),
+        **({"pending_reviews": summary["pending_reviews"], "placement_adopted": False,
+             "executed_step_count": summary.get("executed_step_count", len(summary.get("passed_steps") or [])),
+             "reused_step_count": summary.get("reused_step_count", 0)}
+           if "pending_reviews" in summary else {}),
     }
 
 
@@ -170,6 +297,191 @@ def copy_release_evidence(source: Path, destination: Path) -> str:
 
 def adopted_routing_board() -> Path:
     return resolve_adopted_routing_board(ROOT)
+
+
+def placement_checkpoint_commands(board: Path, baseline: Path, freeze: Path, state: str,
+                                  evidence: Path, work: Path) -> list[tuple[str, list[str]]]:
+    """One existing verifier, bounded producers, no adoption or human verdict."""
+    def command(script: str, *args: object) -> list[str]:
+        return [sys.executable, str(ROOT / "scripts" / script), *map(str, args)]
+    commands = [("physical-integrity", command("check_kicad_physical_integrity.py",
+        "--board", board, "--phase", "placement", "--output", evidence / "physical-integrity.json"))]
+    if state == "moved":
+        commands.extend([
+            ("placement-semantics", command("check_kicad_placement_semantics.py", "--input", baseline,
+                "--candidate", board, "--output", evidence / "placement-semantics.json")),
+            ("routability", command("check_kicad_placement_routability.py", "--board", board,
+                "--baseline", baseline, "--output", evidence / "routability.json")),
+        ])
+    else:
+        commands.append(("placement-immutability", command("check_kicad_placement_immutability.py",
+            "--input", baseline, "--candidate", board, "--output", evidence / "placement-immutability.json")))
+    commands.extend([
+        ("electrical-manifest", command("extract_kicad_parity_manifest.py", "--board", board,
+            "--output", work / "electrical-manifest.json")),
+        ("electrical-parity", command("check_final_electrical_parity.py", "--board", board,
+            "--electrical-freeze", freeze, "--final-manifest", work / "electrical-manifest.json",
+            "--output", evidence / "final-electrical-parity.json")),
+        ("kicad-audit", command("krt_candidate_audit.py", "--input", baseline, "--candidate", board,
+            "--work-dir", work / "drc", "--cache-dir", work / "drc-cache",
+            "--report", evidence / "final-routing-audit.json")),
+        ("visual-bundle", command("render_kicad_visual_bundle.py", "--board", board, "--tier", "checkpoint",
+            "--trigger", "footprint_moved" if state == "moved" else "functional_block_completed",
+            "--output-dir", work / "visuals", "--receipt", evidence / "visual-bundle.json")),
+    ])
+    return commands
+
+
+def cached_placement_checkpoint(path: Path, dependencies: dict[str, str], state: str) -> dict | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if (value.get("kind") != "pcb_pipeline_summary" or value.get("success") is not True
+                or value.get("requested", {}).get("placement_state") != state
+                or value.get("checkpoint_inputs") != dependencies
+                or value.get('uncacheable_steps')
+                or not dependencies_fresh(value.get("evidence_hashes"))
+                or not all(reusable_step(record, record.get('inputs'))
+                           and dependencies_fresh(record['inputs'].get('dependencies'))
+                           for record in (value.get('step_records') or {}).values())):
+            return None
+        return value
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def run_placement_checkpoint(args: argparse.Namespace, config: dict, board: Path, baseline: Path) -> int:
+    started = time.perf_counter()
+    stage = str(current_stage().get("stage"))
+    if stage not in {"physical", "routing"}:
+        raise SystemExit("Placement checkpoints require the physical or routing stage")
+    configured = config.get("manufacturing", {}).get("gate_receipts", {}).get("electrical_freeze")
+    if not isinstance(configured, str) or not (ROOT / configured).is_file():
+        raise SystemExit("A current immutable electrical freeze is required")
+    freeze = (ROOT / configured).resolve()
+    # An empty new-project draft must never silently pass an empty review.
+    for name in ("placement-semantics.json", "placement-routability.json"):
+        policy = json.loads((ROOT / "config" / name).read_text(encoding="utf-8"))
+        if policy.get("status") in {"draft", "pending"}:
+            raise SystemExit(f"Review project-specific {name} before a placement checkpoint")
+    dependencies = checkpoint_dependencies(board, baseline, args.config, freeze)
+    cache = ROOT / f"build/{'05-placement' if stage == 'physical' else '06-routing'}/evidence/checkpoint-cache.json"
+    previous = None
+    records = {}
+    index = {}
+    if args.reuse_checkpoint:
+        previous = cached_placement_checkpoint(args.reuse_checkpoint.resolve(), dependencies, args.placement_state)
+        if previous is None:
+            raise SystemExit("Placement checkpoint receipt is stale or mismatched")
+    elif cache.is_file():
+        try:
+            index = json.loads(cache.read_text(encoding="utf-8"))
+            receipt = (ROOT / index["receipt"]).resolve()
+            if sha256(receipt) == index["sha256"]:
+                previous = cached_placement_checkpoint(receipt, dependencies, args.placement_state)
+        except (OSError, ValueError, KeyError, TypeError):
+            pass  # Invalid cache evidence is rerun, never accepted.
+    if not isinstance(index, dict):
+        index = {}
+    if not args.reuse_checkpoint:
+        try:
+            source = (ROOT / index.get('resume_receipt', index.get('receipt', ''))).resolve()
+            digest = index.get('resume_sha256', index.get('sha256'))
+            if source.is_file() and sha256(source) == digest:
+                value = json.loads(source.read_text(encoding='utf-8'))
+                if value.get('kind') == 'pcb_pipeline_summary' and value.get('inputs_stable') is True:
+                    candidate_records = value.get('step_records')
+                    records = candidate_records if isinstance(candidate_records, dict) else {}
+        except (OSError, ValueError, TypeError):
+            pass
+    plan_commands = placement_checkpoint_commands(board, baseline, freeze,
+        args.placement_state, Path('evidence'), Path('tmp'))
+    if args.plan:
+        checks, available = [], {}
+        for name, command in plan_commands:
+            record = records.get(name)
+            reuse = previous or reusable_step(record, step_inputs(command, dependencies, Path('evidence'), Path('tmp'), available))
+            checks.append({'name': name, 'action': 'reuse' if reuse else 'run'})
+            if reuse and record:
+                available.update({canonical_step_path(path, Path(record['lanes']['evidence']), Path(record['lanes']['work'])): digest
+                                  for path, digest in record['files'].items()})
+        print(json.dumps({"success": True, "kind": "placement_checkpoint_plan", "board_sha256": sha256(board),
+            "checks": checks,
+            "pending_reviews": ["visual_review", "critical_route_probes"], "adopts_board": False}, separators=(",", ":")))
+        return 0
+    if previous:
+        summary = {**previous, "reused": True, "executed_step_count": 0,
+                   "reused_step_count": len(previous.get('passed_steps') or []),
+                   "context_metrics": {**previous["context_metrics"], "duration_ms": round((time.perf_counter() - started) * 1000)}}
+        print(json.dumps(stdout_index(summary), separators=(",", ":")))
+        return 0
+    run = create_run(stage, "pcb-audit", args.run_id)
+    steps = []
+    updated_records = {}
+    raised = None
+    for name, command in placement_checkpoint_commands(board, baseline, freeze, args.placement_state, run.evidence, run.tmp):
+        inputs = step_inputs(command, dependencies, run.evidence, run.tmp)
+        record = records.get(name)
+        try:
+            if reusable_step(record, inputs):
+                step, record = restore_step(record, run.evidence, run.tmp)
+                updated_records[name] = record
+            else:
+                before = step_files(run.evidence, run.tmp)
+                step = run_step(name, command, run.tmp / 'logs')
+                if step['success']:
+                    record = step_record(inputs, step, before, run.evidence, run.tmp)
+                    if record is not None:
+                        updated_records[name] = record
+        except BaseException as exc:
+            raised = exc
+            step = {'name': name, 'success': False, 'log_bytes': 0, 'tail': str(exc)[:500],
+                    'data': {'error': 'checkpoint_step_exception'}}
+        steps.append(step)
+        if not step["success"]:
+            break
+    failed = next((step for step in steps if not step["success"]), None)
+    stable = dependencies == checkpoint_dependencies(board, baseline, args.config, freeze)
+    stable = stable and all(reusable_step(record, record['inputs']) for record in updated_records.values())
+    if not stable and failed is None:
+        failed = {"name": "input-freshness", "tail": "Checkpoint dependencies changed during verification",
+                  "data": {"error": "checkpoint_inputs_changed_during_run"}}
+    success = failed is None and stable
+    summary_path = run.evidence / "pipeline-summary.json"
+    evidence_files = [p for p in run.evidence.rglob("*") if p.is_file() and p != run.manifest]
+    evidence_files.extend(p for p in (run.tmp / "visuals").rglob("*") if p.is_file())
+    summary = {"schema": 2, "kind": "pcb_pipeline_summary", "success": success,
+        "run": {"run_id": run.run_id}, "requested": {"tier": "checkpoint", "build": False, "export": False,
+            "placement_state": args.placement_state, "board": relative(board), "baseline_board": relative(baseline)},
+        "board_sha256": sha256(board), "baseline_board_sha256": sha256(baseline),
+        "checkpoint_inputs": dependencies, "inputs_stable": stable,
+        "step_records": updated_records if stable else {},
+        'uncacheable_steps': [step['name'] for step in steps if step['success'] and step['name'] not in updated_records],
+        "evidence_hashes": {relative(p): sha256(p) for p in evidence_files},
+        "passed_steps": [step["name"] for step in steps if step["success"]], "failed_step": failed,
+        "executed_step_count": sum(not step.get('reused') for step in steps),
+        "reused_step_count": sum(bool(step.get('reused')) for step in steps),
+        "reused": bool(steps) and all(step.get('reused') for step in steps),
+        "release_pass": False, "stage_complete": False, "placement_adopted": False,
+        "pending_reviews": ["visual_review", "critical_route_probes"],
+        "artifacts": {"pipeline_summary": relative(summary_path),
+            **{p.stem: relative(p) for p in run.evidence.glob("*.json")}},
+        "context_metrics": {"duration_ms": round((time.perf_counter() - started) * 1000),
+            "executed_steps": sum(not step.get('reused') for step in steps),
+            "reused_steps": sum(bool(step.get('reused')) for step in steps),
+            "pipeline_log_bytes": sum(step["log_bytes"] for step in steps if not step.get('reused'))},
+        "limits": "Deterministic checkpoint checks only; human visual review, critical probes, promotion and release remain separate gates."}
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2)+"\n", encoding="utf-8")
+    finish_run(run, success, artifacts={"pipeline_summary": relative(summary_path)}, metrics=summary["context_metrics"])
+    if stable and (success or updated_records):
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        index.update(schema=2, resume_receipt=relative(summary_path), resume_sha256=sha256(summary_path))
+        if success:
+            index.update(receipt=relative(summary_path), sha256=sha256(summary_path))
+        cache.write_text(json.dumps(index)+"\n", encoding="utf-8")
+    print(json.dumps(stdout_index(summary), ensure_ascii=False, separators=(",", ":")))
+    if raised is not None:
+        raise raised
+    return 0 if success else 1
 
 
 def main() -> int:
@@ -192,6 +504,8 @@ def main() -> int:
     parser.add_argument("--run-id", help="Optional stable artifact run id; defaults to a UTC timestamp and operation.")
     parser.add_argument("--log-dir", type=Path, help="Compatibility override; defaults inside the run tmp lane.")
     parser.add_argument("--reuse-checkpoint", type=Path, help="Reuse an exact passing checkpoint receipt only when every bound dependency is unchanged.")
+    parser.add_argument("--placement-state", choices=("moved", "unchanged"), help="Aggregate placement integrity, parity, DRC and visual generation; unchanged proves immutability and skips placement semantics/scoring.")
+    parser.add_argument("--plan", action="store_true", help="Plan an aggregate placement checkpoint without creating artifacts.")
     args = parser.parse_args()
     if args.build and args.export:
         raise SystemExit("A source build creates an unreviewed candidate; review it before a separate export attempt")
@@ -201,6 +515,10 @@ def main() -> int:
         raise SystemExit("--baseline-board is only valid for checkpoint verification")
     if args.reuse_checkpoint and (args.build or args.export or args.tier != "checkpoint"):
         raise SystemExit("--reuse-checkpoint is valid only for checkpoint verification")
+    if args.plan and not args.placement_state:
+        raise SystemExit("--plan requires --placement-state")
+    if args.placement_state and (args.build or args.export or args.tier != "checkpoint" or not args.baseline_board):
+        raise SystemExit("--placement-state requires checkpoint --baseline-board and excludes build/export")
 
     config = json.loads(args.config.read_text(encoding="utf-8"))
     project = config["project"]
@@ -245,6 +563,8 @@ def main() -> int:
     baseline_board_path = args.baseline_board.resolve() if args.baseline_board else None
     if baseline_board_path and not baseline_board_path.is_file():
         raise SystemExit(f"Baseline board not found: {baseline_board_path}")
+    if args.placement_state:
+        return run_placement_checkpoint(args, config, board_path, baseline_board_path)
     if args.reuse_checkpoint:
         reused = reusable_checkpoint(args.reuse_checkpoint, board_path, baseline_board_path)
         if reused is None:
